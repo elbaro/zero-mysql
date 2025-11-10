@@ -1,0 +1,10 @@
+[package]
+name = "zero-mysql"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+thiserror = "2.0"
+bytes = "1.9"
+tokio-util = { version = "0.7", features = ["codec"] }
+zerocopy = { version = "0.8", features = ["derive"] }
