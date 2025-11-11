@@ -35,7 +35,7 @@ pub struct OkPayload {
     pub last_insert_id: u64,
     pub status_flags: StatusFlags,
     pub warnings: u16,
-    pub info: String,
+    // pub info: String,
 }
 
 impl TryFrom<OkPayloadBytes<'_>> for OkPayload {
@@ -44,7 +44,7 @@ impl TryFrom<OkPayloadBytes<'_>> for OkPayload {
     fn try_from(bytes: OkPayloadBytes<'_>) -> Result<Self> {
         let payload = bytes.bytes();
         let (header, mut data) = read_int_1(payload)?;
-        if header != 0x00 {
+        if header != 0x00 && header != 0xFE {
             return Err(Error::InvalidPacket);
         }
 
@@ -53,25 +53,24 @@ impl TryFrom<OkPayloadBytes<'_>> for OkPayload {
         let (status_flags, rest) = read_int_2(rest)?;
         let (warnings, rest) = read_int_2(rest)?;
 
-        data = rest;
+        // data = rest;
 
-        // Info string is the rest of the packet (can be empty)
-        let info = if !data.is_empty() {
-            String::from_utf8_lossy(data).to_string()
-        } else {
-            String::new()
-        };
+        // // Info string is the rest of the packet (can be empty)
+        // let info = if !data.is_empty() {
+        //     String::from_utf8_lossy(data).to_string()
+        // } else {
+        //     String::new()
+        // };
 
         Ok(OkPayload {
             affected_rows,
             last_insert_id,
             status_flags: StatusFlags::new(status_flags),
             warnings,
-            info,
+            // info,
         })
     }
 }
-
 
 /// ERR packet response
 #[derive(Debug, Clone)]
@@ -112,7 +111,6 @@ impl TryFrom<ErrPayloadBytes<'_>> for ErrPayload {
         })
     }
 }
-
 
 /// EOF packet response (zero-copy)
 ///

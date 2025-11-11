@@ -363,21 +363,6 @@ impl Conn {
         Ok(statement_id)
     }
 
-    /// Execute a query with parameters using binary protocol and decode all rows at once
-    ///
-    /// This function reads all rows into the provided `rows_buffer` and then passes
-    /// a reference to the decoder. The decoder can then parse the rows with zero-copy.
-    ///
-    /// # Arguments
-    /// * `statement_id` - The prepared statement ID
-    /// * `params` - Parameters implementing the Params trait
-    /// * `decoder` - Mutable reference to a RowsDecoder implementation
-    /// * `buffer` - Reusable buffer for reading packets
-    /// * `rows_buffer` - Buffer to store all row data (will be cleared and filled)
-    ///
-    /// # Returns
-    /// * `Ok(D::Output)` - The decoded result from the RowsDecoder
-    /// * `Err(Error)` - Query execution or decoding failed
     pub fn exec_fold<'a, P, H>(
         &mut self,
         statement_id: u32,
@@ -411,7 +396,7 @@ impl Conn {
                     let col_def = read_column_definition(&buffer)?;
                     columns.push(col_def);
                 }
-                handler.start(num_columns, &columns)?;
+                handler.start(&columns)?;
 
                 loop {
                     let _seq = read_payload(&mut self.stream, buffer)?;
@@ -427,7 +412,7 @@ impl Conn {
                                 crate::protocol::packet::OkPayloadBytes::try_from_payload(&buffer)
                                     .ok_or(Error::InvalidPacket)?;
                             eof_bytes.assert_eof()?;
-                            handler.finish(&eof_bytes)?;
+                            handler.finish(eof_bytes)?;
                             break;
                         }
                         _ => Err(Error::InvalidPacket)?,

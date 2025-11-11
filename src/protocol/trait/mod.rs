@@ -27,7 +27,7 @@ pub trait RowDecoder<'a> {
 pub trait ResultSetHandler<'a> {
     fn ok(&mut self, ok: OkPayloadBytes) -> Result<()>;
     // fn err(&mut self, err: &ErrPayload) -> Result<()>;
-    fn start(&mut self, column_count: usize, column_defs: &[ColumnDefinition]) -> Result<()>;
+    fn start(&mut self, column_defs: &[ColumnDefinition]) -> Result<()>;
     fn row(&mut self, row: &RowPayload) -> Result<()>;
-    fn finish(&mut self, eof: &OkPayloadBytes) -> Result<()>;
+    fn finish(&mut self, eof: OkPayloadBytes) -> Result<()>;
 }

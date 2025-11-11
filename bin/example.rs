@@ -49,12 +49,8 @@ fn main() -> Result<()> {
         //     println!("Received ERR packet");
         // }
 
-        fn start(
-            &mut self,
-            column_count: usize,
-            _column_defs: &[zero_mysql::col::ColumnDefinition],
-        ) -> Result<()> {
-            println!("Result set started with {} columns", column_count);
+        fn start(&mut self, column_defs: &[zero_mysql::col::ColumnDefinition]) -> Result<()> {
+            println!("Columns: {column_defs:?}");
             self.count = 0;
             Ok(())
         }
@@ -64,7 +60,11 @@ fn main() -> Result<()> {
             Ok(())
         }
 
-        fn finish(&mut self, _eof: &zero_mysql::protocol::packet::OkPayloadBytes) -> Result<()> {
+        fn finish(&mut self, _eof: zero_mysql::protocol::packet::OkPayloadBytes) -> Result<()> {
+            println!(
+                "Ok EOF : {:?}",
+                zero_mysql::protocol::response::OkPayload::try_from(_eof)?
+            );
             println!("Result set finished (EOF received)");
             Ok(())
         }
