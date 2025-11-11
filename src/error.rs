@@ -26,6 +26,9 @@ pub enum Error {
 
     #[error("Invalid packet")]
     InvalidPacket,
+
+    #[error("Unsupported authentication plugin: {0}")]
+    UnsupportedAuthPlugin(String),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

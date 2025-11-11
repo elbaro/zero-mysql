@@ -106,3 +106,81 @@ pub fn write_packet_header(out: &mut Vec<u8>, sequence_id: u8, payload_length: u
     // Write 1-byte sequence ID
     out.push(sequence_id);
 }
+
+/// Helper function to write packet header to a fixed-size array
+pub fn write_packet_header_array(sequence_id: u8, payload_length: usize) -> [u8; 4] {
+    let mut header = [0u8; 4];
+    let bytes = (payload_length as u32).to_le_bytes();
+    header[0] = bytes[0];
+    header[1] = bytes[1];
+    header[2] = bytes[2];
+    header[3] = sequence_id;
+    header
+}
+
+/// OK packet payload (minimal header only)
+///
+/// Layout: 0x00 followed by variable-length fields:
+/// - affected_rows: length-encoded integer
+/// - last_insert_id: length-encoded integer
+/// - status_flags: 2 bytes
+/// - warnings: 2 bytes
+/// - info: variable-length string
+#[derive(Debug)]
+pub struct OkPayloadBytes<'a>(&'a [u8]);
+
+impl<'a> OkPayloadBytes<'a> {
+    pub fn try_from_payload(bytes: &'a [u8]) -> Option<Self> {
+        if bytes[4] == 0x00 || bytes[4] == 0xFE {
+            Some(Self(bytes))
+        } else {
+            None
+        }
+    }
+
+    pub fn assert_eof(&self) -> Result<()> {
+        if self.0[0] == 0xFE {
+            Ok(())
+        } else {
+            Err(Error::InvalidPacket)
+        }
+    }
+
+    pub fn bytes(&self) -> &[u8] {
+        self.0
+    }
+}
+
+/// ERR packet payload
+///
+/// Layout: 0xFF followed by:
+/// - error_code: 2 bytes
+/// - sql_state_marker: 1 byte ('#')
+/// - sql_state: 5 bytes
+/// - error_message: variable-length string
+#[derive(Debug)]
+pub struct ErrPayloadBytes<'a>(&'a [u8]);
+
+impl<'a> ErrPayloadBytes<'a> {
+    pub fn try_from_packet(bytes: &'a [u8]) -> Option<Self> {
+        // Check for ERR packet: starts with 0xFF
+        // Minimum size: 4 byte header + 1 byte header (0xFF) + 2 byte error code = 7 bytes
+        if bytes.len() >= 7 && bytes[4] == 0xFF {
+            Some(Self(&bytes[4..]))
+        } else {
+            None
+        }
+    }
+
+    pub fn from_payload(bytes: &'a [u8]) -> Option<Self> {
+        if !bytes.is_empty() && bytes[0] == 0xFF {
+            Some(Self(bytes))
+        } else {
+            None
+        }
+    }
+
+    pub fn bytes(&self) -> &[u8] {
+        self.0
+    }
+}

@@ -2,7 +2,7 @@ use crate::col::ColumnDefinition;
 use crate::constant::{ColumnFlags, ColumnType};
 use crate::error::{Error, Result};
 use crate::protocol::primitive::*;
-use crate::row::Row;
+use crate::row::RowPayload;
 
 /// Result set metadata header
 #[derive(Debug, Clone)]
@@ -66,8 +66,9 @@ pub fn read_column_definition(payload: &[u8]) -> Result<ColumnDefinition> {
     let (type_byte, rest) = read_int_1(data)?;
     data = rest;
 
-    let column_type = ColumnType::from_u8(type_byte)
-        .ok_or_else(|| Error::UnknownProtocolError(format!("Unknown column type: {}", type_byte)))?;
+    let column_type = ColumnType::from_u8(type_byte).ok_or_else(|| {
+        Error::UnknownProtocolError(format!("Unknown column type: {}", type_byte))
+    })?;
 
     // flags (2 bytes)
     let (flags, rest) = read_int_2(data)?;
@@ -86,19 +87,14 @@ pub fn read_column_definition(payload: &[u8]) -> Result<ColumnDefinition> {
         charset,
         column_length,
         column_type,
-        ColumnFlags::new(flags),
+        ColumnFlags::from_bits_truncate(flags),
         decimals,
     ))
 }
 
 /// Read binary protocol row or EOF
 /// Returns None if this is an EOF packet
-pub fn read_binary_row<'a>(payload: &'a [u8], num_columns: usize) -> Result<Option<Row<'a>>> {
-    // Check for EOF packet (0xFE and length < 9)
-    if !payload.is_empty() && payload[0] == 0xFE && payload.len() < 9 {
-        return Ok(None);
-    }
-
+pub fn read_binary_row<'a>(payload: &'a [u8], num_columns: usize) -> Result<RowPayload<'a>> {
     // Binary protocol row packet starts with 0x00
     let (header, mut data) = read_int_1(payload)?;
     if header != 0x00 {
@@ -112,5 +108,5 @@ pub fn read_binary_row<'a>(payload: &'a [u8], num_columns: usize) -> Result<Opti
     data = rest;
 
     // Remaining data is the values
-    Ok(Some(Row::new(null_bitmap, data, num_columns)))
+    Ok(RowPayload::new(null_bitmap, data, num_columns))
 }

@@ -1,5 +1,6 @@
 use crate::constant::{CapabilityFlags, StatusFlags};
 use crate::error::{Error, Result};
+use crate::protocol::packet::{ErrPayloadBytes, OkPayloadBytes};
 use crate::protocol::primitive::*;
 use zerocopy::byteorder::little_endian::U16 as U16LE;
 use zerocopy::{FromBytes, Immutable, KnownLayout};
@@ -29,7 +30,7 @@ pub fn detect_packet_type(payload: &[u8], _capabilities: CapabilityFlags) -> Res
 
 /// OK packet response
 #[derive(Debug, Clone)]
-pub struct OkPacket {
+pub struct OkPayload {
     pub affected_rows: u64,
     pub last_insert_id: u64,
     pub status_flags: StatusFlags,
@@ -37,71 +38,81 @@ pub struct OkPacket {
     pub info: String,
 }
 
-/// Read OK packet (header byte 0x00)
-pub fn read_ok_packet(payload: &[u8]) -> Result<OkPacket> {
-    let (header, mut data) = read_int_1(payload)?;
-    if header != 0x00 {
-        return Err(Error::InvalidPacket);
+impl TryFrom<OkPayloadBytes<'_>> for OkPayload {
+    type Error = Error;
+
+    fn try_from(bytes: OkPayloadBytes<'_>) -> Result<Self> {
+        let payload = bytes.bytes();
+        let (header, mut data) = read_int_1(payload)?;
+        if header != 0x00 {
+            return Err(Error::InvalidPacket);
+        }
+
+        let (affected_rows, rest) = read_int_lenenc(data)?;
+        let (last_insert_id, rest) = read_int_lenenc(rest)?;
+        let (status_flags, rest) = read_int_2(rest)?;
+        let (warnings, rest) = read_int_2(rest)?;
+
+        data = rest;
+
+        // Info string is the rest of the packet (can be empty)
+        let info = if !data.is_empty() {
+            String::from_utf8_lossy(data).to_string()
+        } else {
+            String::new()
+        };
+
+        Ok(OkPayload {
+            affected_rows,
+            last_insert_id,
+            status_flags: StatusFlags::new(status_flags),
+            warnings,
+            info,
+        })
     }
-
-    let (affected_rows, rest) = read_int_lenenc(data)?;
-    let (last_insert_id, rest) = read_int_lenenc(rest)?;
-    let (status_flags, rest) = read_int_2(rest)?;
-    let (warnings, rest) = read_int_2(rest)?;
-
-    data = rest;
-
-    // Info string is the rest of the packet (can be empty)
-    let info = if !data.is_empty() {
-        String::from_utf8_lossy(data).to_string()
-    } else {
-        String::new()
-    };
-
-    Ok(OkPacket {
-        affected_rows,
-        last_insert_id,
-        status_flags: StatusFlags::new(status_flags),
-        warnings,
-        info,
-    })
 }
+
 
 /// ERR packet response
 #[derive(Debug, Clone)]
-pub struct ErrPacket {
+pub struct ErrPayload {
     pub error_code: u16,
     pub sql_state: String,
     pub message: String,
 }
 
-/// Read ERR packet (header byte 0xFF)
-pub fn read_err_packet(payload: &[u8]) -> Result<ErrPacket> {
-    let (header, mut data) = read_int_1(payload)?;
-    if header != 0xFF {
-        return Err(Error::InvalidPacket);
+impl TryFrom<ErrPayloadBytes<'_>> for ErrPayload {
+    type Error = Error;
+
+    fn try_from(bytes: ErrPayloadBytes<'_>) -> Result<Self> {
+        let payload = bytes.bytes();
+        let (header, mut data) = read_int_1(payload)?;
+        if header != 0xFF {
+            return Err(Error::InvalidPacket);
+        }
+
+        let (error_code, rest) = read_int_2(data)?;
+        data = rest;
+
+        // Check for SQL state marker '#'
+        let (sql_state, rest) = if !data.is_empty() && data[0] == b'#' {
+            let (state_bytes, rest) = read_string_fix(&data[1..], 5)?;
+            (String::from_utf8_lossy(state_bytes).to_string(), rest)
+        } else {
+            (String::new(), data)
+        };
+
+        // Rest is error message
+        let message = String::from_utf8_lossy(rest).to_string();
+
+        Ok(ErrPayload {
+            error_code,
+            sql_state,
+            message,
+        })
     }
-
-    let (error_code, rest) = read_int_2(data)?;
-    data = rest;
-
-    // Check for SQL state marker '#'
-    let (sql_state, rest) = if !data.is_empty() && data[0] == b'#' {
-        let (state_bytes, rest) = read_string_fix(&data[1..], 5)?;
-        (String::from_utf8_lossy(state_bytes).to_string(), rest)
-    } else {
-        (String::new(), data)
-    };
-
-    // Rest is error message
-    let message = String::from_utf8_lossy(rest).to_string();
-
-    Ok(ErrPacket {
-        error_code,
-        sql_state,
-        message,
-    })
 }
+
 
 /// EOF packet response (zero-copy)
 ///

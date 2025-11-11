@@ -1,9 +1,10 @@
 use crate::constant::CommandByte;
 use crate::error::{Error, Result};
+use crate::protocol::packet::{ErrPayloadBytes, OkPayloadBytes};
 use crate::protocol::primitive::*;
 use crate::protocol::r#trait::params::Params;
-use crate::protocol::response::{read_ok_packet, OkPacket};
-use crate::row::Row;
+use crate::protocol::response::ErrPayload;
+use crate::row::RowPayload;
 use zerocopy::byteorder::little_endian::{U16 as U16LE, U32 as U32LE};
 use zerocopy::{FromBytes, Immutable, KnownLayout};
 
@@ -44,8 +45,7 @@ pub fn read_prepare_ok(payload: &[u8]) -> Result<&PrepareOk> {
     }
 
     // Zero-copy cast using zerocopy
-    PrepareOk::ref_from_bytes(&data[..11])
-        .map_err(|_| Error::InvalidPacket)
+    PrepareOk::ref_from_bytes(&data[..11]).map_err(|_| Error::InvalidPacket)
 
     // Note: If num_params > 0, server will send param definitions
     // Note: If num_columns > 0, server will send column definitions
@@ -85,19 +85,20 @@ pub fn write_execute<P: Params>(out: &mut Vec<u8>, statement_id: u32, params: &P
 
 /// Read COM_STMT_EXECUTE response
 /// This can be either an OK packet or a result set
-pub fn read_execute_response(payload: &[u8]) -> Result<ExecuteResponse> {
+pub fn read_execute_response(payload: &[u8]) -> Result<ExecuteResponse<'_>> {
     if payload.is_empty() {
         return Err(Error::InvalidPacket);
     }
 
     match payload[0] {
         0x00 => {
-            let ok = read_ok_packet(payload)?;
-            Ok(ExecuteResponse::Ok(ok))
+            let ok_bytes = OkPayloadBytes::try_from_payload(payload).ok_or(Error::InvalidPacket)?;
+            Ok(ExecuteResponse::Ok(ok_bytes))
         }
         0xFF => {
             // Error packet - convert to Error
-            let err = crate::protocol::response::read_err_packet(payload)?;
+            let err_bytes = ErrPayloadBytes::from_payload(payload).ok_or(Error::InvalidPacket)?;
+            let err = ErrPayload::try_from(err_bytes)?;
             Err(Error::ServerError {
                 error_code: err.error_code,
                 sql_state: err.sql_state,
@@ -113,14 +114,14 @@ pub fn read_execute_response(payload: &[u8]) -> Result<ExecuteResponse> {
 }
 
 /// Execute response variants
-#[derive(Debug, Clone)]
-pub enum ExecuteResponse {
-    Ok(OkPacket),
+#[derive(Debug)]
+pub enum ExecuteResponse<'a> {
+    Ok(OkPayloadBytes<'a>),
     ResultSet { column_count: u64 },
 }
 
 /// Read binary protocol row from execute response
-pub fn read_binary_row<'a>(payload: &'a [u8], num_columns: usize) -> Result<Option<Row<'a>>> {
+pub fn read_binary_row<'a>(payload: &'a [u8], num_columns: usize) -> Result<RowPayload<'a>> {
     crate::protocol::command::resultset::read_binary_row(payload, num_columns)
 }
 

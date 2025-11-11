@@ -2,7 +2,7 @@ use crate::col::ColumnDefinition;
 use crate::constant::CommandByte;
 use crate::error::Result;
 use crate::protocol::primitive::*;
-use crate::row::Row;
+use crate::row::RowPayload;
 
 /// Write COM_QUERY command
 pub fn write_query(out: &mut Vec<u8>, sql: &str) {
@@ -30,7 +30,7 @@ pub fn read_column_definition(payload: &[u8]) -> Result<ColumnDefinition> {
 
 /// Read a text protocol row
 /// Returns None if this is an EOF packet
-pub fn read_text_row<'a>(payload: &'a [u8], num_columns: usize) -> Result<Option<Row<'a>>> {
+pub fn read_text_row<'a>(payload: &'a [u8], num_columns: usize) -> Result<Option<RowPayload<'a>>> {
     // Check for EOF packet (0xFE and length < 9)
     if !payload.is_empty() && payload[0] == 0xFE && payload.len() < 9 {
         return Ok(None);
@@ -39,5 +39,5 @@ pub fn read_text_row<'a>(payload: &'a [u8], num_columns: usize) -> Result<Option
     // Text protocol doesn't have null bitmap at the start
     // Values are length-encoded strings, NULL is encoded as 0xFB
     // We just return the raw payload for external parsing
-    Ok(Some(Row::new(&[], payload, num_columns)))
+    Ok(Some(RowPayload::new(&[], payload, num_columns)))
 }

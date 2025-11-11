@@ -68,17 +68,17 @@ pub fn read_int_lenenc(data: &[u8]) -> Result<(u64, &[u8])> {
     }
 
     match data[0] {
-        0xfc => {
+        0xFC => {
             // 2-byte integer
             let (val, rest) = read_int_2(&data[1..])?;
             Ok((val as u64, rest))
         }
-        0xfd => {
+        0xFD => {
             // 3-byte integer
             let (val, rest) = read_int_3(&data[1..])?;
             Ok((val as u64, rest))
         }
-        0xfe => {
+        0xFE => {
             // 8-byte integer
             let (val, rest) = read_int_8(&data[1..])?;
             Ok((val, rest))
@@ -99,6 +99,7 @@ pub fn read_string_fix(data: &[u8], len: usize) -> Result<(&[u8], &[u8])> {
 }
 
 /// Read null-terminated string
+/// TODO: use memchr
 pub fn read_string_null(data: &[u8]) -> Result<(&[u8], &[u8])> {
     for (i, &byte) in data.iter().enumerate() {
         if byte == 0 {
