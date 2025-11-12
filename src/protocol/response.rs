@@ -43,7 +43,7 @@ impl TryFrom<OkPayloadBytes<'_>> for OkPayload {
 
     fn try_from(bytes: OkPayloadBytes<'_>) -> Result<Self> {
         let payload = bytes.bytes();
-        let (header, mut data) = read_int_1(payload)?;
+        let (header, data) = read_int_1(payload)?;
         if header != 0x00 && header != 0xFE {
             return Err(Error::InvalidPacket);
         }
@@ -51,7 +51,7 @@ impl TryFrom<OkPayloadBytes<'_>> for OkPayload {
         let (affected_rows, rest) = read_int_lenenc(data)?;
         let (last_insert_id, rest) = read_int_lenenc(rest)?;
         let (status_flags, rest) = read_int_2(rest)?;
-        let (warnings, rest) = read_int_2(rest)?;
+        let (warnings, _rest) = read_int_2(rest)?;
 
         // data = rest;
 

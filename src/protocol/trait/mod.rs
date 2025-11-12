@@ -1,6 +1,6 @@
 pub mod params;
 
-use crate::col::ColumnDefinition;
+use crate::col::ColumnDefinitionBytes;
 use crate::error::Result;
 use crate::protocol::packet::OkPayloadBytes;
 use crate::row::RowPayload;
@@ -25,9 +25,10 @@ pub trait RowDecoder<'a> {
 
 /// Trait that defines event callbacks
 pub trait ResultSetHandler<'a> {
-    fn ok(&mut self, ok: OkPayloadBytes) -> Result<()>;
+    fn no_result_set(&mut self, ok: OkPayloadBytes) -> Result<()>;
     // fn err(&mut self, err: &ErrPayload) -> Result<()>;
-    fn start(&mut self, column_defs: &[ColumnDefinition]) -> Result<()>;
+    fn resultset_start(&mut self, num_columns: usize) -> Result<()>;
+    fn col(&mut self, col: ColumnDefinitionBytes) -> Result<()>;
     fn row(&mut self, row: &RowPayload) -> Result<()>;
-    fn finish(&mut self, eof: OkPayloadBytes) -> Result<()>;
+    fn resultset_end(&mut self, eof: OkPayloadBytes) -> Result<()>;
 }

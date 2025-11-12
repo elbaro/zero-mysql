@@ -1,4 +1,6 @@
+use zero_mysql::col::ColumnTypeAndFlags;
 use zero_mysql::error::Result;
+use zero_mysql::protocol::value::Value;
 use zero_mysql::sync::Conn;
 
 fn main() -> Result<()> {
@@ -17,31 +19,29 @@ fn main() -> Result<()> {
 
     // Prepare a simple query
     println!("\nPreparing query: SELECT 1 + 1 AS result");
-    let stmt_id = conn.prepare("SELECT 1 + 1 AS result")?;
+    let stmt_id = conn.prepare("SELECT 1 + ?")?;
     println!("Statement prepared successfully with ID: {}", stmt_id);
 
     // Execute the query with no parameters
-    println!("\nExecuting query...");
     let mut buffer = Vec::new();
 
     // Create a simple row counter using the new ResultSetHandler trait
-    struct RowCounter {
-        count: usize,
+    struct Handler {
+        cols: Vec<ColumnTypeAndFlags>,
     }
 
-    impl RowCounter {
+    impl Handler {
         fn new() -> Self {
-            Self { count: 0 }
-        }
-
-        fn count(&self) -> usize {
-            self.count
+            Self { cols: Vec::new() }
         }
     }
 
-    impl<'a> zero_mysql::protocol::r#trait::ResultSetHandler<'a> for RowCounter {
-        fn ok(&mut self, _ok: zero_mysql::protocol::packet::OkPayloadBytes) -> Result<()> {
-            println!("Received OK packet");
+    impl<'a> zero_mysql::protocol::r#trait::ResultSetHandler<'a> for Handler {
+        fn no_result_set(
+            &mut self,
+            _ok: zero_mysql::protocol::packet::OkPayloadBytes,
+        ) -> Result<()> {
+            println!("Received no result set");
             Ok(())
         }
 
@@ -49,39 +49,46 @@ fn main() -> Result<()> {
         //     println!("Received ERR packet");
         // }
 
-        fn start(&mut self, column_defs: &[zero_mysql::col::ColumnDefinition]) -> Result<()> {
-            println!("Columns: {column_defs:?}");
-            self.count = 0;
+        fn resultset_start(&mut self, num_columns: usize) -> Result<()> {
+            self.cols.reserve(num_columns);
             Ok(())
         }
 
-        fn row(&mut self, _row: &zero_mysql::row::RowPayload) -> Result<()> {
-            self.count += 1;
+        fn col(&mut self, col: zero_mysql::col::ColumnDefinitionBytes) -> Result<()> {
+            self.cols.push(col.tail()?.type_and_flags()?);
             Ok(())
         }
 
-        fn finish(&mut self, _eof: zero_mysql::protocol::packet::OkPayloadBytes) -> Result<()> {
+        fn row(&mut self, row: &zero_mysql::row::RowPayload) -> Result<()> {
+            let mut values = vec![];
+            let mut bytes = row.values();
+            for i in 0..self.cols.len() {
+                if row.null_bitmap().is_null(i) {
+                    values.push(Value::Null);
+                } else {
+                    let value;
+                    (value, bytes) = Value::parse(&self.cols[i], bytes)?;
+                    values.push(value);
+                }
+            }
+            println!("Row: {values:?}");
+            Ok(())
+        }
+
+        fn resultset_end(
+            &mut self,
+            _eof: zero_mysql::protocol::packet::OkPayloadBytes,
+        ) -> Result<()> {
             println!(
-                "Ok EOF : {:?}",
+                "Result set finished (EOF received) : {:?}",
                 zero_mysql::protocol::response::OkPayload::try_from(_eof)?
             );
-            println!("Result set finished (EOF received)");
             Ok(())
         }
     }
 
-    let mut decoder = RowCounter::new();
-    conn.exec_fold(
-        stmt_id,
-        &(), // No parameters
-        &mut decoder,
-        &mut buffer,
-    )?;
-
-    println!(
-        "Query executed successfully! Rows returned: {}",
-        decoder.count()
-    );
+    let mut decoder = Handler::new();
+    conn.exec_fold(stmt_id, vec![2], &mut decoder, &mut buffer)?;
 
     println!("\nExample completed successfully!");
 

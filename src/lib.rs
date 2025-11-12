@@ -1,10 +1,10 @@
 #![feature(write_all_vectored)]
 
+pub mod col;
 pub mod constant;
 pub mod error;
-pub mod row;
-pub mod col;
 pub mod protocol;
+pub mod row;
 pub mod sync;
 
 #[cfg(feature = "async")]

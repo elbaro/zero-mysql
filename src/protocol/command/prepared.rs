@@ -1,3 +1,4 @@
+use crate::col::ColumnDefinitionBytes;
 use crate::constant::CommandByte;
 use crate::error::{Error, Result};
 use crate::protocol::packet::{ErrPayloadBytes, OkPayloadBytes};
@@ -53,7 +54,7 @@ pub fn read_prepare_ok(payload: &[u8]) -> Result<&PrepareOk> {
 }
 
 /// Write COM_STMT_EXECUTE command
-pub fn write_execute<P: Params>(out: &mut Vec<u8>, statement_id: u32, params: &P) {
+pub fn write_execute<P: Params>(out: &mut Vec<u8>, statement_id: u32, params: &P) -> Result<()> {
     write_int_1(out, CommandByte::StmtExecute as u8);
     write_int_4(out, statement_id);
 
@@ -79,8 +80,9 @@ pub fn write_execute<P: Params>(out: &mut Vec<u8>, statement_id: u32, params: &P
         }
 
         // Write parameter values
-        params.write_values(out).ok(); // Ignore errors for now (non-priority)
+        params.write_values(out)?; // Ignore errors for now (non-priority)
     }
+    Ok(())
 }
 
 /// Read COM_STMT_EXECUTE response
@@ -135,4 +137,125 @@ pub fn write_close_statement(out: &mut Vec<u8>, statement_id: u32) {
 pub fn write_reset_statement(out: &mut Vec<u8>, statement_id: u32) {
     write_int_1(out, CommandByte::StmtReset as u8);
     write_int_4(out, statement_id);
+}
+
+// ============================================================================
+// State Machine API for exec_fold
+// ============================================================================
+
+/// Result of driving the exec_fold state machine
+///
+/// Returns events that the caller should handle
+pub enum ExecResult<'a> {
+    /// Need more payload data
+    NeedPayload,
+    /// Execute returned OK (no result set)
+    NoResultSet(OkPayloadBytes<'a>),
+    ResultSetStart {
+        num_columns: usize,
+    },
+    /// Result set started with column definition packets (raw bytes)
+    /// Caller should parse these into ColumnDefinition using read_column_definition
+    Column(ColumnDefinitionBytes<'a>),
+    /// Row data received
+    Row(RowPayload<'a>),
+    /// Result set finished with EOF
+    Eof(OkPayloadBytes<'a>),
+}
+
+/// State machine for exec_fold
+///
+/// Pure parsing state machine without handler dependencies.
+/// Each call to `drive()` can accept a payload with its own independent lifetime.
+pub enum Exec {
+    /// Waiting for initial execute response
+    Start,
+    /// Reading column definitions
+    ReadingColumns {
+        num_columns: usize,
+        remaining: usize,
+    },
+    /// Reading rows
+    ReadingRows { num_columns: usize },
+    /// Finished
+    Finished,
+}
+
+impl Exec {
+    /// Create a new exec_fold state machine
+    pub fn new() -> Self {
+        Self::Start
+    }
+
+    /// Drive the state machine with the next payload
+    ///
+    /// # Arguments
+    /// * `payload` - The next packet payload to process
+    ///
+    /// # Returns
+    /// * `Ok(ExecFoldResult)` - Event to handle
+    /// * `Err(Error)` - An error occurred
+    pub fn drive<'a>(&mut self, payload: &'a [u8]) -> Result<ExecResult<'a>> {
+        match self {
+            Self::Start => {
+                // Parse execute response
+                let response = read_execute_response(payload)?;
+
+                match response {
+                    ExecuteResponse::Ok(ok_bytes) => {
+                        // No rows to process
+                        *self = Self::Finished;
+                        Ok(ExecResult::NoResultSet(ok_bytes))
+                    }
+                    ExecuteResponse::ResultSet { column_count } => {
+                        let num_columns = column_count as usize;
+                        *self = Self::ReadingColumns {
+                            num_columns,
+                            remaining: num_columns,
+                        };
+                        Ok(ExecResult::NeedPayload)
+                    }
+                }
+            }
+
+            Self::ReadingColumns {
+                num_columns,
+                remaining,
+            } => {
+                // Store the raw packet bytes
+                *remaining -= 1;
+
+                if *remaining == 0 {
+                    *self = Self::ReadingRows {
+                        num_columns: *num_columns,
+                    };
+                }
+                Ok(ExecResult::Column(ColumnDefinitionBytes(payload)))
+            }
+
+            Self::ReadingRows { num_columns } => {
+                match payload[0] {
+                    0x00 => {
+                        // Row packet
+                        let row = read_binary_row(payload, *num_columns)?;
+                        Ok(ExecResult::Row(row))
+                    }
+                    0xFE => {
+                        // EOF packet
+                        let eof_bytes = OkPayloadBytes::try_from_payload(payload)
+                            .ok_or(Error::InvalidPacket)?;
+                        eof_bytes.assert_eof()?;
+                        *self = Self::Finished;
+                        Ok(ExecResult::Eof(eof_bytes))
+                    }
+                    _ => Err(Error::InvalidPacket),
+                }
+            }
+
+            Self::Finished => {
+                // Should not receive more data after done
+                Err(Error::InvalidPacket)
+            }
+        }
+    }
 }

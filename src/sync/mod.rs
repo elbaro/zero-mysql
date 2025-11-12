@@ -4,19 +4,12 @@ use std::net::TcpStream;
 use crate::col::ColumnDefinition;
 use crate::constant::CapabilityFlags;
 use crate::error::{Error, Result};
-use crate::protocol::command::prepared::{read_execute_response, write_execute, ExecuteResponse};
+use crate::protocol::command::prepared::write_execute;
 use crate::protocol::command::prepared::{read_prepare_ok, write_prepare};
-use crate::protocol::command::resultset::{read_binary_row, read_column_definition};
-use crate::protocol::connection::handshake::{
-    auth_caching_sha2_password, auth_mysql_native_password, read_auth_switch_request,
-    read_caching_sha2_password_fast_auth_result, read_initial_handshake,
-    write_auth_switch_response, write_handshake_response, CachingSha2PasswordFastAuthResult,
-    HandshakeResponse41,
-};
 use crate::protocol::packet::write_packet_header_array;
-use crate::protocol::packet::{ErrPayloadBytes, OkPayloadBytes};
+use crate::protocol::packet::ErrPayloadBytes;
 use crate::protocol::r#trait::{params::Params, ResultSetHandler};
-use crate::protocol::response::{detect_packet_type, ErrPayload, OkPayload, PacketType};
+use crate::protocol::response::ErrPayload;
 use crate::row::RowPayload;
 
 /// A MySQL connection with a buffered TCP stream
@@ -122,167 +115,48 @@ impl Conn {
         password: &str,
         database: Option<&str>,
     ) -> Result<Self> {
+        use crate::protocol::connection::handshake::{Handshake, HandshakeResult};
+
         let mut conn_stream = BufReader::new(stream);
         let mut buffer = Vec::new();
 
-        // Step 1: Read initial handshake from server
-        let _seq = read_payload(&mut conn_stream, &mut buffer)?;
-        let handshake = read_initial_handshake(&buffer)?;
+        // Create handshake state machine
+        let mut handshake = Handshake::new(
+            username.to_string(),
+            password.to_string(),
+            database.map(|s| s.to_string()),
+        );
 
-        // Step 2: Compute client capabilities
-        use crate::constant::CAPABILITIES_ALWAYS_ENABLED;
-        let mut client_caps = CAPABILITIES_ALWAYS_ENABLED;
+        // Drive the handshake state machine
+        let (server_version, capability_flags) = loop {
+            // Read next packet
+            buffer.clear();
+            let mut seq = read_payload(&mut conn_stream, &mut buffer)?;
 
-        // Add CLIENT_CONNECT_WITH_DB if we have a database name and server supports it
-        if database.is_some()
-            && handshake
-                .capability_flags
-                .contains(CapabilityFlags::CLIENT_CONNECT_WITH_DB)
-        {
-            client_caps |= CapabilityFlags::CLIENT_CONNECT_WITH_DB;
-        }
-
-        let negotiated_caps = client_caps & handshake.capability_flags;
-
-        // Step 3: Compute auth response based on plugin
-        let (auth_response, auth_plugin_name) = match handshake.auth_plugin_name {
-            b"mysql_native_password" => {
-                let response = auth_mysql_native_password(password, &handshake.auth_plugin_data);
-                (response.to_vec(), "mysql_native_password")
-            }
-            b"caching_sha2_password" => {
-                let response = auth_caching_sha2_password(password, &handshake.auth_plugin_data);
-                (response.to_vec(), "caching_sha2_password")
-            }
-            unknown => {
-                return Err(Error::UnsupportedAuthPlugin(
-                    String::from_utf8_lossy(unknown).to_string(),
-                ));
-            }
-        };
-
-        // Step 4: Send handshake response
-        let handshake_resp = HandshakeResponse41 {
-            capability_flags: negotiated_caps,
-            max_packet_size: 16_777_216, // 16MB
-            charset: 45,                 // utf8mb4_general_ci (widely compatible)
-            username,
-            auth_response: &auth_response,
-            database,
-            auth_plugin_name: Some(auth_plugin_name),
-        };
-
-        let mut out = Vec::new();
-        write_handshake_response(&mut out, &handshake_resp);
-        write_payload(&mut conn_stream.get_mut(), 1, &out)?;
-
-        // Step 5: Read server response
-        let mut buffer = Vec::new();
-        let _seq = read_payload(&mut conn_stream, &mut buffer)?;
-
-        // Check packet type
-        let packet_type = detect_packet_type(&buffer, negotiated_caps)?;
-        match packet_type {
-            PacketType::Ok => {
-                // Authentication successful
-                let ok_bytes =
-                    OkPayloadBytes::try_from_payload(&buffer).ok_or(Error::InvalidPacket)?;
-                let _ok = OkPayload::try_from(ok_bytes)?;
-            }
-            PacketType::Err => {
-                // Authentication failed
-                let err_bytes =
-                    ErrPayloadBytes::from_payload(&buffer).ok_or(Error::InvalidPacket)?;
-                let err = ErrPayload::try_from(err_bytes)?;
-                return Err(Error::ServerError {
-                    error_code: err.error_code,
-                    sql_state: err.sql_state,
-                    message: err.message,
-                });
-            }
-            PacketType::Eof | PacketType::ResultSet if buffer[0] == 0xFE => {
-                // Auth switch request or other 0xFE packet
-                // For caching_sha2_password, this might be fast auth result
-                if handshake.auth_plugin_name == b"caching_sha2_password" {
-                    let result = read_caching_sha2_password_fast_auth_result(&buffer)?;
-                    match result {
-                        CachingSha2PasswordFastAuthResult::Success => {
-                            // Read final OK packet
-                            let _seq = read_payload(&mut conn_stream, &mut buffer)?;
-                            let ok_bytes = OkPayloadBytes::try_from_payload(&buffer)
-                                .ok_or(Error::InvalidPacket)?;
-                            let _ok = OkPayload::try_from(ok_bytes)?;
-                        }
-                        CachingSha2PasswordFastAuthResult::FullAuthRequired => {
-                            // Would need to send password over SSL or RSA
-                            // For now, return error
-                            return Err(Error::UnknownProtocolError(
-                                "Full authentication required (SSL/RSA not implemented)"
-                                    .to_string(),
-                            ));
-                        }
+            // Drive state machine with the payload
+            match handshake.drive(&buffer)? {
+                HandshakeResult::Write(packet_data) => {
+                    // Write packet to server
+                    if !packet_data.is_empty() {
+                        seq = seq.wrapping_add(1);
+                        write_payload(&mut conn_stream.get_mut(), seq, &packet_data)?;
                     }
-                } else {
-                    // Auth switch request
-                    let auth_switch = read_auth_switch_request(&buffer)?;
-
-                    // Compute new auth response
-                    let challenge = &auth_switch.plugin_data;
-                    let new_auth_response = match auth_switch.plugin_name {
-                        b"mysql_native_password" => {
-                            auth_mysql_native_password(password, challenge).to_vec()
-                        }
-                        b"caching_sha2_password" => {
-                            auth_caching_sha2_password(password, challenge).to_vec()
-                        }
-                        _ => {
-                            return Err(Error::UnknownProtocolError(format!(
-                                "Unsupported auth plugin: {}",
-                                String::from_utf8_lossy(auth_switch.plugin_name)
-                            )));
-                        }
-                    };
-
-                    // Send auth switch response
-                    let mut out = Vec::new();
-                    write_auth_switch_response(&mut out, &new_auth_response);
-                    write_payload(&mut conn_stream.get_mut(), 3, &out)?;
-
-                    // Read final response
-                    let _seq = read_payload(&mut conn_stream, &mut buffer)?;
-                    let packet_type = detect_packet_type(&buffer, negotiated_caps)?;
-
-                    match packet_type {
-                        PacketType::Ok => {
-                            let ok_bytes = OkPayloadBytes::try_from_payload(&buffer)
-                                .ok_or(Error::InvalidPacket)?;
-                            let _ok = OkPayload::try_from(ok_bytes)?;
-                        }
-                        PacketType::Err => {
-                            let err_bytes = ErrPayloadBytes::from_payload(&buffer)
-                                .ok_or(Error::InvalidPacket)?;
-                            let err = ErrPayload::try_from(err_bytes)?;
-                            return Err(Error::ServerError {
-                                error_code: err.error_code,
-                                sql_state: err.sql_state,
-                                message: err.message,
-                            });
-                        }
-                        _ => {
-                            return Err(Error::InvalidPacket);
-                        }
-                    }
+                    // Continue to read next response
+                }
+                HandshakeResult::Connected {
+                    server_version,
+                    capability_flags,
+                } => {
+                    // Handshake complete
+                    break (server_version, capability_flags);
                 }
             }
-            _ => {
-                return Err(Error::InvalidPacket);
-            }
-        }
+        };
 
         Ok(Self {
             stream: conn_stream,
-            server_version: handshake.server_version,
-            capability_flags: negotiated_caps,
+            server_version,
+            capability_flags,
         })
     }
 
@@ -374,103 +248,45 @@ impl Conn {
         P: Params,
         H: ResultSetHandler<'a>,
     {
+        use crate::protocol::command::prepared::{Exec, ExecResult};
+
         // Write COM_STMT_EXECUTE
         let mut out = Vec::new();
         write_execute(&mut out, statement_id, params);
         write_payload(self.stream.get_mut(), 0, &out)?;
 
-        // Read response
-        let _seq = read_payload(&mut self.stream, buffer)?;
-        let response = read_execute_response(&buffer)?;
+        // Create the state machine
+        let mut exec_fold = Exec::new();
 
-        match response {
-            ExecuteResponse::Ok(ok) => {
-                // No rows to process
-                handler.ok(ok)?;
-            }
-            ExecuteResponse::ResultSet { column_count } => {
-                let num_columns = column_count as usize;
-                let mut columns = Vec::with_capacity(num_columns);
-                for _ in 0..num_columns {
-                    let _seq = read_payload(&mut self.stream, buffer)?;
-                    let col_def = read_column_definition(&buffer)?;
-                    columns.push(col_def);
+        // Drive the state machine: read payloads and drive
+        loop {
+            // Read the next packet from network
+            buffer.clear();
+            read_payload(&mut self.stream, buffer)?;
+
+            // Drive state machine with the payload and handle events
+            match exec_fold.drive(&buffer[..])? {
+                ExecResult::NeedPayload => {
+                    continue;
                 }
-                handler.start(&columns)?;
-
-                loop {
-                    let _seq = read_payload(&mut self.stream, buffer)?;
-
-                    match buffer[0] {
-                        0x00 => {
-                            // row
-                            handler.row(&read_binary_row(&buffer, num_columns)?)?;
-                        }
-                        0xFE => {
-                            // EOF
-                            let eof_bytes =
-                                crate::protocol::packet::OkPayloadBytes::try_from_payload(&buffer)
-                                    .ok_or(Error::InvalidPacket)?;
-                            eof_bytes.assert_eof()?;
-                            handler.finish(eof_bytes)?;
-                            break;
-                        }
-                        _ => Err(Error::InvalidPacket)?,
-                    }
-                }
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Execute a query with parameters using binary protocol and return an iterator
-    ///
-    /// # Arguments
-    /// * `statement_id` - The prepared statement ID
-    /// * `params` - Parameters implementing the Params trait
-    ///
-    /// # Returns
-    /// * `Ok(QueryResult)` - An iterator over the result rows
-    /// * `Err(Error)` - Query execution failed
-    pub fn exec_iter_with_decoder<'a, P>(
-        &'a mut self,
-        statement_id: u32,
-        params: &P,
-    ) -> Result<QueryResult<'a>>
-    where
-        P: Params,
-    {
-        // Write COM_STMT_EXECUTE
-        let mut out = Vec::new();
-        write_execute(&mut out, statement_id, params);
-        write_payload(self.stream.get_mut(), 0, &out)?;
-
-        // Read response
-        let mut buffer = Vec::new();
-        let _seq = read_payload(&mut self.stream, &mut buffer)?;
-        let response = read_execute_response(&buffer)?;
-
-        match response {
-            ExecuteResponse::Ok(_ok) => {
-                // No rows, return finished iterator
-                Ok(QueryResult::new(&mut self.stream, 0, Vec::new()))
-            }
-            ExecuteResponse::ResultSet { column_count } => {
-                let num_columns = column_count as usize;
-
-                // Read column definitions
-                let mut columns = Vec::with_capacity(num_columns);
-                for _ in 0..num_columns {
-                    let _seq = read_payload(&mut self.stream, &mut buffer)?;
-                    let col_def = read_column_definition(&buffer)?;
-                    columns.push(col_def);
+                ExecResult::NoResultSet(ok_bytes) => {
+                    handler.no_result_set(ok_bytes)?;
+                    return Ok(());
                 }
 
-                // Read EOF packet after column definitions (if present)
-                let _seq = read_payload(&mut self.stream, &mut buffer)?;
-
-                Ok(QueryResult::new(&mut self.stream, num_columns, columns))
+                ExecResult::ResultSetStart { num_columns } => {
+                    handler.resultset_start(num_columns)?;
+                }
+                ExecResult::Column(col) => {
+                    handler.col(col)?;
+                }
+                ExecResult::Row(row) => {
+                    handler.row(&row)?;
+                }
+                ExecResult::Eof(eof_bytes) => {
+                    handler.resultset_end(eof_bytes)?;
+                    return Ok(());
+                }
             }
         }
     }
@@ -569,13 +385,18 @@ fn write_payload<W: Write>(stream: &mut W, mut sequence_id: u8, payload: &[u8]) 
     Ok(())
 }
 
+// ============================================================================
+// Example Functions
+// ============================================================================
+
 /// Iterator over query results that reads and decodes rows on demand
 pub struct QueryResult<'a> {
     reader: &'a mut BufReader<TcpStream>,
     buffer: Vec<u8>,
     row_payload: Vec<u8>,
     num_columns: usize,
-    columns: Vec<ColumnDefinition>,
+    column_packets: Vec<Vec<u8>>,
+    columns: Vec<ColumnDefinition<'a>>,
     finished: bool,
 }
 
@@ -583,20 +404,22 @@ impl<'a> QueryResult<'a> {
     fn new(
         reader: &'a mut BufReader<TcpStream>,
         num_columns: usize,
-        columns: Vec<ColumnDefinition>,
+        column_packets: Vec<Vec<u8>>,
+        columns: Vec<ColumnDefinition<'a>>,
     ) -> Self {
         Self {
             reader,
             buffer: Vec::new(),
             row_payload: Vec::new(),
             num_columns,
+            column_packets,
             columns,
             finished: false,
         }
     }
 
     /// Get the column definitions
-    pub fn columns(&self) -> &[ColumnDefinition] {
+    pub fn columns(&self) -> &[ColumnDefinition<'a>] {
         &self.columns
     }
 

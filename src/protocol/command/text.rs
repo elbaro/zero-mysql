@@ -1,4 +1,3 @@
-use crate::col::ColumnDefinition;
 use crate::constant::CommandByte;
 use crate::error::Result;
 use crate::protocol::primitive::*;
@@ -22,12 +21,6 @@ pub fn read_text_resultset_header(payload: &[u8]) -> Result<ResultSetHeader> {
     Ok(ResultSetHeader { column_count })
 }
 
-/// Read column definition packet
-pub fn read_column_definition(payload: &[u8]) -> Result<ColumnDefinition> {
-    // Delegate to shared resultset module
-    crate::protocol::command::resultset::read_column_definition(payload)
-}
-
 /// Read a text protocol row
 /// Returns None if this is an EOF packet
 pub fn read_text_row<'a>(payload: &'a [u8], num_columns: usize) -> Result<Option<RowPayload<'a>>> {
@@ -39,5 +32,6 @@ pub fn read_text_row<'a>(payload: &'a [u8], num_columns: usize) -> Result<Option
     // Text protocol doesn't have null bitmap at the start
     // Values are length-encoded strings, NULL is encoded as 0xFB
     // We just return the raw payload for external parsing
-    Ok(Some(RowPayload::new(&[], payload, num_columns)))
+    // Ok(Some(RowPayload::new(&[], payload, num_columns)))
+    todo!()
 }

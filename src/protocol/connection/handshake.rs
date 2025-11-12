@@ -384,5 +384,281 @@ pub fn read_caching_sha2_password_fast_auth_result(
 }
 
 // ============================================================================
+// State Machine API for Handshake
+// ============================================================================
+
+/// Configuration for handshake
+pub struct HandshakeConfig {
+    pub username: String,
+    pub password: String,
+    pub database: Option<String>,
+}
+
+/// Result of driving the handshake state machine
+pub enum HandshakeResult {
+    /// Write this packet to the server, then read next response
+    Write(Vec<u8>),
+    /// Handshake complete, connection established
+    Connected {
+        server_version: String,
+        capability_flags: CapabilityFlags,
+    },
+}
+
+/// State machine for MySQL handshake
+///
+/// Pure parsing and packet generation state machine without I/O dependencies.
+pub enum Handshake {
+    /// Waiting for initial handshake from server
+    Start { config: HandshakeConfig },
+    /// Sent handshake response, waiting for auth result
+    WaitingAuthResult {
+        config: HandshakeConfig,
+        initial_plugin: Vec<u8>,
+        capability_flags: CapabilityFlags,
+        server_version: String,
+    },
+    /// Sent auth switch response, waiting for final auth result
+    WaitingFinalAuthResult {
+        capability_flags: CapabilityFlags,
+        server_version: String,
+    },
+    /// Connected (terminal state)
+    Connected,
+}
+
+impl Handshake {
+    /// Create a new handshake state machine
+    pub fn new(username: String, password: String, database: Option<String>) -> Self {
+        Self::Start {
+            config: HandshakeConfig {
+                username,
+                password,
+                database,
+            },
+        }
+    }
+
+    /// Drive the state machine with the next payload
+    ///
+    /// # Arguments
+    /// * `payload` - The next packet payload to process
+    ///
+    /// # Returns
+    /// * `Ok(HandshakeResult::Write)` - Write this packet, then read response
+    /// * `Ok(HandshakeResult::Connected)` - Handshake complete
+    /// * `Err(Error)` - An error occurred
+    pub fn drive(&mut self, payload: &[u8]) -> Result<HandshakeResult> {
+        match self {
+            Self::Start { config } => {
+                // Parse initial handshake from server
+                let handshake = read_initial_handshake(payload)?;
+
+                let server_version = handshake.server_version.clone();
+                let server_caps = handshake.capability_flags;
+
+                // Compute client capabilities
+                let mut client_caps = CapabilityFlags::CLIENT_LONG_FLAG
+                    | CapabilityFlags::CLIENT_PROTOCOL_41
+                    | CapabilityFlags::CLIENT_TRANSACTIONS
+                    | CapabilityFlags::CLIENT_MULTI_STATEMENTS
+                    | CapabilityFlags::CLIENT_MULTI_RESULTS
+                    | CapabilityFlags::CLIENT_PS_MULTI_RESULTS
+                    | CapabilityFlags::CLIENT_SECURE_CONNECTION
+                    | CapabilityFlags::CLIENT_PLUGIN_AUTH
+                    | CapabilityFlags::CLIENT_PLUGIN_AUTH_LENENC_CLIENT_DATA
+                    | CapabilityFlags::CLIENT_DEPRECATE_EOF;
+
+                // Add CLIENT_CONNECT_WITH_DB if database provided and server supports it
+                if config.database.is_some()
+                    && server_caps.contains(CapabilityFlags::CLIENT_CONNECT_WITH_DB)
+                {
+                    client_caps |= CapabilityFlags::CLIENT_CONNECT_WITH_DB;
+                }
+
+                // Negotiate capabilities
+                let negotiated_caps = client_caps & server_caps;
+
+                // Compute auth response based on plugin
+                let auth_response = match handshake.auth_plugin_name {
+                    b"mysql_native_password" => {
+                        auth_mysql_native_password(&config.password, &handshake.auth_plugin_data)
+                            .to_vec()
+                    }
+                    b"caching_sha2_password" => {
+                        auth_caching_sha2_password(&config.password, &handshake.auth_plugin_data)
+                            .to_vec()
+                    }
+                    plugin => {
+                        return Err(Error::UnsupportedAuthPlugin(
+                            String::from_utf8_lossy(plugin).to_string(),
+                        ));
+                    }
+                };
+
+                // Build handshake response packet
+                let response = HandshakeResponse41 {
+                    capability_flags: negotiated_caps,
+                    max_packet_size: 16777216, // 16MB
+                    charset: 45,               // utf8mb4_general_ci
+                    username: &config.username,
+                    auth_response: &auth_response,
+                    database: config.database.as_deref(),
+                    auth_plugin_name: Some(std::str::from_utf8(handshake.auth_plugin_name).unwrap()),
+                };
+
+                let mut packet_data = Vec::new();
+                write_handshake_response(&mut packet_data, &response);
+
+                // Transition to waiting for auth result
+                let initial_plugin = handshake.auth_plugin_name.to_vec();
+                let config_owned = std::mem::replace(
+                    config,
+                    HandshakeConfig {
+                        username: String::new(),
+                        password: String::new(),
+                        database: None,
+                    },
+                );
+
+                *self = Self::WaitingAuthResult {
+                    config: config_owned,
+                    initial_plugin,
+                    capability_flags: negotiated_caps,
+                    server_version,
+                };
+
+                Ok(HandshakeResult::Write(packet_data))
+            }
+
+            Self::WaitingAuthResult {
+                config,
+                initial_plugin,
+                capability_flags,
+                server_version,
+            } => {
+                if payload.is_empty() {
+                    return Err(Error::UnexpectedEof);
+                }
+
+                match payload[0] {
+                    0x00 => {
+                        // OK packet - authentication succeeded
+                        let result = HandshakeResult::Connected {
+                            server_version: server_version.clone(),
+                            capability_flags: *capability_flags,
+                        };
+                        *self = Self::Connected;
+                        Ok(result)
+                    }
+                    0xFF => {
+                        // ERR packet - authentication failed
+                        let err_bytes = ErrPayloadBytes::from_payload(payload)
+                            .ok_or(Error::InvalidPacket)?;
+                        let err = ErrPayload::try_from(err_bytes)?;
+                        Err(Error::ServerError {
+                            error_code: err.error_code,
+                            sql_state: err.sql_state,
+                            message: err.message,
+                        })
+                    }
+                    0xFE => {
+                        // Could be auth switch or fast auth result
+                        if initial_plugin == b"caching_sha2_password" && payload.len() == 2 {
+                            // Fast auth result
+                            let result = read_caching_sha2_password_fast_auth_result(payload)?;
+                            match result {
+                                CachingSha2PasswordFastAuthResult::Success => {
+                                    // Need to read final OK packet
+                                    // Stay in same state but expect OK next
+                                    Ok(HandshakeResult::Write(Vec::new()))
+                                }
+                                CachingSha2PasswordFastAuthResult::FullAuthRequired => {
+                                    Err(Error::UnsupportedAuthPlugin(
+                                        "caching_sha2_password full auth (requires SSL/RSA)"
+                                            .to_string(),
+                                    ))
+                                }
+                            }
+                        } else {
+                            // Auth switch request
+                            let auth_switch = read_auth_switch_request(payload)?;
+
+                            // Compute auth response for new plugin
+                            let auth_response = match auth_switch.plugin_name {
+                                b"mysql_native_password" => {
+                                    auth_mysql_native_password(&config.password, auth_switch.plugin_data)
+                                        .to_vec()
+                                }
+                                b"caching_sha2_password" => {
+                                    auth_caching_sha2_password(&config.password, auth_switch.plugin_data)
+                                        .to_vec()
+                                }
+                                plugin => {
+                                    return Err(Error::UnsupportedAuthPlugin(
+                                        String::from_utf8_lossy(plugin).to_string(),
+                                    ));
+                                }
+                            };
+
+                            // Build auth switch response
+                            let mut packet_data = Vec::new();
+                            write_auth_switch_response(&mut packet_data, &auth_response);
+
+                            // Transition to waiting for final result
+                            *self = Self::WaitingFinalAuthResult {
+                                capability_flags: *capability_flags,
+                                server_version: server_version.clone(),
+                            };
+
+                            Ok(HandshakeResult::Write(packet_data))
+                        }
+                    }
+                    _ => Err(Error::InvalidPacket),
+                }
+            }
+
+            Self::WaitingFinalAuthResult {
+                capability_flags,
+                server_version,
+            } => {
+                if payload.is_empty() {
+                    return Err(Error::UnexpectedEof);
+                }
+
+                match payload[0] {
+                    0x00 => {
+                        // OK packet - authentication succeeded
+                        let result = HandshakeResult::Connected {
+                            server_version: server_version.clone(),
+                            capability_flags: *capability_flags,
+                        };
+                        *self = Self::Connected;
+                        Ok(result)
+                    }
+                    0xFF => {
+                        // ERR packet - authentication failed
+                        let err_bytes = ErrPayloadBytes::from_payload(payload)
+                            .ok_or(Error::InvalidPacket)?;
+                        let err = ErrPayload::try_from(err_bytes)?;
+                        Err(Error::ServerError {
+                            error_code: err.error_code,
+                            sql_state: err.sql_state,
+                            message: err.message,
+                        })
+                    }
+                    _ => Err(Error::InvalidPacket),
+                }
+            }
+
+            Self::Connected => {
+                // Should not receive more data after connected
+                Err(Error::InvalidPacket)
+            }
+        }
+    }
+}
+
+// ============================================================================
 // Helper Functions
 // ============================================================================
