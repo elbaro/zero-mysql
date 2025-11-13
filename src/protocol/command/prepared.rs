@@ -4,7 +4,6 @@ use crate::error::{Error, Result};
 use crate::protocol::packet::{ErrPayloadBytes, OkPayloadBytes};
 use crate::protocol::primitive::*;
 use crate::protocol::r#trait::params::Params;
-use crate::protocol::response::ErrPayload;
 use crate::row::RowPayload;
 use zerocopy::byteorder::little_endian::{U16 as U16LE, U32 as U32LE};
 use zerocopy::{FromBytes, Immutable, KnownLayout};
@@ -99,13 +98,7 @@ pub fn read_execute_response(payload: &[u8]) -> Result<ExecuteResponse<'_>> {
         }
         0xFF => {
             // Error packet - convert to Error
-            let err_bytes = ErrPayloadBytes::from_payload(payload).ok_or(Error::InvalidPacket)?;
-            let err = ErrPayload::try_from(err_bytes)?;
-            Err(Error::ServerError {
-                error_code: err.error_code,
-                sql_state: err.sql_state,
-                message: err.message,
-            })
+            Err(ErrPayloadBytes(payload).into())
         }
         _ => {
             // Result set - first byte is column count

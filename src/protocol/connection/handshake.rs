@@ -2,7 +2,6 @@ use crate::constant::CapabilityFlags;
 use crate::error::{Error, Result};
 use crate::protocol::packet::ErrPayloadBytes;
 use crate::protocol::primitive::*;
-use crate::protocol::response::ErrPayload;
 
 // ============================================================================
 // Initial Handshake Packet (Server -> Client)
@@ -47,14 +46,7 @@ pub fn read_initial_handshake(payload: &[u8]) -> Result<InitialHandshake<'_>> {
 
     // If first byte from server is 0xFF, Packet is an ERR_Packet, socket has to be closed.
     if protocol_version == 0xFF {
-        let err_bytes = ErrPayloadBytes::from_payload(payload)
-            .ok_or(Error::InvalidPacket)?;
-        let err = ErrPayload::try_from(err_bytes)?;
-        return Err(Error::ServerError {
-            error_code: err.error_code,
-            sql_state: err.sql_state,
-            message: err.message,
-        });
+        Err(ErrPayloadBytes(payload))?
     }
 
     let (server_version_bytes, rest) = read_string_null(data)?;
@@ -504,7 +496,9 @@ impl Handshake {
                     username: &config.username,
                     auth_response: &auth_response,
                     database: config.database.as_deref(),
-                    auth_plugin_name: Some(std::str::from_utf8(handshake.auth_plugin_name).unwrap()),
+                    auth_plugin_name: Some(
+                        std::str::from_utf8(handshake.auth_plugin_name).unwrap(),
+                    ),
                 };
 
                 let mut packet_data = Vec::new();
@@ -553,14 +547,7 @@ impl Handshake {
                     }
                     0xFF => {
                         // ERR packet - authentication failed
-                        let err_bytes = ErrPayloadBytes::from_payload(payload)
-                            .ok_or(Error::InvalidPacket)?;
-                        let err = ErrPayload::try_from(err_bytes)?;
-                        Err(Error::ServerError {
-                            error_code: err.error_code,
-                            sql_state: err.sql_state,
-                            message: err.message,
-                        })
+                        Err(ErrPayloadBytes(payload).into())
                     }
                     0xFE => {
                         // Could be auth switch or fast auth result
@@ -586,14 +573,16 @@ impl Handshake {
 
                             // Compute auth response for new plugin
                             let auth_response = match auth_switch.plugin_name {
-                                b"mysql_native_password" => {
-                                    auth_mysql_native_password(&config.password, auth_switch.plugin_data)
-                                        .to_vec()
-                                }
-                                b"caching_sha2_password" => {
-                                    auth_caching_sha2_password(&config.password, auth_switch.plugin_data)
-                                        .to_vec()
-                                }
+                                b"mysql_native_password" => auth_mysql_native_password(
+                                    &config.password,
+                                    auth_switch.plugin_data,
+                                )
+                                .to_vec(),
+                                b"caching_sha2_password" => auth_caching_sha2_password(
+                                    &config.password,
+                                    auth_switch.plugin_data,
+                                )
+                                .to_vec(),
                                 plugin => {
                                     return Err(Error::UnsupportedAuthPlugin(
                                         String::from_utf8_lossy(plugin).to_string(),
@@ -638,14 +627,7 @@ impl Handshake {
                     }
                     0xFF => {
                         // ERR packet - authentication failed
-                        let err_bytes = ErrPayloadBytes::from_payload(payload)
-                            .ok_or(Error::InvalidPacket)?;
-                        let err = ErrPayload::try_from(err_bytes)?;
-                        Err(Error::ServerError {
-                            error_code: err.error_code,
-                            sql_state: err.sql_state,
-                            message: err.message,
-                        })
+                        Err(ErrPayloadBytes(payload).into())
                     }
                     _ => Err(Error::InvalidPacket),
                 }

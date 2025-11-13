@@ -1,13 +1,11 @@
 use thiserror::Error;
 
+use crate::protocol::{packet::ErrPayloadBytes, response::ErrPayload};
+
 #[derive(Debug, Error)]
 pub enum Error {
-    #[error("MySQL server error: {error_code} - {message}")]
-    ServerError {
-        error_code: u16,
-        sql_state: String,
-        message: String,
-    },
+    #[error("Server Error: {0}")]
+    ServerError(#[from] ErrPayload),
 
     #[error("IO error: {0}")]
     IoError(#[from] std::io::Error),
@@ -29,6 +27,15 @@ pub enum Error {
 
     #[error("Unsupported authentication plugin: {0}")]
     UnsupportedAuthPlugin(String),
+}
+
+impl<'a> From<ErrPayloadBytes<'a>> for Error {
+    fn from(value: ErrPayloadBytes) -> Self {
+        match ErrPayload::try_from(value) {
+            Ok(err_payload) => Error::ServerError(err_payload),
+            Err(err) => err,
+        }
+    }
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

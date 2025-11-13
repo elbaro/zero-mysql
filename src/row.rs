@@ -1,6 +1,6 @@
 use crate::protocol::value::NullBitmap;
 
-/// Zero-copy row structure that wraps raw bytes from MySQL binary or text protocol.
+/// Zero-copy row structure that wraps raw bytes from MySQL binary protocol.
 /// The actual parsing is delegated to external libraries.
 #[derive(Debug, Clone)]
 pub struct RowPayload<'a> {
@@ -21,6 +21,27 @@ impl<'a> RowPayload<'a> {
     /// Get the raw values bytes (external library parses this)
     pub fn values(&self) -> &[u8] {
         self.values
+    }
+
+    /// Get number of columns
+    pub fn num_columns(&self) -> usize {
+        self.num_columns
+    }
+}
+
+/// Zero-copy row structure for text protocol rows
+#[derive(Debug, Clone)]
+pub struct TextRowPayload<'a> {
+    /// Raw row data (text protocol)
+    pub(crate) data: &'a [u8],
+    /// Number of columns in this row
+    pub(crate) num_columns: usize,
+}
+
+impl<'a> TextRowPayload<'a> {
+    /// Get the raw row data bytes (external library parses this)
+    pub fn data(&self) -> &[u8] {
+        self.data
     }
 
     /// Get number of columns

@@ -89,7 +89,7 @@ fn main() -> Result<()> {
 
     let mut decoder = Handler::new();
     let params = [2i32];
-    conn.exec_fold(stmt_id, &params, &mut decoder, &mut buffer)?;
+    conn.exec(stmt_id, &params, &mut decoder, &mut buffer)?;
 
     // Test INSERT
     println!("\n--- Testing INSERT ---");
@@ -107,7 +107,7 @@ fn main() -> Result<()> {
     )?;
     let mut create_decoder = Handler::new();
     let empty_params: [i32; 0] = [];
-    conn.exec_fold(create_stmt, &empty_params, &mut create_decoder, &mut buffer)?;
+    conn.exec(create_stmt, &empty_params, &mut create_decoder, &mut buffer)?;
 
     // Insert multiple rows with the pattern
     println!("\nInserting test data...");
@@ -130,7 +130,7 @@ fn main() -> Result<()> {
             score,
             description.as_str(),
         );
-        conn.exec_fold(
+        conn.exec(
             insert_stmt,
             &insert_params,
             &mut insert_decoder,
@@ -145,7 +145,7 @@ fn main() -> Result<()> {
         conn.prepare("SELECT username, age, email, score, description FROM test_insert")?;
     let mut select_decoder = Handler::new();
     let select_params: [i32; 0] = [];
-    conn.exec_fold(
+    conn.exec(
         select_stmt,
         &select_params,
         &mut select_decoder,

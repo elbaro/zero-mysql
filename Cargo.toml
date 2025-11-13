@@ -6,6 +6,13 @@ edition = "2021"
 [[bin]]
 name = "example"
 path = "bin/example.rs"
+[[bin]]
+name = "example-text"
+path = "bin/example_text.rs"
+[[bin]]
+name = "example-async"
+path = "bin/example-async.rs"
+required-features = ["dev"]
 
 [dependencies]
 thiserror = "2.0"
@@ -19,5 +26,7 @@ url = "2.5"
 bitflags = "2.6"
 
 [features]
-default = []
+default = ["sync", "async"]
+sync = []
 async = ["tokio"]
+dev = ["tokio/full"]

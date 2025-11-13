@@ -151,36 +151,5 @@ impl<'a> OkPayloadBytes<'a> {
     }
 }
 
-/// ERR packet payload
-///
-/// Layout: 0xFF followed by:
-/// - error_code: 2 bytes
-/// - sql_state_marker: 1 byte ('#')
-/// - sql_state: 5 bytes
-/// - error_message: variable-length string
 #[derive(Debug)]
-pub struct ErrPayloadBytes<'a>(&'a [u8]);
-
-impl<'a> ErrPayloadBytes<'a> {
-    pub fn try_from_packet(bytes: &'a [u8]) -> Option<Self> {
-        // Check for ERR packet: starts with 0xFF
-        // Minimum size: 4 byte header + 1 byte header (0xFF) + 2 byte error code = 7 bytes
-        if bytes.len() >= 7 && bytes[4] == 0xFF {
-            Some(Self(&bytes[4..]))
-        } else {
-            None
-        }
-    }
-
-    pub fn from_payload(bytes: &'a [u8]) -> Option<Self> {
-        if !bytes.is_empty() && bytes[0] == 0xFF {
-            Some(Self(bytes))
-        } else {
-            None
-        }
-    }
-
-    pub fn bytes(&self) -> &[u8] {
-        self.0
-    }
-}
+pub struct ErrPayloadBytes<'a>(pub &'a [u8]);

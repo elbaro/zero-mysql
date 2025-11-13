@@ -73,7 +73,8 @@ impl TryFrom<OkPayloadBytes<'_>> for OkPayload {
 }
 
 /// ERR packet response
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, thiserror::Error)]
+#[error("ERROR {} ({}): {}", self.error_code, self.sql_state, self.message)]
 pub struct ErrPayload {
     pub error_code: u16,
     pub sql_state: String,
@@ -84,7 +85,7 @@ impl TryFrom<ErrPayloadBytes<'_>> for ErrPayload {
     type Error = Error;
 
     fn try_from(bytes: ErrPayloadBytes<'_>) -> Result<Self> {
-        let payload = bytes.bytes();
+        let payload = bytes.0;
         let (header, mut data) = read_int_1(payload)?;
         if header != 0xFF {
             return Err(Error::InvalidPacket);
