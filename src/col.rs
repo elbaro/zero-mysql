@@ -229,22 +229,35 @@ mod tests {
     }
 
     #[test]
-    fn test_column_definition_tail_invalid_flags() {
-        // Example with invalid/unknown flag bits
+    fn test_column_definition_tail_with_part_key_flag() {
+        // Test with PART_KEY_FLAG (0x4000) - from actual MySQL response
+        // This reproduces the bug: flags = 0x4203 (NOT_NULL | PRI_KEY | AUTO_INCREMENT | PART_KEY)
         let data: [u8; 12] = [
-            0x21, 0x00, // charset = 33
-            0xFF, 0x00, 0x00, 0x00, // column_length = 255
-            0x01, // column_type = 1 (TINYINT)
-            0x00, 0x40, // flags = 0x4000 (invalid bit 14) LE
+            0x3f, 0x00, // charset = 63 (binary)
+            0x0B, 0x00, 0x00, 0x00, // column_length = 11
+            0x03, // column_type = 3 (LONG/INT)
+            0x03, 0x42, // flags = 0x4203 (NOT_NULL | PRI_KEY | AUTO_INCREMENT | PART_KEY) LE
             0x00, // decimals = 0
             0x00, 0x00, // reserved = 0
         ];
 
         let tail = ColumnDefinitionTail::ref_from_bytes(&data).expect("Failed to parse");
 
-        // Should error on unknown flags
-        let result = tail.flags();
-        assert!(result.is_err());
+        // Verify the fields
+        assert_eq!(tail.charset(), 63);
+        assert_eq!(tail.column_length(), 11);
+        assert_eq!(tail.decimals, 0);
+
+        // Verify flags can be parsed
+        let flags = tail.flags().expect("Failed to parse flags with PART_KEY_FLAG");
+        assert!(flags.contains(ColumnFlags::NOT_NULL_FLAG));
+        assert!(flags.contains(ColumnFlags::PRI_KEY_FLAG));
+        assert!(flags.contains(ColumnFlags::AUTO_INCREMENT_FLAG));
+        assert!(flags.contains(ColumnFlags::PART_KEY_FLAG));
+
+        // Verify column type
+        let col_type = tail.column_type().expect("Failed to parse column type");
+        assert_eq!(col_type, ColumnType::MYSQL_TYPE_LONG);
     }
 
     #[test]

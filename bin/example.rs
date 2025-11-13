@@ -88,7 +88,69 @@ fn main() -> Result<()> {
     }
 
     let mut decoder = Handler::new();
-    conn.exec_fold(stmt_id, vec![2], &mut decoder, &mut buffer)?;
+    let params = [2i32];
+    conn.exec_fold(stmt_id, &params, &mut decoder, &mut buffer)?;
+
+    // Test INSERT
+    println!("\n--- Testing INSERT ---");
+
+    // Create a test table with columns matching the data pattern
+    println!("Creating test table...");
+    let create_stmt = conn.prepare(
+        "CREATE TEMPORARY TABLE IF NOT EXISTS test_insert (
+            username VARCHAR(50),
+            age INT,
+            email VARCHAR(100),
+            score FLOAT,
+            description TEXT
+        )",
+    )?;
+    let mut create_decoder = Handler::new();
+    let empty_params: [i32; 0] = [];
+    conn.exec_fold(create_stmt, &empty_params, &mut create_decoder, &mut buffer)?;
+
+    // Insert multiple rows with the pattern
+    println!("\nInserting test data...");
+    let insert_stmt = conn.prepare(
+        "INSERT INTO test_insert (username, age, email, score, description) VALUES (?, ?, ?, ?, ?)",
+    )?;
+
+    for i in 0..10 {
+        let username = format!("user_{}", i);
+        let age = 20 + (i % 5);
+        let email = format!("user{}@example.com", i);
+        let score = (i % 10) as f32;
+        let description = format!("Description for user {}", i);
+
+        let mut insert_decoder = Handler::new();
+        let insert_params = (
+            username.as_str(),
+            age,
+            email.as_str(),
+            score,
+            description.as_str(),
+        );
+        conn.exec_fold(
+            insert_stmt,
+            &insert_params,
+            &mut insert_decoder,
+            &mut buffer,
+        )?;
+    }
+    println!("Inserted 10 rows");
+
+    // Verify the insertions with a SELECT
+    println!("\nVerifying inserted data...");
+    let select_stmt =
+        conn.prepare("SELECT username, age, email, score, description FROM test_insert")?;
+    let mut select_decoder = Handler::new();
+    let select_params: [i32; 0] = [];
+    conn.exec_fold(
+        select_stmt,
+        &select_params,
+        &mut select_decoder,
+        &mut buffer,
+    )?;
 
     println!("\nExample completed successfully!");
 

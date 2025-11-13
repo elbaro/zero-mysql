@@ -146,6 +146,7 @@ pub fn write_reset_statement(out: &mut Vec<u8>, statement_id: u32) {
 /// Result of driving the exec_fold state machine
 ///
 /// Returns events that the caller should handle
+#[derive(Debug)]
 pub enum ExecResult<'a> {
     /// Need more payload data
     NeedPayload,

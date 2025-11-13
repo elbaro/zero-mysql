@@ -206,6 +206,8 @@ bitflags::bitflags! {
         const NO_DEFAULT_VALUE_FLAG = 0x1000;
         /// Field is set to NOW on UPDATE
         const ON_UPDATE_NOW_FLAG = 0x2000;
+        /// Field is part of some key (index)
+        const PART_KEY_FLAG = 0x4000;
         /// Field is numeric
         const NUM_FLAG = 0x8000;
     }

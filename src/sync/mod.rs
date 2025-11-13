@@ -1,7 +1,6 @@
 use std::io::{BufRead, BufReader, IoSlice, Write};
 use std::net::TcpStream;
 
-use crate::col::ColumnDefinition;
 use crate::constant::CapabilityFlags;
 use crate::error::{Error, Result};
 use crate::protocol::command::prepared::write_execute;
@@ -10,7 +9,6 @@ use crate::protocol::packet::write_packet_header_array;
 use crate::protocol::packet::ErrPayloadBytes;
 use crate::protocol::r#trait::{params::Params, ResultSetHandler};
 use crate::protocol::response::ErrPayload;
-use crate::row::RowPayload;
 
 /// A MySQL connection with a buffered TCP stream
 ///
@@ -20,6 +18,10 @@ pub struct Conn {
     stream: BufReader<TcpStream>,
     server_version: String,
     capability_flags: CapabilityFlags,
+    /// Reusable buffer for reading payloads (reduces heap allocations)
+    read_buffer: Vec<u8>,
+    /// Reusable buffer for building outgoing commands (reduces heap allocations)
+    write_buffer: Vec<u8>,
 }
 
 impl Conn {
@@ -157,6 +159,8 @@ impl Conn {
             stream: conn_stream,
             server_version,
             capability_flags,
+            read_buffer: Vec::new(),
+            write_buffer: Vec::new(),
         })
     }
 
@@ -179,19 +183,21 @@ impl Conn {
     /// * `Ok(statement_id)` - Statement ID for use in execute
     /// * `Err(Error)` - Preparation failed
     pub fn prepare(&mut self, sql: &str) -> Result<u32> {
-        let mut buffer = Vec::new();
+        // Reuse struct buffers to avoid heap allocations
+        self.read_buffer.clear();
+        self.write_buffer.clear();
 
         // Write COM_STMT_PREPARE
-        let mut out = Vec::new();
-        write_prepare(&mut out, sql);
-        write_payload(self.stream.get_mut(), 0, &out)?;
+        write_prepare(&mut self.write_buffer, sql);
+        write_payload(self.stream.get_mut(), 0, &self.write_buffer)?;
 
         // Read response
-        let _seq = read_payload(&mut self.stream, &mut buffer)?;
+        let _seq = read_payload(&mut self.stream, &mut self.read_buffer)?;
 
         // Check for error
-        if !buffer.is_empty() && buffer[0] == 0xFF {
-            let err_bytes = ErrPayloadBytes::from_payload(&buffer).ok_or(Error::InvalidPacket)?;
+        if !self.read_buffer.is_empty() && self.read_buffer[0] == 0xFF {
+            let err_bytes =
+                ErrPayloadBytes::from_payload(&self.read_buffer).ok_or(Error::InvalidPacket)?;
             let err = ErrPayload::try_from(err_bytes)?;
             return Err(Error::ServerError {
                 error_code: err.error_code,
@@ -201,7 +207,7 @@ impl Conn {
         }
 
         // Parse PrepareOk
-        let prepare_ok = read_prepare_ok(&buffer)?;
+        let prepare_ok = read_prepare_ok(&self.read_buffer)?;
         let statement_id = prepare_ok.statement_id.get();
         let num_params = prepare_ok.num_params.get();
         let num_columns = prepare_ok.num_columns.get();
@@ -209,28 +215,28 @@ impl Conn {
         // Skip parameter definitions if present
         if num_params > 0 {
             for _ in 0..num_params {
-                let _seq = read_payload(&mut self.stream, &mut buffer)?;
+                let _seq = read_payload(&mut self.stream, &mut self.read_buffer)?;
             }
             // Read EOF packet after params (if CLIENT_DEPRECATE_EOF not set)
             if !self
                 .capability_flags
                 .contains(CapabilityFlags::CLIENT_DEPRECATE_EOF)
             {
-                let _seq = read_payload(&mut self.stream, &mut buffer)?;
+                let _seq = read_payload(&mut self.stream, &mut self.read_buffer)?;
             }
         }
 
         // Skip column definitions if present
         if num_columns > 0 {
             for _ in 0..num_columns {
-                let _seq = read_payload(&mut self.stream, &mut buffer)?;
+                let _seq = read_payload(&mut self.stream, &mut self.read_buffer)?;
             }
             // Read EOF packet after columns (if CLIENT_DEPRECATE_EOF not set)
             if !self
                 .capability_flags
                 .contains(CapabilityFlags::CLIENT_DEPRECATE_EOF)
             {
-                let _seq = read_payload(&mut self.stream, &mut buffer)?;
+                let _seq = read_payload(&mut self.stream, &mut self.read_buffer)?;
             }
         }
 
@@ -250,10 +256,10 @@ impl Conn {
     {
         use crate::protocol::command::prepared::{Exec, ExecResult};
 
-        // Write COM_STMT_EXECUTE
-        let mut out = Vec::new();
-        write_execute(&mut out, statement_id, params);
-        write_payload(self.stream.get_mut(), 0, &out)?;
+        // Write COM_STMT_EXECUTE - reuse struct buffer to avoid heap allocations
+        self.write_buffer.clear();
+        write_execute(&mut self.write_buffer, statement_id, params)?;
+        write_payload(self.stream.get_mut(), 0, &self.write_buffer)?;
 
         // Create the state machine
         let mut exec_fold = Exec::new();
@@ -265,7 +271,10 @@ impl Conn {
             read_payload(&mut self.stream, buffer)?;
 
             // Drive state machine with the payload and handle events
-            match exec_fold.drive(&buffer[..])? {
+            // match exec_fold.drive(&buffer[..])? {
+            let result = exec_fold.drive(&buffer[..]);
+            let result = result?;
+            match result {
                 ExecResult::NeedPayload => {
                     continue;
                 }
@@ -383,67 +392,4 @@ fn write_payload<W: Write>(stream: &mut W, mut sequence_id: u8, payload: &[u8]) 
     stream.flush()?;
 
     Ok(())
-}
-
-// ============================================================================
-// Example Functions
-// ============================================================================
-
-/// Iterator over query results that reads and decodes rows on demand
-pub struct QueryResult<'a> {
-    reader: &'a mut BufReader<TcpStream>,
-    buffer: Vec<u8>,
-    row_payload: Vec<u8>,
-    num_columns: usize,
-    column_packets: Vec<Vec<u8>>,
-    columns: Vec<ColumnDefinition<'a>>,
-    finished: bool,
-}
-
-impl<'a> QueryResult<'a> {
-    fn new(
-        reader: &'a mut BufReader<TcpStream>,
-        num_columns: usize,
-        column_packets: Vec<Vec<u8>>,
-        columns: Vec<ColumnDefinition<'a>>,
-    ) -> Self {
-        Self {
-            reader,
-            buffer: Vec::new(),
-            row_payload: Vec::new(),
-            num_columns,
-            column_packets,
-            columns,
-            finished: false,
-        }
-    }
-
-    /// Get the column definitions
-    pub fn columns(&self) -> &[ColumnDefinition<'a>] {
-        &self.columns
-    }
-
-    /// Read the next row packet
-    ///
-    /// Returns `Ok(Some(Row))` if a row was read, `Ok(None)` if no more rows, `Err` on error
-    pub fn next_row(&mut self) -> Result<Option<RowPayload<'_>>> {
-        todo!()
-        // if self.finished {
-        //     return Ok(None);
-        // }
-
-        // let _seq = read_payload(self.reader, &mut self.buffer)?;
-
-        // // Store the payload in our struct so we can return a reference to it
-        // self.row_payload.clear();
-        // self.row_payload.extend_from_slice(&self.buffer);
-
-        // let row = read_binary_row(&self.row_payload, self.num_columns)?;
-
-        // if row.is_none() {
-        //     self.finished = true;
-        // }
-
-        // Ok(row)
-    }
 }

@@ -1,3 +1,4 @@
+pub mod param;
 pub mod params;
 
 use crate::col::ColumnDefinitionBytes;
