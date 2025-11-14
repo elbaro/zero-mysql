@@ -1,4 +1,4 @@
-use tokio::io::{AsyncBufRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufStream};
 use tokio::net::TcpStream;
 
 use crate::constant::CapabilityFlags;
@@ -6,21 +6,25 @@ use crate::error::{Error, Result};
 use crate::protocol::command::prepared::{read_prepare_ok, write_execute, write_prepare};
 use crate::protocol::connection::handshake::{Handshake, HandshakeResult};
 use crate::protocol::packet::write_packet_header_array;
-use crate::protocol::r#trait::{params::Params, ResultSetHandler, TextResultSetHandler};
 use crate::protocol::packet::ErrPayloadBytes;
+use crate::protocol::r#trait::{params::Params, ResultSetHandler, TextResultSetHandler};
 
 /// A MySQL connection with a buffered async TCP stream
 ///
 /// This struct holds the connection state including server information
 /// obtained during the handshake phase.
 pub struct Conn {
-    stream: BufReader<TcpStream>,
+    stream: BufStream<TcpStream>,
     server_version: String,
     capability_flags: CapabilityFlags,
     /// Reusable buffer for reading payloads (reduces heap allocations)
     read_buffer: Vec<u8>,
     /// Reusable buffer for building outgoing commands (reduces heap allocations)
     write_buffer: Vec<u8>,
+    /// Reusable buffer for packet headers when writing payloads (reduces heap allocations)
+    write_headers_buffer: Vec<[u8; 4]>,
+    /// Reusable buffer for IoSlice when writing payloads (reduces heap allocations)
+    ioslice_buffer: Vec<std::io::IoSlice<'static>>,
 }
 
 impl Conn {
@@ -52,9 +56,8 @@ impl Conn {
     /// * `Err(Error)` - Connection or authentication failed
     pub async fn new(url: &str) -> Result<Self> {
         // Parse URL
-        let parsed = url::Url::parse(url).map_err(|e| {
-            Error::BadInputError(format!("Failed to parse MySQL URL: {}", e))
-        })?;
+        let parsed = url::Url::parse(url)
+            .map_err(|e| Error::BadInputError(format!("Failed to parse MySQL URL: {}", e)))?;
 
         // Verify scheme
         if parsed.scheme() != "mysql" {
@@ -65,9 +68,9 @@ impl Conn {
         }
 
         // Extract host
-        let host = parsed.host_str().ok_or_else(|| {
-            Error::BadInputError("Missing host in MySQL URL".to_string())
-        })?;
+        let host = parsed
+            .host_str()
+            .ok_or_else(|| Error::BadInputError("Missing host in MySQL URL".to_string()))?;
 
         // Extract port (default 3306)
         let port = parsed.port().unwrap_or(3306);
@@ -93,6 +96,7 @@ impl Conn {
         // Connect to server
         let addr = format!("{}:{}", host, port);
         let stream = TcpStream::connect(&addr).await?;
+        stream.set_nodelay(true)?;
 
         Self::new_with_stream(stream, username, password, database).await
     }
@@ -117,8 +121,10 @@ impl Conn {
         password: &str,
         database: Option<&str>,
     ) -> Result<Self> {
-        let mut conn_stream = BufReader::new(stream);
+        let mut conn_stream = BufStream::new(stream);
         let mut buffer = Vec::new();
+        let mut headers_buffer = Vec::new();
+        let mut ioslice_buffer = Vec::new();
 
         // Create handshake state machine
         let mut handshake = Handshake::new(
@@ -139,7 +145,14 @@ impl Conn {
                     // Write packet to server
                     if !packet_data.is_empty() {
                         seq = seq.wrapping_add(1);
-                        write_payload(conn_stream.get_mut(), seq, &packet_data).await?;
+                        write_handshake_payload(
+                            conn_stream.get_mut(),
+                            seq,
+                            &packet_data,
+                            &mut headers_buffer,
+                            &mut ioslice_buffer,
+                        )
+                        .await?;
                     }
                     // Continue to read next response
                 }
@@ -159,6 +172,8 @@ impl Conn {
             capability_flags,
             read_buffer: Vec::new(),
             write_buffer: Vec::new(),
+            write_headers_buffer: Vec::new(),
+            ioslice_buffer: Vec::new(),
         })
     }
 
@@ -170,6 +185,68 @@ impl Conn {
     /// Get the negotiated capability flags
     pub fn capability_flags(&self) -> CapabilityFlags {
         self.capability_flags
+    }
+
+    /// Write a MySQL packet from write_buffer asynchronously, splitting it into 16MB chunks if necessary
+    ///
+    /// # Arguments
+    /// * `sequence_id` - Starting sequence ID (will auto-increment for multi-packet)
+    async fn write_payload(&mut self, mut sequence_id: u8) -> Result<()> {
+        use std::io::IoSlice;
+
+        self.write_headers_buffer.clear();
+        self.ioslice_buffer.clear();
+
+        let payload = self.write_buffer.as_slice();
+        let mut remaining = payload;
+        let mut chunk_size = 0;
+
+        // Build all headers
+        while !remaining.is_empty() {
+            chunk_size = remaining.len().min(0xFFFFFF);
+            let (_chunk, rest) = remaining.split_at(chunk_size);
+            remaining = rest;
+
+            // Write header using a stack-allocated buffer
+            let header = write_packet_header_array(sequence_id, chunk_size);
+            self.write_headers_buffer.push(header);
+
+            sequence_id = sequence_id.wrapping_add(1);
+        }
+
+        // If the last chunk was exactly 0xFFFFFF bytes, add an empty packet to signal EOF
+        if chunk_size == 0xFFFFFF {
+            let header = write_packet_header_array(sequence_id, 0);
+            self.write_headers_buffer.push(header);
+        }
+
+        // Build IoSlice array with all headers and chunks
+        remaining = payload;
+        for header in self.write_headers_buffer.iter() {
+            let chunk_size = u32::from_le_bytes([header[0], header[1], header[2], 0]) as usize;
+
+            // Safety: We extend the lifetime of IoSlice to 'static for storage in the Vec.
+            // This is safe because:
+            // 1. The IoSlice references are only used in write_all_vectored_async() below
+            // 2. Both header and payload outlive this function call
+            // 3. ioslice_buffer is cleared at the start of each write_payload call
+            self.ioslice_buffer
+                .push(unsafe { std::mem::transmute(IoSlice::new(header)) });
+
+            if chunk_size > 0 {
+                let chunk;
+                (chunk, remaining) = remaining.split_at(chunk_size);
+                self.ioslice_buffer
+                    .push(unsafe { std::mem::transmute(IoSlice::new(chunk)) });
+            }
+        }
+
+        // Write all chunks at once using vectored I/O
+        write_all_vectored_async(self.stream.get_mut(), &mut self.ioslice_buffer).await?;
+
+        self.stream.flush().await?;
+
+        Ok(())
     }
 
     /// Prepare a statement and return the statement ID (async)
@@ -190,7 +267,8 @@ impl Conn {
 
         // Write COM_STMT_PREPARE
         write_prepare(&mut self.write_buffer, sql);
-        write_payload(self.stream.get_mut(), 0, &self.write_buffer).await?;
+
+        self.write_payload(0).await?;
 
         // Read response
         let _seq = read_payload(&mut self.stream, &mut self.read_buffer).await?;
@@ -207,31 +285,13 @@ impl Conn {
         let num_columns = prepare_ok.num_columns.get();
 
         // Skip parameter definitions if present
-        if num_params > 0 {
-            for _ in 0..num_params {
-                let _seq = read_payload(&mut self.stream, &mut self.read_buffer).await?;
-            }
-            // Read EOF packet after params (if CLIENT_DEPRECATE_EOF not set)
-            if !self
-                .capability_flags
-                .contains(CapabilityFlags::CLIENT_DEPRECATE_EOF)
-            {
-                let _seq = read_payload(&mut self.stream, &mut self.read_buffer).await?;
-            }
+        for _ in 0..num_params {
+            let _seq = read_payload(&mut self.stream, &mut self.read_buffer).await?;
         }
 
         // Skip column definitions if present
-        if num_columns > 0 {
-            for _ in 0..num_columns {
-                let _seq = read_payload(&mut self.stream, &mut self.read_buffer).await?;
-            }
-            // Read EOF packet after columns (if CLIENT_DEPRECATE_EOF not set)
-            if !self
-                .capability_flags
-                .contains(CapabilityFlags::CLIENT_DEPRECATE_EOF)
-            {
-                let _seq = read_payload(&mut self.stream, &mut self.read_buffer).await?;
-            }
+        for _ in 0..num_columns {
+            let _seq = read_payload(&mut self.stream, &mut self.read_buffer).await?;
         }
 
         Ok(statement_id)
@@ -246,17 +306,15 @@ impl Conn {
     /// * `statement_id` - The prepared statement ID
     /// * `params` - Parameters implementing the Params trait
     /// * `handler` - Mutable reference to a ResultSetHandler implementation
-    /// * `buffer` - Reusable buffer for reading packets (to minimize allocations)
     ///
     /// # Returns
     /// * `Ok(())` - Query execution completed successfully
     /// * `Err(Error)` - Query execution or handler callback failed
-    pub async fn exec_fold<'a, P, H>(
+    pub async fn exec<'a, P, H>(
         &mut self,
         statement_id: u32,
         params: &P,
         handler: &mut H,
-        buffer: &mut Vec<u8>,
     ) -> Result<()>
     where
         P: Params,
@@ -267,19 +325,20 @@ impl Conn {
         // Write COM_STMT_EXECUTE - reuse struct buffer to avoid heap allocations
         self.write_buffer.clear();
         write_execute(&mut self.write_buffer, statement_id, params)?;
-        write_payload(self.stream.get_mut(), 0, &self.write_buffer).await?;
+
+        self.write_payload(0).await?;
 
         // Create the state machine
-        let mut exec_fold = Exec::new();
+        let mut exec = Exec::new();
 
         // Drive the state machine: read payloads and drive
         loop {
             // Read the next packet from network
-            buffer.clear();
-            read_payload(&mut self.stream, buffer).await?;
+            self.read_buffer.clear();
+            read_payload(&mut self.stream, &mut self.read_buffer).await?;
 
             // Drive state machine with the payload and handle events
-            let result = exec_fold.drive(&buffer[..])?;
+            let result = exec.drive(&self.read_buffer[..])?;
             match result {
                 ExecResult::NeedPayload => {
                     continue;
@@ -306,22 +365,153 @@ impl Conn {
         }
     }
 
+    /// Execute a prepared statement and return only the first row, dropping the rest (async)
+    ///
+    /// This is optimized for queries where you only need the first result.
+    /// After receiving the first row, it efficiently discards remaining rows without
+    /// processing them through the handler.
+    ///
+    /// # Arguments
+    /// * `statement_id` - The prepared statement ID
+    /// * `params` - Parameters implementing the Params trait
+    /// * `handler` - Mutable reference to a ResultSetHandler implementation
+    ///
+    /// # Returns
+    /// * `Ok(true)` - First row was found and processed
+    /// * `Ok(false)` - No rows in result set
+    /// * `Err(Error)` - Query execution or handler callback failed
+    pub async fn exec_first<'a, P, H>(
+        &mut self,
+        statement_id: u32,
+        params: &P,
+        handler: &mut H,
+    ) -> Result<bool>
+    where
+        P: Params,
+        H: ResultSetHandler<'a>,
+    {
+        use crate::protocol::command::prepared::{Exec, ExecResult};
+
+        // Write COM_STMT_EXECUTE - reuse struct buffer to avoid heap allocations
+        self.write_buffer.clear();
+        write_execute(&mut self.write_buffer, statement_id, params)?;
+
+        self.write_payload(0).await?;
+
+        // Create the state machine
+        let mut exec = Exec::new();
+        let mut first_row_found = false;
+
+        // Drive the state machine: read payloads and drive
+        loop {
+            // Read the next packet from network
+            self.read_buffer.clear();
+            read_payload(&mut self.stream, &mut self.read_buffer).await?;
+
+            // Drive state machine with the payload and handle events
+            let result = exec.drive(&self.read_buffer[..])?;
+            match result {
+                ExecResult::NeedPayload => {
+                    continue;
+                }
+                ExecResult::NoResultSet(ok_bytes) => {
+                    handler.no_result_set(ok_bytes)?;
+                    return Ok(false);
+                }
+
+                ExecResult::ResultSetStart { num_columns } => {
+                    handler.resultset_start(num_columns)?;
+                }
+                ExecResult::Column(col) => {
+                    handler.col(col)?;
+                }
+                ExecResult::Row(row) => {
+                    if !first_row_found {
+                        handler.row(&row)?;
+                        first_row_found = true;
+                        // Continue reading to drain remaining packets but don't process them
+                    }
+                    // Skip processing subsequent rows
+                }
+                ExecResult::Eof(eof_bytes) => {
+                    handler.resultset_end(eof_bytes)?;
+                    return Ok(first_row_found);
+                }
+            }
+        }
+    }
+
+    /// Execute a prepared statement and discard all results (async)
+    ///
+    /// This is optimized for queries where you don't need to process any results,
+    /// such as INSERT/UPDATE/DELETE statements or when you only care about whether
+    /// the query succeeded.
+    ///
+    /// # Arguments
+    /// * `statement_id` - The prepared statement ID
+    /// * `params` - Parameters implementing the Params trait
+    ///
+    /// # Returns
+    /// * `Ok(())` - Query executed successfully
+    /// * `Err(Error)` - Query execution failed
+    pub async fn exec_drop<P>(&mut self, statement_id: u32, params: &P) -> Result<()>
+    where
+        P: Params,
+    {
+        use crate::protocol::command::prepared::{Exec, ExecResult};
+
+        // Write COM_STMT_EXECUTE - reuse struct buffer to avoid heap allocations
+        self.write_buffer.clear();
+        write_execute(&mut self.write_buffer, statement_id, params)?;
+
+        self.write_payload(0).await?;
+
+        // Create the state machine
+        let mut exec = Exec::new();
+
+        // Drive the state machine: read payloads and drive, but don't process results
+        loop {
+            // Read the next packet from network
+            self.read_buffer.clear();
+            read_payload(&mut self.stream, &mut self.read_buffer).await?;
+
+            // Drive state machine with the payload
+            let result = exec.drive(&self.read_buffer[..])?;
+            match result {
+                ExecResult::NeedPayload => {
+                    continue;
+                }
+                ExecResult::NoResultSet(_ok_bytes) => {
+                    // No result set, query complete
+                    return Ok(());
+                }
+                ExecResult::ResultSetStart { .. } => {
+                    // Start of result set, continue to drain
+                }
+                ExecResult::Column(_) => {
+                    // Column definition, skip
+                }
+                ExecResult::Row(_) => {
+                    // Row data, skip
+                }
+                ExecResult::Eof(_eof_bytes) => {
+                    // End of result set
+                    return Ok(());
+                }
+            }
+        }
+    }
+
     /// Execute a text protocol SQL query (async)
     ///
     /// # Arguments
     /// * `sql` - SQL query to execute
     /// * `handler` - Handler for result set events
-    /// * `buffer` - Reusable buffer for reading payloads
     ///
     /// # Returns
     /// * `Ok(())` - Query executed successfully
     /// * `Err(Error)` - Query failed
-    pub async fn query<'a, H>(
-        &mut self,
-        sql: &str,
-        handler: &mut H,
-        buffer: &mut Vec<u8>,
-    ) -> Result<()>
+    pub async fn query<'a, H>(&mut self, sql: &str, handler: &mut H) -> Result<()>
     where
         H: TextResultSetHandler<'a>,
     {
@@ -330,7 +520,8 @@ impl Conn {
         // Write COM_QUERY - reuse struct buffer to avoid heap allocations
         self.write_buffer.clear();
         write_query(&mut self.write_buffer, sql);
-        write_payload(self.stream.get_mut(), 0, &self.write_buffer).await?;
+
+        self.write_payload(0).await?;
 
         // Create the state machine
         let mut query_fold = Query::new();
@@ -338,11 +529,11 @@ impl Conn {
         // Drive the state machine: read payloads and drive
         loop {
             // Read the next packet from network
-            buffer.clear();
-            read_payload(&mut self.stream, buffer).await?;
+            self.read_buffer.clear();
+            read_payload(&mut self.stream, &mut self.read_buffer).await?;
 
             // Drive state machine with the payload and handle events
-            let result = query_fold.drive(&buffer[..])?;
+            let result = query_fold.drive(&self.read_buffer[..])?;
             match result {
                 QueryResult::NeedPayload => {
                     continue;
@@ -369,6 +560,42 @@ impl Conn {
     }
 }
 
+/// Write all data from IoSlice buffers, handling partial writes
+async fn write_all_vectored_async<W: AsyncWrite + Unpin>(
+    writer: &mut W,
+    bufs: &mut [std::io::IoSlice<'_>],
+) -> Result<()> {
+    let mut bufs_idx = 0;
+
+    while bufs_idx < bufs.len() {
+        match writer.write_vectored(&bufs[bufs_idx..]).await {
+            Ok(0) => {
+                return Err(Error::IoError(std::io::Error::new(
+                    std::io::ErrorKind::WriteZero,
+                    "failed to write whole buffer",
+                )));
+            }
+            Ok(mut n) => {
+                // Advance through buffers based on bytes written
+                while n > 0 && bufs_idx < bufs.len() {
+                    let buf_len = bufs[bufs_idx].len();
+                    if n >= buf_len {
+                        // Fully consumed this buffer
+                        n -= buf_len;
+                        bufs_idx += 1;
+                    } else {
+                        // Partially consumed this buffer - advance it
+                        bufs[bufs_idx].advance(n);
+                        n = 0;
+                    }
+                }
+            }
+            Err(e) => return Err(Error::IoError(e)),
+        }
+    }
+    Ok(())
+}
+
 /// Read a complete MySQL payload asynchronously, concatenating packets if they span multiple 16MB chunks.
 /// This function performs minimal copies and uses buffered reads to reduce syscalls.
 ///
@@ -383,12 +610,15 @@ pub async fn read_payload<R: AsyncBufRead + Unpin>(
     reader: &mut R,
     buffer: &mut Vec<u8>,
 ) -> Result<u8> {
-    buffer.clear();
-
     // Read first packet header (4 bytes)
     // Note: fill_buf() doesn't guarantee 4 bytes will be available, so we use read_exact
     let mut header = [0u8; 4];
-    reader.read_exact(&mut header).await.map_err(|e| Error::IoError(e))?;
+
+    buffer.clear();
+    reader
+        .read_exact(&mut header)
+        .await
+        .map_err(|e| Error::IoError(e))?;
 
     let length = u32::from_le_bytes([header[0], header[1], header[2], 0]) as usize;
     let sequence_id = header[3];
@@ -408,7 +638,10 @@ pub async fn read_payload<R: AsyncBufRead + Unpin>(
     let mut current_length = length;
     while current_length == 0xFFFFFF {
         // Read next packet header
-        reader.read_exact(&mut header).await.map_err(|e| Error::IoError(e))?;
+        reader
+            .read_exact(&mut header)
+            .await
+            .map_err(|e| Error::IoError(e))?;
 
         current_length = u32::from_le_bytes([header[0], header[1], header[2], 0]) as usize;
         // sequence_id should increment but we don't verify it (non-priority)
@@ -425,49 +658,72 @@ pub async fn read_payload<R: AsyncBufRead + Unpin>(
     Ok(sequence_id)
 }
 
-/// Write a MySQL packet asynchronously, splitting it into 16MB chunks if necessary
+/// Write a MySQL packet during handshake asynchronously, splitting it into 16MB chunks if necessary
+/// (standalone version for use before Conn is fully initialized)
 ///
 /// # Arguments
 /// * `stream` - The async TCP stream to write to
 /// * `sequence_id` - Starting sequence ID (will auto-increment for multi-packet)
 /// * `payload` - The payload bytes to send
-async fn write_payload<W: AsyncWrite + Unpin>(
+/// * `headers_buffer` - Reusable buffer for packet headers (reduces heap allocations)
+/// * `ioslice_buffer` - Reusable buffer for IoSlice (reduces heap allocations)
+async fn write_handshake_payload<W: AsyncWrite + Unpin>(
     stream: &mut W,
     mut sequence_id: u8,
     payload: &[u8],
+    headers_buffer: &mut Vec<[u8; 4]>,
+    ioslice_buffer: &mut Vec<std::io::IoSlice<'static>>,
 ) -> Result<()> {
+    use std::io::IoSlice;
+
+    headers_buffer.clear();
+    ioslice_buffer.clear();
+
     let mut remaining = payload;
     let mut chunk_size = 0;
 
+    // Build all headers
     while !remaining.is_empty() {
         chunk_size = remaining.len().min(0xFFFFFF);
-        let chunk;
-        (chunk, remaining) = remaining.split_at(chunk_size);
+        let (_chunk, rest) = remaining.split_at(chunk_size);
+        remaining = rest;
 
         // Write header using a stack-allocated buffer
         let header = write_packet_header_array(sequence_id, chunk_size);
-
-        // Write header and payload separately without allocating
-        stream
-            .write_all(&header)
-            .await
-            .map_err(|e| Error::IoError(e))?;
-        stream
-            .write_all(chunk)
-            .await
-            .map_err(|e| Error::IoError(e))?;
+        headers_buffer.push(header);
 
         sequence_id = sequence_id.wrapping_add(1);
     }
 
-    // If the last chunk was exactly 0xFFFFFF bytes, send an empty packet to signal EOF
+    // If the last chunk was exactly 0xFFFFFF bytes, add an empty packet to signal EOF
     if chunk_size == 0xFFFFFF {
         let header = write_packet_header_array(sequence_id, 0);
-        stream
-            .write_all(&header)
-            .await
-            .map_err(|e| Error::IoError(e))?;
+        headers_buffer.push(header);
     }
+
+    // Build IoSlice array with all headers and chunks
+    remaining = payload;
+    for header in headers_buffer.iter() {
+        let chunk_size = u32::from_le_bytes([header[0], header[1], header[2], 0]) as usize;
+
+        // Safety: We extend the lifetime of IoSlice to 'static for storage in the Vec.
+        // This is safe because:
+        // 1. The IoSlice references are only used in write_all_vectored_async() below
+        // 2. Both header and payload outlive this function call
+        // 3. ioslice_buffer is cleared at the start of each write_handshake_payload call
+        ioslice_buffer.push(unsafe { std::mem::transmute(IoSlice::new(header)) });
+
+        if chunk_size > 0 {
+            let chunk;
+            (chunk, remaining) = remaining.split_at(chunk_size);
+            ioslice_buffer.push(unsafe { std::mem::transmute(IoSlice::new(chunk)) });
+        }
+    }
+
+    // Write all chunks at once using vectored I/O
+    write_all_vectored_async(stream, ioslice_buffer).await?;
+
+    stream.flush().await?;
 
     Ok(())
 }

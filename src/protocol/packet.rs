@@ -127,17 +127,9 @@ pub fn write_packet_header_array(sequence_id: u8, payload_length: usize) -> [u8;
 /// - warnings: 2 bytes
 /// - info: variable-length string
 #[derive(Debug)]
-pub struct OkPayloadBytes<'a>(&'a [u8]);
+pub struct OkPayloadBytes<'a>(pub &'a [u8]);
 
 impl<'a> OkPayloadBytes<'a> {
-    pub fn try_from_payload(bytes: &'a [u8]) -> Option<Self> {
-        if bytes[4] == 0x00 || bytes[4] == 0xFE {
-            Some(Self(bytes))
-        } else {
-            None
-        }
-    }
-
     pub fn assert_eof(&self) -> Result<()> {
         if self.0[0] == 0xFE {
             Ok(())

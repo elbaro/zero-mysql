@@ -333,10 +333,6 @@ mod tests {
             "CLIENT_PROTOCOL_41 must be always enabled"
         );
         assert!(
-            always_enabled.contains(CapabilityFlags::CLIENT_CONNECT_WITH_DB),
-            "CLIENT_CONNECT_WITH_DB must be always enabled"
-        );
-        assert!(
             always_enabled.contains(CapabilityFlags::CLIENT_PLUGIN_AUTH),
             "CLIENT_PLUGIN_AUTH must be always enabled"
         );

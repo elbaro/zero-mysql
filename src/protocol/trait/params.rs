@@ -26,6 +26,7 @@ pub trait Params {
     /// Typically true on first execute, false on subsequent executes
     /// with the same statement (optimization).
     fn send_types_to_server(&self) -> bool {
+        // TODO: add a param_example=(..) arg to prepare()
         true
     }
 

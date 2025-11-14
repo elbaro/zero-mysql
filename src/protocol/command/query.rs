@@ -5,6 +5,8 @@ use crate::protocol::packet::{ErrPayloadBytes, OkPayloadBytes};
 use crate::protocol::primitive::*;
 use crate::row::TextRowPayload;
 
+const MAX_PAYLOAD_LENGTH: usize = (1 << 24) - 4;
+
 /// Write COM_QUERY command
 pub fn write_query(out: &mut Vec<u8>, sql: &str) {
     write_int_1(out, CommandByte::Query as u8);
@@ -29,9 +31,7 @@ pub fn read_query_response(payload: &[u8]) -> Result<QueryResponse<'_>> {
         }
         0x00 => {
             // OK packet - query succeeded without result set
-            let ok_bytes =
-                OkPayloadBytes::try_from_payload(payload).ok_or(Error::InvalidPacket)?;
-            Ok(QueryResponse::Ok(ok_bytes))
+            Ok(QueryResponse::Ok(OkPayloadBytes(payload)))
         }
         0xFB => {
             // LOCAL INFILE packet - not yet supported
@@ -156,37 +156,24 @@ impl Query {
             }
 
             Self::ReadingRows { num_columns } => {
-                // After all rows, the server sends an end-of-result-set packet:
-                // - With CLIENT_DEPRECATE_EOF: OK packet (0x00 or 0xFE)
-                // - Without CLIENT_DEPRECATE_EOF: EOF packet (0xFE, length < 9)
+                // A valid row's first item is NULL (0xFB) or string<lenenc>.
+                // string<lenenc> starts with int<lenenc> which cannot start with 0xFF (ErrPacket header).
+                // Hence, 0xFF always means Err.
                 //
-                // Challenge: Text protocol rows are length-encoded strings that can start
-                // with ANY byte value, including 0x00 or 0xFE. We must distinguish:
-                // - OK/EOF packets (structured packets marking end of result set)
-                // - Text row data (raw column values as length-encoded strings)
-                //
-                // Solution: Check if payload[0] is 0x00 or 0xFE, then try to parse as
-                // OK/EOF packet. If parsing succeeds, it's end of result set. Otherwise,
-                // it's a text row that happens to start with those bytes.
-                match payload[0] {
-                    0x00 | 0xFE => {
-                        // Might be OK/EOF packet or a text row starting with these bytes
-                        // Try to parse as OK/EOF packet - if it succeeds, we're done
-                        if let Some(ok_bytes) = OkPayloadBytes::try_from_payload(payload) {
-                            *self = Self::Finished;
-                            Ok(QueryResult::Eof(ok_bytes))
-                        } else {
-                            // Not a valid OK/EOF packet, must be a text row
-                            let row = read_text_row(payload, *num_columns)?;
-                            Ok(QueryResult::Row(row))
-                        }
+                // Similarly, string<lenenc> starting with 0xFE means that the length of a string is at least 2^24, which means the packet is of the size 2^24.
+                // The Ok-Packet for EOF cannot be this long, therefore 0xFE with payload.len() determines the payload length.
+                match payload.first() {
+                    Some(0xFF) => {
+                        // ErrPacket
+                        Err(ErrPayloadBytes(payload))?
                     }
-                    0xFF => {
-                        // Error during result set (unlikely but possible)
-                        Err(ErrPayloadBytes(payload).into())
+                    Some(0xFE) if payload.len() != MAX_PAYLOAD_LENGTH => {
+                        // OkPacket (EOF)
+                        *self = Self::Finished;
+                        Ok(QueryResult::Eof(OkPayloadBytes(payload)))
                     }
                     _ => {
-                        // Text protocol row (doesn't start with 0x00, 0xFE, or 0xFF)
+                        // Text protocol row (doesn't start with 0x00 or 0xFE)
                         let row = read_text_row(payload, *num_columns)?;
                         Ok(QueryResult::Row(row))
                     }

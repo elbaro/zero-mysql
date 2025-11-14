@@ -92,10 +92,7 @@ pub fn read_execute_response(payload: &[u8]) -> Result<ExecuteResponse<'_>> {
     }
 
     match payload[0] {
-        0x00 => {
-            let ok_bytes = OkPayloadBytes::try_from_payload(payload).ok_or(Error::InvalidPacket)?;
-            Ok(ExecuteResponse::Ok(ok_bytes))
-        }
+        0x00 => Ok(ExecuteResponse::Ok(OkPayloadBytes(payload))),
         0xFF => {
             // Error packet - convert to Error
             Err(ErrPayloadBytes(payload).into())
@@ -236,8 +233,7 @@ impl Exec {
                     }
                     0xFE => {
                         // EOF packet
-                        let eof_bytes = OkPayloadBytes::try_from_payload(payload)
-                            .ok_or(Error::InvalidPacket)?;
+                        let eof_bytes = OkPayloadBytes(payload);
                         eof_bytes.assert_eof()?;
                         *self = Self::Finished;
                         Ok(ExecResult::Eof(eof_bytes))

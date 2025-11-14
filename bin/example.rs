@@ -22,9 +22,6 @@ fn main() -> Result<()> {
     let stmt_id = conn.prepare("SELECT 1 + ?")?;
     println!("Statement prepared successfully with ID: {}", stmt_id);
 
-    // Execute the query with no parameters
-    let mut buffer = Vec::new();
-
     // Create a simple row counter using the new ResultSetHandler trait
     struct Handler {
         cols: Vec<ColumnTypeAndFlags>,
@@ -89,7 +86,7 @@ fn main() -> Result<()> {
 
     let mut decoder = Handler::new();
     let params = [2i32];
-    conn.exec(stmt_id, &params, &mut decoder, &mut buffer)?;
+    conn.exec(stmt_id, &params, &mut decoder)?;
 
     // Test INSERT
     println!("\n--- Testing INSERT ---");
@@ -107,7 +104,7 @@ fn main() -> Result<()> {
     )?;
     let mut create_decoder = Handler::new();
     let empty_params: [i32; 0] = [];
-    conn.exec(create_stmt, &empty_params, &mut create_decoder, &mut buffer)?;
+    conn.exec(create_stmt, &empty_params, &mut create_decoder)?;
 
     // Insert multiple rows with the pattern
     println!("\nInserting test data...");
@@ -130,12 +127,7 @@ fn main() -> Result<()> {
             score,
             description.as_str(),
         );
-        conn.exec(
-            insert_stmt,
-            &insert_params,
-            &mut insert_decoder,
-            &mut buffer,
-        )?;
+        conn.exec(insert_stmt, &insert_params, &mut insert_decoder)?;
     }
     println!("Inserted 10 rows");
 
@@ -145,12 +137,7 @@ fn main() -> Result<()> {
         conn.prepare("SELECT username, age, email, score, description FROM test_insert")?;
     let mut select_decoder = Handler::new();
     let select_params: [i32; 0] = [];
-    conn.exec(
-        select_stmt,
-        &select_params,
-        &mut select_decoder,
-        &mut buffer,
-    )?;
+    conn.exec(select_stmt, &select_params, &mut select_decoder)?;
 
     println!("\nExample completed successfully!");
 
