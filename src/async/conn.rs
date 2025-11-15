@@ -1,5 +1,6 @@
-use tokio::io::{AsyncBufRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufStream};
+use tokio::io::{AsyncBufRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::net::TcpStream;
+use tracing::instrument;
 
 use crate::constant::CapabilityFlags;
 use crate::error::{Error, Result};
@@ -14,7 +15,7 @@ use crate::protocol::r#trait::{params::Params, ResultSetHandler, TextResultSetHa
 /// This struct holds the connection state including server information
 /// obtained during the handshake phase.
 pub struct Conn {
-    stream: BufStream<TcpStream>,
+    stream: BufReader<TcpStream>,
     server_version: String,
     capability_flags: CapabilityFlags,
     /// Reusable buffer for reading payloads (reduces heap allocations)
@@ -25,6 +26,8 @@ pub struct Conn {
     write_headers_buffer: Vec<[u8; 4]>,
     /// Reusable buffer for IoSlice when writing payloads (reduces heap allocations)
     ioslice_buffer: Vec<std::io::IoSlice<'static>>,
+    /// Reusable buffer for assembling complete packets with headers (reduces heap allocations)
+    packet_buf: Vec<u8>,
 }
 
 impl Conn {
@@ -121,7 +124,7 @@ impl Conn {
         password: &str,
         database: Option<&str>,
     ) -> Result<Self> {
-        let mut conn_stream = BufStream::new(stream);
+        let mut conn_stream = BufReader::new(stream);
         let mut buffer = Vec::new();
         let mut headers_buffer = Vec::new();
         let mut ioslice_buffer = Vec::new();
@@ -146,7 +149,7 @@ impl Conn {
                     if !packet_data.is_empty() {
                         seq = seq.wrapping_add(1);
                         write_handshake_payload(
-                            conn_stream.get_mut(),
+                            &mut conn_stream,
                             seq,
                             &packet_data,
                             &mut headers_buffer,
@@ -174,6 +177,7 @@ impl Conn {
             write_buffer: Vec::new(),
             write_headers_buffer: Vec::new(),
             ioslice_buffer: Vec::new(),
+            packet_buf: Vec::new(),
         })
     }
 
@@ -191,60 +195,55 @@ impl Conn {
     ///
     /// # Arguments
     /// * `sequence_id` - Starting sequence ID (will auto-increment for multi-packet)
+    #[instrument(skip_all)]
     async fn write_payload(&mut self, mut sequence_id: u8) -> Result<()> {
-        use std::io::IoSlice;
-
-        self.write_headers_buffer.clear();
-        self.ioslice_buffer.clear();
-
         let payload = self.write_buffer.as_slice();
+
+        // Calculate number of chunks needed
+        let num_chunks = (payload.len() + 0xFFFFFF - 1) / 0xFFFFFF;
+        let needs_empty_packet = payload.len() % 0xFFFFFF == 0 && !payload.is_empty();
+        let total_headers = if needs_empty_packet { num_chunks + 1 } else { num_chunks };
+
+        // Pre-calculate total size: headers (4 bytes each) + payload
+        let total_size = total_headers * 4 + payload.len();
+
+        // Reuse packet buffer, reserve capacity if needed
+        self.packet_buf.clear();
+        self.packet_buf.reserve(total_size);
+
+        // Build packet with headers and chunks
         let mut remaining = payload;
-        let mut chunk_size = 0;
-
-        // Build all headers
         while !remaining.is_empty() {
-            chunk_size = remaining.len().min(0xFFFFFF);
-            let (_chunk, rest) = remaining.split_at(chunk_size);
-            remaining = rest;
+            let chunk_size = remaining.len().min(0xFFFFFF);
+            let (chunk, rest) = remaining.split_at(chunk_size);
 
-            // Write header using a stack-allocated buffer
+            // Write header
             let header = write_packet_header_array(sequence_id, chunk_size);
-            self.write_headers_buffer.push(header);
+            self.packet_buf.extend_from_slice(&header);
 
+            // Write chunk
+            self.packet_buf.extend_from_slice(chunk);
+
+            remaining = rest;
             sequence_id = sequence_id.wrapping_add(1);
         }
 
-        // If the last chunk was exactly 0xFFFFFF bytes, add an empty packet to signal EOF
-        if chunk_size == 0xFFFFFF {
+        // Add empty packet if last chunk was exactly 0xFFFFFF bytes
+        if needs_empty_packet {
             let header = write_packet_header_array(sequence_id, 0);
-            self.write_headers_buffer.push(header);
+            self.packet_buf.extend_from_slice(&header);
         }
 
-        // Build IoSlice array with all headers and chunks
-        remaining = payload;
-        for header in self.write_headers_buffer.iter() {
-            let chunk_size = u32::from_le_bytes([header[0], header[1], header[2], 0]) as usize;
-
-            // Safety: We extend the lifetime of IoSlice to 'static for storage in the Vec.
-            // This is safe because:
-            // 1. The IoSlice references are only used in write_all_vectored_async() below
-            // 2. Both header and payload outlive this function call
-            // 3. ioslice_buffer is cleared at the start of each write_payload call
-            self.ioslice_buffer
-                .push(unsafe { std::mem::transmute(IoSlice::new(header)) });
-
-            if chunk_size > 0 {
-                let chunk;
-                (chunk, remaining) = remaining.split_at(chunk_size);
-                self.ioslice_buffer
-                    .push(unsafe { std::mem::transmute(IoSlice::new(chunk)) });
-            }
+        {
+            use tokio::io::AsyncWriteExt;
+            let _span = tracing::trace_span!("write_and_flush", bytes = self.packet_buf.len()).entered();
+            // println!("writing {} bytes", self.packet_buf.len());
+            //
+            let t = std::time::Instant::now();
+            self.stream.write_all(&self.packet_buf).await.map_err(Error::IoError)?;
+            println!("{:?}", t.elapsed());
+            // self.stream.flush().await?;
         }
-
-        // Write all chunks at once using vectored I/O
-        write_all_vectored_async(self.stream.get_mut(), &mut self.ioslice_buffer).await?;
-
-        self.stream.flush().await?;
 
         Ok(())
     }
@@ -313,7 +312,7 @@ impl Conn {
     pub async fn exec<'a, P, H>(
         &mut self,
         statement_id: u32,
-        params: &P,
+        params: P,
         handler: &mut H,
     ) -> Result<()>
     where
@@ -383,7 +382,7 @@ impl Conn {
     pub async fn exec_first<'a, P, H>(
         &mut self,
         statement_id: u32,
-        params: &P,
+        params: P,
         handler: &mut H,
     ) -> Result<bool>
     where
@@ -454,15 +453,19 @@ impl Conn {
     /// # Returns
     /// * `Ok(())` - Query executed successfully
     /// * `Err(Error)` - Query execution failed
-    pub async fn exec_drop<P>(&mut self, statement_id: u32, params: &P) -> Result<()>
+    #[instrument(skip_all)]
+    pub async fn exec_drop<P>(&mut self, statement_id: u32, params: P) -> Result<()>
     where
         P: Params,
     {
         use crate::protocol::command::prepared::{Exec, ExecResult};
 
         // Write COM_STMT_EXECUTE - reuse struct buffer to avoid heap allocations
+        // let build_start = std::time::Instant::now();
         self.write_buffer.clear();
         write_execute(&mut self.write_buffer, statement_id, params)?;
+        // let build_elapsed = build_start.elapsed();
+        // println!("[zero-mysql] build execute buffer took: {:?}", build_elapsed);
 
         self.write_payload(0).await?;
 
@@ -606,6 +609,7 @@ async fn write_all_vectored_async<W: AsyncWrite + Unpin>(
 /// # Returns
 /// * `Ok(sequence_id)` - The sequence ID; the payload is stored in `buffer`
 /// * `Err(Error)` - IO error or protocol error
+#[instrument(skip_all)]
 pub async fn read_payload<R: AsyncBufRead + Unpin>(
     reader: &mut R,
     buffer: &mut Vec<u8>,
@@ -722,7 +726,6 @@ async fn write_handshake_payload<W: AsyncWrite + Unpin>(
 
     // Write all chunks at once using vectored I/O
     write_all_vectored_async(stream, ioslice_buffer).await?;
-
     stream.flush().await?;
 
     Ok(())

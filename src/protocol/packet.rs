@@ -99,6 +99,7 @@ impl Decoder for PacketDecoder {
 }
 
 /// Helper function to write packet header
+#[inline]
 pub fn write_packet_header(out: &mut Vec<u8>, sequence_id: u8, payload_length: usize) {
     // Write 3-byte length
     let bytes = (payload_length as u32).to_le_bytes();
@@ -108,6 +109,7 @@ pub fn write_packet_header(out: &mut Vec<u8>, sequence_id: u8, payload_length: u
 }
 
 /// Helper function to write packet header to a fixed-size array
+#[inline]
 pub fn write_packet_header_array(sequence_id: u8, payload_length: usize) -> [u8; 4] {
     let mut header = [0u8; 4];
     let bytes = (payload_length as u32).to_le_bytes();

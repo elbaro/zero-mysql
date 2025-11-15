@@ -1,17 +1,16 @@
 use mysql::prelude::*;
 use mysql::*;
 
-#[global_allocator]
-static GLOBAL: tracy_client::ProfiledAllocator<std::alloc::System> =
-    tracy_client::ProfiledAllocator::new(std::alloc::System, 100);
+// #[global_allocator]
+// static GLOBAL: tracy_client::ProfiledAllocator<std::alloc::System> =
+//     tracy_client::ProfiledAllocator::new(std::alloc::System, 100);
 
 fn main() -> Result<()> {
     // Initialize tracy client and tracing
     tracy_client::Client::start();
 
     use tracing_subscriber::layer::SubscriberExt;
-    let subscriber = tracing_subscriber::registry()
-        .with(tracing_tracy::TracyLayer::default());
+    let subscriber = tracing_subscriber::registry().with(tracing_tracy::TracyLayer::default());
     tracing::subscriber::set_global_default(subscriber).unwrap();
 
     // Connect to MySQL server
@@ -37,18 +36,16 @@ fn main() -> Result<()> {
                 email VARCHAR(100),
                 score FLOAT,
                 description VARCHAR(100)
-            ) ENGINE=MEMORY"
+            ) ENGINE=MEMORY",
         )?;
     }
 
     // Prepare statement
     let insert_stmt = conn.prep(
-        r"INSERT INTO test_bench (name, age, email, score, description)
-          VALUES (?, ?, ?, ?, ?)"
+        r"INSERT INTO test_bench (name, age, email, score, description) VALUES (?, ?, ?, ?, ?)",
     )?;
 
     // Pre-construct row data to avoid measuring string formatting overhead
-    let _span = tracing::info_span!("prepare_data").entered();
     let mut rows = Vec::with_capacity(10_000);
     for i in 0..10_000 {
         rows.push((
@@ -59,7 +56,6 @@ fn main() -> Result<()> {
             format!("Description for user {}", i),
         ));
     }
-    drop(_span);
 
     println!("Starting infinite loop: inserting 10,000 rows and truncating...");
     let mut iteration = 0u64;
@@ -72,27 +68,32 @@ fn main() -> Result<()> {
         {
             let _span = tracing::info_span!("insert_10000_rows").entered();
             for (username, age, email, score, description) in &rows {
-                let _span = tracing::trace_span!("insert_row").entered();
-
-                {
-                    let _trace = tracing::trace_span!("exec_drop").entered();
-                    conn.exec_drop(
-                        &insert_stmt,
-                        (username.as_str(), *age, email.as_str(), *score, description.as_str()),
-                    )?;
-                }
+                // let _trace = tracing::trace_span!("exec_drop").entered();
+                conn.exec_drop(
+                    &insert_stmt,
+                    (
+                        username.as_str(),
+                        *age,
+                        email.as_str(),
+                        *score,
+                        description.as_str(),
+                    ),
+                )?;
             }
         }
+        let elapsed = iteration_start.elapsed();
 
         println!("Iteration {}: Inserted 10,000 rows", iteration);
 
         // Truncate the table
         {
-            let _span = tracing::info_span!("truncate_table").entered();
             conn.query_drop("TRUNCATE TABLE test_bench")?;
         }
 
-        let elapsed = iteration_start.elapsed();
-        println!("Iteration {}: Truncated table (took {:.2}ms)", iteration, elapsed.as_secs_f64() * 1000.0);
+        println!(
+            "Iteration {}: Truncated table (took {:.2}ms)",
+            iteration,
+            elapsed.as_secs_f64() * 1000.0
+        );
     }
 }

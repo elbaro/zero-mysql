@@ -53,7 +53,7 @@ pub fn read_prepare_ok(payload: &[u8]) -> Result<&PrepareOk> {
 }
 
 /// Write COM_STMT_EXECUTE command
-pub fn write_execute<P: Params>(out: &mut Vec<u8>, statement_id: u32, params: &P) -> Result<()> {
+pub fn write_execute<P: Params>(out: &mut Vec<u8>, statement_id: u32, params: P) -> Result<()> {
     write_int_1(out, CommandByte::StmtExecute as u8);
     write_int_4(out, statement_id);
 

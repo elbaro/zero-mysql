@@ -313,7 +313,7 @@ impl Conn {
         Ok(statement_id)
     }
 
-    pub fn exec<'a, P, H>(&mut self, statement_id: u32, params: &P, handler: &mut H) -> Result<()>
+    pub fn exec<'a, P, H>(&mut self, statement_id: u32, params: P, handler: &mut H) -> Result<()>
     where
         P: Params,
         H: ResultSetHandler<'a>,
@@ -381,7 +381,7 @@ impl Conn {
     pub fn exec_first<'a, P, H>(
         &mut self,
         statement_id: u32,
-        params: &P,
+        params: P,
         handler: &mut H,
     ) -> Result<bool>
     where
@@ -452,7 +452,7 @@ impl Conn {
     /// # Returns
     /// * `Ok(())` - Query executed successfully
     /// * `Err(Error)` - Query execution failed
-    pub fn exec_drop<P>(&mut self, statement_id: u32, params: &P) -> Result<()>
+    pub fn exec_drop<P>(&mut self, statement_id: u32, params: P) -> Result<()>
     where
         P: Params,
     {
@@ -600,7 +600,8 @@ pub fn read_payload<R: BufRead>(reader: &mut R, buffer: &mut Vec<u8>) -> Result<
             .read_exact(&mut next_header)
             .map_err(|e| Error::IoError(e))?;
 
-        current_length = u32::from_le_bytes([next_header[0], next_header[1], next_header[2], 0]) as usize;
+        current_length =
+            u32::from_le_bytes([next_header[0], next_header[1], next_header[2], 0]) as usize;
         // sequence_id should increment but we don't verify it (non-priority)
 
         // Read and append next packet payload

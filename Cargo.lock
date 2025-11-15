@@ -629,13 +629,29 @@ dependencies = [
  "io-enum",
  "libc",
  "lru 0.12.5",
- "mysql_common",
+ "mysql_common 0.35.5 (registry+https://github.com/rust-lang/crates.io-index)",
  "named_pipe",
  "pem",
  "percent-encoding",
  "socket2 0.5.10",
  "twox-hash",
  "url",
+]
+
+[[package]]
+name = "mysql-common-derive"
+version = "0.32.1"
+dependencies = [
+ "darling",
+ "heck",
+ "num-bigint",
+ "proc-macro-crate",
+ "proc-macro-error2",
+ "proc-macro2",
+ "quote",
+ "syn",
+ "termcolor",
+ "thiserror",
 ]
 
 [[package]]
@@ -659,8 +675,6 @@ dependencies = [
 [[package]]
 name = "mysql_async"
 version = "0.36.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "277ce2f2459b2af4cc6d0a0b7892381f80800832f57c533f03e2845f4ea331ea"
 dependencies = [
  "bytes",
  "crossbeam-queue",
@@ -670,7 +684,7 @@ dependencies = [
  "futures-util",
  "keyed_priority_queue",
  "lru 0.14.0",
- "mysql_common",
+ "mysql_common 0.35.5",
  "pem",
  "percent-encoding",
  "rand",
@@ -680,8 +694,34 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-util",
+ "tracing",
  "twox-hash",
  "url",
+]
+
+[[package]]
+name = "mysql_common"
+version = "0.35.5"
+dependencies = [
+ "base64",
+ "bitflags",
+ "btoi",
+ "byteorder",
+ "bytes",
+ "crc32fast",
+ "flate2",
+ "getrandom",
+ "mysql-common-derive 0.32.1",
+ "num-bigint",
+ "num-traits",
+ "regex",
+ "saturating",
+ "serde",
+ "serde_json",
+ "sha1",
+ "sha2",
+ "thiserror",
+ "uuid",
 ]
 
 [[package]]
@@ -698,7 +738,7 @@ dependencies = [
  "crc32fast",
  "flate2",
  "getrandom",
- "mysql-common-derive",
+ "mysql-common-derive 0.32.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "num-bigint",
  "num-traits",
  "regex",
@@ -1843,6 +1883,7 @@ dependencies = [
  "bytes",
  "mysql",
  "mysql_async",
+ "mysql_common 0.35.5",
  "sha1",
  "sha2",
  "thiserror",

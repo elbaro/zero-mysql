@@ -29,11 +29,15 @@ required-features = ["dev"]
 name = "tracy-base-async"
 path = "bin/tracy_base_async.rs"
 required-features = ["dev"]
+[[bin]]
+name = "bench-write-payload"
+path = "bin/bench_write_payload.rs"
+required-features = ["dev"]
 
 [dependencies]
 tracy-client = { version = "=0.18.0", optional = true }
-tracing = { version = "*", optional = true }
-tracing-tracy = { version = "*", optional = true }
+# tracing = { version = "*", features = ["release_max_level_warn"] }
+tracing = { version = "*" }
 tracing-subscriber = { version = "*", optional = true }
 thiserror = "2.0"
 bytes = "1.9"
@@ -45,10 +49,21 @@ sha2 = "0.10"
 url = "2.5"
 bitflags = "2.6"
 mysql = { version = "*", optional = true }
-mysql_async = { version = "*", optional = true }
+mysql_async = { path = "../mysql_async", optional = true, features = [
+  "tracing",
+] }
+mysql_common = { path = "../mysql_common" }
+tracing-tracy = { version = "*", optional = true }
 
 [features]
 default = ["sync", "async"]
 sync = []
 async = ["tokio"]
-dev = ["tokio/full", "tracy-client", "tracing", "tracing-tracy", "tracing-subscriber", "mysql", "mysql_async"]
+dev = [
+  "tokio/full",
+  "tracy-client",
+  "tracing-tracy",
+  "tracing-subscriber",
+  "mysql",
+  "mysql_async",
+]

@@ -1,8 +1,8 @@
 use mysql_async::{prelude::*, *};
 
-#[global_allocator]
-static GLOBAL: tracy_client::ProfiledAllocator<std::alloc::System> =
-    tracy_client::ProfiledAllocator::new(std::alloc::System, 100);
+// #[global_allocator]
+// static GLOBAL: tracy_client::ProfiledAllocator<std::alloc::System> =
+//     tracy_client::ProfiledAllocator::new(std::alloc::System, 100);
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -16,13 +16,12 @@ async fn main() -> Result<()> {
 
     // Connect to MySQL server
     println!("Connecting to MySQL...");
-    let pool = Pool::new("mysql://test:1234@localhost/test");
+    let pool = Pool::new("mysql://test:1234@127.0.0.1/test");
     let mut conn = pool.get_conn().await?;
     println!("Connected to MySQL");
 
     // Drop and recreate the test table using MEMORY engine
     {
-        let _span = tracy_client::span!("create_table");
         println!("Creating test table...");
 
         // Drop existing table
@@ -42,7 +41,6 @@ async fn main() -> Result<()> {
     }
 
     // Pre-construct row data to avoid measuring string formatting overhead
-    let _span = tracing::info_span!("prepare_data").entered();
     let mut rows = Vec::with_capacity(10_000);
     for i in 0..10_000 {
         rows.push((
@@ -53,7 +51,6 @@ async fn main() -> Result<()> {
             format!("Description for user {}", i),
         ));
     }
-    drop(_span);
 
     println!("Starting infinite loop: inserting 10,000 rows and truncating...");
     let mut iteration = 0u64;
@@ -64,30 +61,19 @@ async fn main() -> Result<()> {
 
         // Insert 10,000 rows
         {
-            let _span = tracing::info_span!("insert_10000_rows").entered();
-            for (username, age, email, score, description) in &rows {
-                let _span = tracing::trace_span!("insert_row").entered();
-
-                {
-                    let _trace = tracing::trace_span!("exec_drop").entered();
+            for (row_id, (username, age, email, score, description)) in rows.iter().enumerate() {
+                let _row_span = tracing::trace_span!("row", row_id).entered();
                     conn.exec_drop(
                         r"INSERT INTO test_bench (name, age, email, score, description)
                           VALUES (?, ?, ?, ?, ?)",
                         (username.as_str(), *age, email.as_str(), *score, description.as_str()),
                     ).await?;
-                }
             }
         }
 
-        println!("Iteration {}: Inserted 10,000 rows", iteration);
+        println!("Iteration {}: Inserted 10,000 rows (took: {:.2}ms)", iteration, iteration_start.elapsed().as_secs_f64() * 1000.);
 
         // Truncate the table
-        {
-            let _span = tracing::info_span!("truncate_table").entered();
-            conn.query_drop("TRUNCATE TABLE test_bench").await?;
-        }
-
-        let elapsed = iteration_start.elapsed();
-        println!("Iteration {}: Truncated table (took {:.2}ms)", iteration, elapsed.as_secs_f64() * 1000.0);
+        conn.query_drop("TRUNCATE TABLE test_bench").await?;
     }
 }

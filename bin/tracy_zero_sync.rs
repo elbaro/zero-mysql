@@ -3,17 +3,16 @@ use zero_mysql::error::Result;
 use zero_mysql::protocol::value::Value;
 use zero_mysql::sync::Conn;
 
-#[global_allocator]
-static GLOBAL: tracy_client::ProfiledAllocator<std::alloc::System> =
-    tracy_client::ProfiledAllocator::new(std::alloc::System, 100);
+// #[global_allocator]
+// static GLOBAL: tracy_client::ProfiledAllocator<std::alloc::System> =
+//     tracy_client::ProfiledAllocator::new(std::alloc::System, 100);
 
 fn main() -> Result<()> {
     // Initialize tracy client and tracing
     tracy_client::Client::start();
 
     use tracing_subscriber::layer::SubscriberExt;
-    let subscriber = tracing_subscriber::registry()
-        .with(tracing_tracy::TracyLayer::default());
+    let subscriber = tracing_subscriber::registry().with(tracing_tracy::TracyLayer::default());
     tracing::subscriber::set_global_default(subscriber).unwrap();
 
     // Connect to MySQL server
@@ -75,7 +74,6 @@ fn main() -> Result<()> {
 
     // Drop and recreate the test table using MEMORY engine
     {
-        let _span = tracy_client::span!("create_table");
         println!("Creating test table...");
 
         // Drop existing table
@@ -106,7 +104,6 @@ fn main() -> Result<()> {
     let truncate_stmt = conn.prepare("TRUNCATE TABLE test_bench")?;
 
     // Pre-construct row data to avoid measuring string formatting overhead
-    let _span = tracing::info_span!("prepare_data").entered();
     let mut rows = Vec::with_capacity(10_000);
     for i in 0..10_000 {
         rows.push((
@@ -117,7 +114,6 @@ fn main() -> Result<()> {
             format!("Description for user {}", i),
         ));
     }
-    drop(_span);
 
     println!("Starting infinite loop: inserting 10,000 rows and truncating...");
     let mut iteration = 0u64;
@@ -158,6 +154,10 @@ fn main() -> Result<()> {
         }
 
         let elapsed = iteration_start.elapsed();
-        println!("Iteration {}: Truncated table (took {:.2}ms)", iteration, elapsed.as_secs_f64() * 1000.0);
+        println!(
+            "Iteration {}: Truncated table (took {:.2}ms)",
+            iteration,
+            elapsed.as_secs_f64() * 1000.0
+        );
     }
 }
