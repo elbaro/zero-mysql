@@ -234,16 +234,9 @@ impl Conn {
             self.packet_buf.extend_from_slice(&header);
         }
 
-        {
-            use tokio::io::AsyncWriteExt;
-            let _span = tracing::trace_span!("write_and_flush", bytes = self.packet_buf.len()).entered();
-            // println!("writing {} bytes", self.packet_buf.len());
-            //
-            let t = std::time::Instant::now();
-            self.stream.write_all(&self.packet_buf).await.map_err(Error::IoError)?;
-            println!("{:?}", t.elapsed());
-            // self.stream.flush().await?;
-        }
+        use tokio::io::AsyncWriteExt;
+        self.stream.write_all(&self.packet_buf).await.map_err(Error::IoError)?;
+        self.stream.flush().await?;
 
         Ok(())
     }
@@ -461,11 +454,8 @@ impl Conn {
         use crate::protocol::command::prepared::{Exec, ExecResult};
 
         // Write COM_STMT_EXECUTE - reuse struct buffer to avoid heap allocations
-        // let build_start = std::time::Instant::now();
         self.write_buffer.clear();
         write_execute(&mut self.write_buffer, statement_id, params)?;
-        // let build_elapsed = build_start.elapsed();
-        // println!("[zero-mysql] build execute buffer took: {:?}", build_elapsed);
 
         self.write_payload(0).await?;
 
@@ -556,6 +546,64 @@ impl Conn {
                 }
                 QueryResult::Eof(eof_bytes) => {
                     handler.resultset_end(eof_bytes)?;
+                    return Ok(());
+                }
+            }
+        }
+    }
+
+    /// Execute a text protocol SQL query and discard all results (async)
+    ///
+    /// This is optimized for queries where you don't need to process any results,
+    /// such as DDL statements (CREATE, DROP, ALTER), DML statements without results
+    /// (INSERT, UPDATE, DELETE), or when you only care about whether the query succeeded.
+    ///
+    /// # Arguments
+    /// * `sql` - SQL query to execute
+    ///
+    /// # Returns
+    /// * `Ok(())` - Query executed successfully
+    /// * `Err(Error)` - Query execution failed
+    #[instrument(skip_all)]
+    pub async fn query_drop(&mut self, sql: &str) -> Result<()> {
+        use crate::protocol::command::query::{write_query, Query, QueryResult};
+
+        // Write COM_QUERY - reuse struct buffer to avoid heap allocations
+        self.write_buffer.clear();
+        write_query(&mut self.write_buffer, sql);
+
+        self.write_payload(0).await?;
+
+        // Create the state machine
+        let mut query = Query::new();
+
+        // Drive the state machine: read payloads and drive, but don't process results
+        loop {
+            // Read the next packet from network
+            self.read_buffer.clear();
+            read_payload(&mut self.stream, &mut self.read_buffer).await?;
+
+            // Drive state machine with the payload
+            let result = query.drive(&self.read_buffer[..])?;
+            match result {
+                QueryResult::NeedPayload => {
+                    continue;
+                }
+                QueryResult::NoResultSet(_ok_bytes) => {
+                    // No result set, query complete
+                    return Ok(());
+                }
+                QueryResult::ResultSetStart { .. } => {
+                    // Start of result set, continue to drain
+                }
+                QueryResult::Column(_) => {
+                    // Column definition, skip
+                }
+                QueryResult::Row(_) => {
+                    // Row data, skip
+                }
+                QueryResult::Eof(_eof_bytes) => {
+                    // End of result set
                     return Ok(());
                 }
             }

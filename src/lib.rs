@@ -7,5 +7,8 @@ pub mod protocol;
 pub mod row;
 pub mod sync;
 
-#[cfg(feature = "async")]
-pub mod r#async;
+#[cfg(feature = "tokio")]
+pub mod tokio;
+
+#[cfg(feature = "compio")]
+pub mod compio;

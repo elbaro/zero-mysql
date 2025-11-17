@@ -1,8 +1,42 @@
-use mysql_async::{prelude::*, *};
+use zero_mysql::col::ColumnDefinitionBytes;
+use zero_mysql::error::Result;
+use zero_mysql::tokio::Conn;
+use zero_mysql::row::TextRowPayload;
 
 // #[global_allocator]
 // static GLOBAL: tracy_client::ProfiledAllocator<std::alloc::System> =
 //     tracy_client::ProfiledAllocator::new(std::alloc::System, 100);
+
+// Simple handler that ignores all output (for setup queries)
+struct DropHandler;
+
+impl<'a> zero_mysql::protocol::r#trait::TextResultSetHandler<'a> for DropHandler {
+    fn no_result_set(
+        &mut self,
+        _ok: zero_mysql::protocol::packet::OkPayloadBytes,
+    ) -> Result<()> {
+        Ok(())
+    }
+
+    fn resultset_start(&mut self, _num_columns: usize) -> Result<()> {
+        Ok(())
+    }
+
+    fn col(&mut self, _col: ColumnDefinitionBytes) -> Result<()> {
+        Ok(())
+    }
+
+    fn row(&mut self, _row: &TextRowPayload) -> Result<()> {
+        Ok(())
+    }
+
+    fn resultset_end(
+        &mut self,
+        _eof: zero_mysql::protocol::packet::OkPayloadBytes,
+    ) -> Result<()> {
+        Ok(())
+    }
+}
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
@@ -13,13 +47,14 @@ async fn main() -> Result<()> {
         // tracing::subscriber::set_global_default(subscriber).unwrap();
     }
 
-    let pool = Pool::new("mysql://test:1234@127.0.0.1/test?prefer_socket=false");
-    let mut conn = pool.get_conn().await?;
+    let mut conn = Conn::new("mysql://test:1234@127.0.0.1/test").await?;
 
     {
-        conn.query_drop("DROP TABLE IF EXISTS test_bench").await?;
-        conn.query_drop(
-            r"CREATE TABLE test_bench (
+        let mut handler = DropHandler;
+        conn.query("DROP TABLE IF EXISTS test_bench", &mut handler)
+            .await?;
+        conn.query(
+            "CREATE TABLE test_bench (
                 id INT PRIMARY KEY AUTO_INCREMENT,
                 name VARCHAR(100),
                 age INT,
@@ -27,9 +62,16 @@ async fn main() -> Result<()> {
                 score FLOAT,
                 description VARCHAR(100)
             ) ENGINE=MEMORY",
+            &mut handler,
         )
         .await?;
     }
+
+    let insert_stmt = conn
+        .prepare(
+            "INSERT INTO test_bench (name, age, email, score, description) VALUES (?, ?, ?, ?, ?)",
+        )
+        .await?;
 
     const N: usize = 10000;
     let mut rows = Vec::with_capacity(N);
@@ -49,8 +91,7 @@ async fn main() -> Result<()> {
         for (row_id, (username, age, email, score, description)) in rows.iter().enumerate() {
             // let _row_span = tracing::trace_span!("row", row_id).entered();
             conn.exec_drop(
-                r"INSERT INTO test_bench (name, age, email, score, description)
-                          VALUES (?, ?, ?, ?, ?)",
+                insert_stmt,
                 (
                     username.as_str(),
                     *age,
@@ -63,13 +104,13 @@ async fn main() -> Result<()> {
         }
 
         println!(
-            "Iteration {}: Inserted 10,000 rows (took: {:.2}ms)",
+            "Iteration {}: Inserted 10,000 rows (took {:.2}ms)",
             iteration,
-            iteration_start.elapsed().as_secs_f64() * 1000.
+            iteration_start.elapsed().as_secs_f64() * 1000.0
         );
-
-        // Truncate the table
-        conn.query_drop("TRUNCATE TABLE test_bench").await?;
+        let mut handler = DropHandler;
+        conn.query("TRUNCATE TABLE test_bench", &mut handler)
+            .await?;
     }
 
     Ok(())
