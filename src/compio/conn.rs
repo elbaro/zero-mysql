@@ -214,7 +214,9 @@ impl Conn {
 
         // Reuse packet buffer, reserve capacity if needed
         self.packet_buf.clear();
-        self.packet_buf.reserve(total_size);
+        if self.packet_buf.capacity() < total_size {
+            self.packet_buf.reserve(total_size - self.packet_buf.capacity());
+        }
 
         // Build packet with headers and chunks
         let mut remaining = payload;

@@ -85,7 +85,7 @@ async fn main() -> Result<()> {
         ));
     }
 
-    for iteration in 0..1 {
+    for iteration in 0..10 {
         let iteration_start = std::time::Instant::now();
 
         for (row_id, (username, age, email, score, description)) in rows.iter().enumerate() {
