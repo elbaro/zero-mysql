@@ -53,7 +53,8 @@ async fn main() -> Result<()> {
         }
 
         fn row(&mut self, row: &TextRowPayload) -> Result<()> {
-            println!("Row data (raw bytes, {} columns): {} bytes",
+            println!(
+                "Row data (raw bytes, {} columns): {} bytes",
                 row.num_columns(),
                 row.data().len()
             );
@@ -90,7 +91,8 @@ async fn main() -> Result<()> {
             email VARCHAR(100)
         )",
         &mut handler,
-    ).await?;
+    )
+    .await?;
 
     // Test 3: Insert some data
     println!("\n--- Test 3: INSERT data ---");
@@ -101,7 +103,8 @@ async fn main() -> Result<()> {
          (2, 'bob', 30, 'bob@example.com'),
          (3, 'charlie', 35, 'charlie@example.com')",
         &mut handler,
-    ).await?;
+    )
+    .await?;
 
     // Test 4: SELECT the inserted data
     println!("\n--- Test 4: SELECT data ---");
@@ -109,7 +112,8 @@ async fn main() -> Result<()> {
     conn.query(
         "SELECT id, username, age, email FROM test_text ORDER BY id",
         &mut handler,
-    ).await?;
+    )
+    .await?;
 
     // Test 5: UPDATE data
     println!("\n--- Test 5: UPDATE data ---");
@@ -117,15 +121,14 @@ async fn main() -> Result<()> {
     conn.query(
         "UPDATE test_text SET age = age + 1 WHERE username = 'alice'",
         &mut handler,
-    ).await?;
+    )
+    .await?;
 
     // Test 6: DELETE data
     println!("\n--- Test 6: DELETE data ---");
     let mut handler = TextHandler::new();
-    conn.query(
-        "DELETE FROM test_text WHERE id = 3",
-        &mut handler,
-    ).await?;
+    conn.query("DELETE FROM test_text WHERE id = 3", &mut handler)
+        .await?;
 
     // Test 7: Verify final state
     println!("\n--- Test 7: Verify final state ---");
@@ -133,7 +136,8 @@ async fn main() -> Result<()> {
     conn.query(
         "SELECT id, username, age, email FROM test_text ORDER BY id",
         &mut handler,
-    ).await?;
+    )
+    .await?;
 
     println!("\nAsync text protocol example completed successfully!");
 

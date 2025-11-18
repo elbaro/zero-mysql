@@ -1,6 +1,6 @@
 use crate::error::{Error, Result};
-use zerocopy::byteorder::little_endian::{U16 as U16LE, U32 as U32LE, U64 as U64LE};
 use zerocopy::FromBytes;
+use zerocopy::byteorder::little_endian::{U16 as U16LE, U32 as U32LE, U64 as U64LE};
 
 /// Read 1-byte integer
 pub fn read_int_1(data: &[u8]) -> Result<(u8, &[u8])> {
@@ -183,4 +183,3 @@ pub fn write_bytes_lenenc(out: &mut Vec<u8>, data: &[u8]) {
     write_int_lenenc(out, data.len() as u64);
     out.extend_from_slice(data);
 }
-

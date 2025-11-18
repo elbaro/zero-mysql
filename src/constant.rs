@@ -322,7 +322,8 @@ mod tests {
         // Test 2: Union covers all flags
         let union = always_enabled | configurable | always_disabled;
         assert_eq!(
-            union.bits(), ALL_FLAGS,
+            union.bits(),
+            ALL_FLAGS,
             "Union of all three categories must equal all possible flags (0xFFFFFFFF). Missing flags: 0x{:08X}",
             ALL_FLAGS & !union.bits()
         );

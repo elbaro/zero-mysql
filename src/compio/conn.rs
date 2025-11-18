@@ -1,7 +1,7 @@
-use compio::io::{AsyncReadExt, AsyncWriteExt};
-use compio::buf::IoBuf;
-use compio::buf::IntoInner;
 use compio::buf::BufResult;
+use compio::buf::IntoInner;
+use compio::buf::IoBuf;
+use compio::io::{AsyncReadExt, AsyncWriteExt};
 use compio::net::TcpStream;
 use tracing::instrument;
 
@@ -9,9 +9,9 @@ use crate::constant::CapabilityFlags;
 use crate::error::{Error, Result};
 use crate::protocol::command::prepared::{read_prepare_ok, write_execute, write_prepare};
 use crate::protocol::connection::handshake::{Handshake, HandshakeResult};
-use crate::protocol::packet::write_packet_header_array;
 use crate::protocol::packet::ErrPayloadBytes;
-use crate::protocol::r#trait::{params::Params, ResultSetHandler, TextResultSetHandler};
+use crate::protocol::packet::write_packet_header_array;
+use crate::protocol::r#trait::{ResultSetHandler, TextResultSetHandler, params::Params};
 
 /// A MySQL connection with an async TCP stream (compio runtime)
 ///
@@ -207,7 +207,11 @@ impl Conn {
         // Calculate number of chunks needed
         let num_chunks = (payload.len() + 0xFFFFFF - 1) / 0xFFFFFF;
         let needs_empty_packet = payload.len() % 0xFFFFFF == 0 && !payload.is_empty();
-        let total_headers = if needs_empty_packet { num_chunks + 1 } else { num_chunks };
+        let total_headers = if needs_empty_packet {
+            num_chunks + 1
+        } else {
+            num_chunks
+        };
 
         // Pre-calculate total size: headers (4 bytes each) + payload
         let total_size = total_headers * 4 + payload.len();
@@ -215,7 +219,8 @@ impl Conn {
         // Reuse packet buffer, reserve capacity if needed
         self.packet_buf.clear();
         if self.packet_buf.capacity() < total_size {
-            self.packet_buf.reserve(total_size - self.packet_buf.capacity());
+            self.packet_buf
+                .reserve(total_size - self.packet_buf.capacity());
         }
 
         // Build packet with headers and chunks
@@ -554,7 +559,7 @@ impl Conn {
     where
         H: TextResultSetHandler<'a>,
     {
-        use crate::protocol::command::query::{write_query, Query, QueryResult};
+        use crate::protocol::command::query::{Query, QueryResult, write_query};
 
         // Write COM_QUERY
         self.write_buffer.clear();
@@ -620,7 +625,7 @@ impl Conn {
     /// * `Err(Error)` - Query execution failed
     #[instrument(skip_all)]
     pub async fn query_drop(&mut self, sql: &str) -> Result<()> {
-        use crate::protocol::command::query::{write_query, Query, QueryResult};
+        use crate::protocol::command::query::{Query, QueryResult, write_query};
 
         // Write COM_QUERY
         self.write_buffer.clear();
@@ -685,16 +690,13 @@ impl Conn {
 /// * `Ok((sequence_id, buffer))` - The sequence ID and buffer with the payload
 /// * `Err(Error)` - IO error or protocol error
 #[instrument(skip_all)]
-pub async fn read_payload<R>(
-    reader: &mut R,
-    mut buffer: Vec<u8>,
-) -> Result<(u8, Vec<u8>)>
+pub async fn read_payload<R>(reader: &mut R, mut buffer: Vec<u8>) -> Result<(u8, Vec<u8>)>
 where
     R: AsyncReadExt + Unpin,
 {
     // Read first packet header (4 bytes)
     let header = [0u8; 4];
-    let BufResult(result,header) = reader.read_exact(header).await;
+    let BufResult(result, header) = reader.read_exact(header).await;
     result.map_err(Error::IoError)?;
     let mut length = u32::from_le_bytes([header[0], header[1], header[2], 0]) as usize;
     let sequence_id = header[3];

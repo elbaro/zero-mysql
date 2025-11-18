@@ -1,7 +1,7 @@
 use zero_mysql::col::ColumnDefinitionBytes;
 use zero_mysql::error::Result;
-use zero_mysql::tokio::Conn;
 use zero_mysql::row::TextRowPayload;
+use zero_mysql::tokio::Conn;
 
 // #[global_allocator]
 // static GLOBAL: tracy_client::ProfiledAllocator<std::alloc::System> =
@@ -11,10 +11,7 @@ use zero_mysql::row::TextRowPayload;
 struct DropHandler;
 
 impl<'a> zero_mysql::protocol::r#trait::TextResultSetHandler<'a> for DropHandler {
-    fn no_result_set(
-        &mut self,
-        _ok: zero_mysql::protocol::packet::OkPayloadBytes,
-    ) -> Result<()> {
+    fn no_result_set(&mut self, _ok: zero_mysql::protocol::packet::OkPayloadBytes) -> Result<()> {
         Ok(())
     }
 
@@ -30,10 +27,7 @@ impl<'a> zero_mysql::protocol::r#trait::TextResultSetHandler<'a> for DropHandler
         Ok(())
     }
 
-    fn resultset_end(
-        &mut self,
-        _eof: zero_mysql::protocol::packet::OkPayloadBytes,
-    ) -> Result<()> {
+    fn resultset_end(&mut self, _eof: zero_mysql::protocol::packet::OkPayloadBytes) -> Result<()> {
         Ok(())
     }
 }

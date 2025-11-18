@@ -1,6 +1,6 @@
 use zero_mysql::col::ColumnDefinitionBytes;
-use zero_mysql::error::Result;
 use zero_mysql::compio::Conn;
+use zero_mysql::error::Result;
 use zero_mysql::row::TextRowPayload;
 
 // #[global_allocator]
@@ -11,10 +11,7 @@ use zero_mysql::row::TextRowPayload;
 struct DropHandler;
 
 impl<'a> zero_mysql::protocol::r#trait::TextResultSetHandler<'a> for DropHandler {
-    fn no_result_set(
-        &mut self,
-        _ok: zero_mysql::protocol::packet::OkPayloadBytes,
-    ) -> Result<()> {
+    fn no_result_set(&mut self, _ok: zero_mysql::protocol::packet::OkPayloadBytes) -> Result<()> {
         Ok(())
     }
 
@@ -30,16 +27,15 @@ impl<'a> zero_mysql::protocol::r#trait::TextResultSetHandler<'a> for DropHandler
         Ok(())
     }
 
-    fn resultset_end(
-        &mut self,
-        _eof: zero_mysql::protocol::packet::OkPayloadBytes,
-    ) -> Result<()> {
+    fn resultset_end(&mut self, _eof: zero_mysql::protocol::packet::OkPayloadBytes) -> Result<()> {
         Ok(())
     }
 }
 
 fn main() -> Result<()> {
-    compio::runtime::Runtime::new().unwrap().block_on(async_main())
+    compio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(async_main())
 }
 
 async fn async_main() -> Result<()> {

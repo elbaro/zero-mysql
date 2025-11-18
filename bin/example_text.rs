@@ -52,7 +52,8 @@ fn main() -> Result<()> {
         }
 
         fn row(&mut self, row: &TextRowPayload) -> Result<()> {
-            println!("Row data (raw bytes, {} columns): {} bytes",
+            println!(
+                "Row data (raw bytes, {} columns): {} bytes",
                 row.num_columns(),
                 row.data().len()
             );
@@ -121,10 +122,7 @@ fn main() -> Result<()> {
     // Test 6: DELETE data
     println!("\n--- Test 6: DELETE data ---");
     let mut handler = TextHandler::new();
-    conn.query(
-        "DELETE FROM test_text WHERE id = 3",
-        &mut handler,
-    )?;
+    conn.query("DELETE FROM test_text WHERE id = 3", &mut handler)?;
 
     // Test 7: Verify final state
     println!("\n--- Test 7: Verify final state ---");

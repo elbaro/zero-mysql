@@ -249,7 +249,9 @@ mod tests {
         assert_eq!(tail.decimals, 0);
 
         // Verify flags can be parsed
-        let flags = tail.flags().expect("Failed to parse flags with PART_KEY_FLAG");
+        let flags = tail
+            .flags()
+            .expect("Failed to parse flags with PART_KEY_FLAG");
         assert!(flags.contains(ColumnFlags::NOT_NULL_FLAG));
         assert!(flags.contains(ColumnFlags::PRI_KEY_FLAG));
         assert!(flags.contains(ColumnFlags::AUTO_INCREMENT_FLAG));

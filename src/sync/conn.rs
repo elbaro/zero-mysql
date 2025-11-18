@@ -5,9 +5,9 @@ use crate::constant::CapabilityFlags;
 use crate::error::{Error, Result};
 use crate::protocol::command::prepared::write_execute;
 use crate::protocol::command::prepared::{read_prepare_ok, write_prepare};
-use crate::protocol::packet::write_packet_header_array;
 use crate::protocol::packet::ErrPayloadBytes;
-use crate::protocol::r#trait::{params::Params, ResultSetHandler, TextResultSetHandler};
+use crate::protocol::packet::write_packet_header_array;
+use crate::protocol::r#trait::{ResultSetHandler, TextResultSetHandler, params::Params};
 
 /// A MySQL connection with a buffered TCP stream
 ///
@@ -514,7 +514,7 @@ impl Conn {
     where
         H: TextResultSetHandler<'a>,
     {
-        use crate::protocol::command::query::{write_query, Query, QueryResult};
+        use crate::protocol::command::query::{Query, QueryResult, write_query};
 
         // Write COM_QUERY - reuse struct buffer to avoid heap allocations
         self.write_buffer.clear();
@@ -571,7 +571,7 @@ impl Conn {
     /// * `Ok(())` - Query executed successfully
     /// * `Err(Error)` - Query execution failed
     pub fn query_drop(&mut self, sql: &str) -> Result<()> {
-        use crate::protocol::command::query::{write_query, Query, QueryResult};
+        use crate::protocol::command::query::{Query, QueryResult, write_query};
 
         // Write COM_QUERY - reuse struct buffer to avoid heap allocations
         self.write_buffer.clear();

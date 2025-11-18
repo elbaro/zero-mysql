@@ -6,9 +6,9 @@ use crate::constant::CapabilityFlags;
 use crate::error::{Error, Result};
 use crate::protocol::command::prepared::{read_prepare_ok, write_execute, write_prepare};
 use crate::protocol::connection::handshake::{Handshake, HandshakeResult};
-use crate::protocol::packet::write_packet_header_array;
 use crate::protocol::packet::ErrPayloadBytes;
-use crate::protocol::r#trait::{params::Params, ResultSetHandler, TextResultSetHandler};
+use crate::protocol::packet::write_packet_header_array;
+use crate::protocol::r#trait::{ResultSetHandler, TextResultSetHandler, params::Params};
 
 /// A MySQL connection with a buffered async TCP stream
 ///
@@ -202,7 +202,11 @@ impl Conn {
         // Calculate number of chunks needed
         let num_chunks = (payload.len() + 0xFFFFFF - 1) / 0xFFFFFF;
         let needs_empty_packet = payload.len() % 0xFFFFFF == 0 && !payload.is_empty();
-        let total_headers = if needs_empty_packet { num_chunks + 1 } else { num_chunks };
+        let total_headers = if needs_empty_packet {
+            num_chunks + 1
+        } else {
+            num_chunks
+        };
 
         // Pre-calculate total size: headers (4 bytes each) + payload
         let total_size = total_headers * 4 + payload.len();
@@ -235,7 +239,10 @@ impl Conn {
         }
 
         use tokio::io::AsyncWriteExt;
-        self.stream.write_all(&self.packet_buf).await.map_err(Error::IoError)?;
+        self.stream
+            .write_all(&self.packet_buf)
+            .await
+            .map_err(Error::IoError)?;
         self.stream.flush().await?;
 
         Ok(())
@@ -508,7 +515,7 @@ impl Conn {
     where
         H: TextResultSetHandler<'a>,
     {
-        use crate::protocol::command::query::{write_query, Query, QueryResult};
+        use crate::protocol::command::query::{Query, QueryResult, write_query};
 
         // Write COM_QUERY - reuse struct buffer to avoid heap allocations
         self.write_buffer.clear();
@@ -566,7 +573,7 @@ impl Conn {
     /// * `Err(Error)` - Query execution failed
     #[instrument(skip_all)]
     pub async fn query_drop(&mut self, sql: &str) -> Result<()> {
-        use crate::protocol::command::query::{write_query, Query, QueryResult};
+        use crate::protocol::command::query::{Query, QueryResult, write_query};
 
         // Write COM_QUERY - reuse struct buffer to avoid heap allocations
         self.write_buffer.clear();

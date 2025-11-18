@@ -167,14 +167,16 @@ async fn main() -> std::io::Result<()> {
     let mut total_vectored = std::time::Duration::ZERO;
 
     for _ in 0..NUM_ITERATIONS {
-        let mut file = OpenOptions::new()
-            .write(true)
-            .open("/dev/null")
-            .await?;
+        let mut file = OpenOptions::new().write(true).open("/dev/null").await?;
 
         let start = Instant::now();
-        write_payload_vectored(&mut file, &payload, &mut headers_buffer, &mut ioslice_buffer)
-            .await?;
+        write_payload_vectored(
+            &mut file,
+            &payload,
+            &mut headers_buffer,
+            &mut ioslice_buffer,
+        )
+        .await?;
         file.flush().await?;
         total_vectored += start.elapsed();
     }
@@ -183,11 +185,15 @@ async fn main() -> std::io::Result<()> {
     println!("  Total time: {:?}", total_vectored);
     println!("  Average per iteration: {:?}", avg_vectored);
     if PAYLOAD_SIZE >= 1024 * 1024 {
-        println!("  Throughput: {:.2} MB/s\n",
-                 (PAYLOAD_SIZE as f64 / 1024.0 / 1024.0) / avg_vectored.as_secs_f64());
+        println!(
+            "  Throughput: {:.2} MB/s\n",
+            (PAYLOAD_SIZE as f64 / 1024.0 / 1024.0) / avg_vectored.as_secs_f64()
+        );
     } else {
-        println!("  Throughput: {:.2} KB/s\n",
-                 (PAYLOAD_SIZE as f64 / 1024.0) / avg_vectored.as_secs_f64());
+        println!(
+            "  Throughput: {:.2} KB/s\n",
+            (PAYLOAD_SIZE as f64 / 1024.0) / avg_vectored.as_secs_f64()
+        );
     }
 
     // Benchmark 2: Buffered approach (copy to Vec<u8>)
@@ -195,10 +201,7 @@ async fn main() -> std::io::Result<()> {
     let mut total_buffered = std::time::Duration::ZERO;
 
     for _ in 0..NUM_ITERATIONS {
-        let mut file = OpenOptions::new()
-            .write(true)
-            .open("/dev/null")
-            .await?;
+        let mut file = OpenOptions::new().write(true).open("/dev/null").await?;
 
         let start = Instant::now();
         write_payload_buffered(&mut file, &payload, &mut copy_buffer).await?;
@@ -210,11 +213,15 @@ async fn main() -> std::io::Result<()> {
     println!("  Total time: {:?}", total_buffered);
     println!("  Average per iteration: {:?}", avg_buffered);
     if PAYLOAD_SIZE >= 1024 * 1024 {
-        println!("  Throughput: {:.2} MB/s\n",
-                 (PAYLOAD_SIZE as f64 / 1024.0 / 1024.0) / avg_buffered.as_secs_f64());
+        println!(
+            "  Throughput: {:.2} MB/s\n",
+            (PAYLOAD_SIZE as f64 / 1024.0 / 1024.0) / avg_buffered.as_secs_f64()
+        );
     } else {
-        println!("  Throughput: {:.2} KB/s\n",
-                 (PAYLOAD_SIZE as f64 / 1024.0) / avg_buffered.as_secs_f64());
+        println!(
+            "  Throughput: {:.2} KB/s\n",
+            (PAYLOAD_SIZE as f64 / 1024.0) / avg_buffered.as_secs_f64()
+        );
     }
 
     // Comparison
@@ -222,10 +229,16 @@ async fn main() -> std::io::Result<()> {
     println!("===========");
     if avg_vectored < avg_buffered {
         let speedup = avg_buffered.as_secs_f64() / avg_vectored.as_secs_f64();
-        println!("Vectored I/O is {:.2}x FASTER than buffered approach", speedup);
+        println!(
+            "Vectored I/O is {:.2}x FASTER than buffered approach",
+            speedup
+        );
     } else {
         let speedup = avg_vectored.as_secs_f64() / avg_buffered.as_secs_f64();
-        println!("Buffered approach is {:.2}x FASTER than vectored I/O", speedup);
+        println!(
+            "Buffered approach is {:.2}x FASTER than vectored I/O",
+            speedup
+        );
     }
 
     Ok(())
