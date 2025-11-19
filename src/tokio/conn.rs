@@ -31,77 +31,68 @@ pub struct Conn {
 }
 
 impl Conn {
-    /// Create a new MySQL connection from a URL (async)
+    /// Create a new MySQL connection from connection options (async)
     ///
     /// This performs the complete MySQL handshake protocol:
-    /// 1. Parses the MySQL URL
-    /// 2. Connects to the MySQL server via TCP
+    /// 1. Parses the connection options
+    /// 2. Connects to the MySQL server via TCP or Unix socket
     /// 3. Reads initial handshake from server
     /// 4. Sends handshake response with authentication
     /// 5. Handles auth plugin switching if needed
     /// 6. Returns ready-to-use connection
     ///
     /// # Arguments
-    /// * `url` - MySQL connection URL (e.g., "mysql://user:pass@host:3306/db")
+    /// * `opts` - Connection options (can be a URL string or an Opts struct)
     ///
-    /// # URL Format
-    /// ```text
-    /// mysql://[username[:password]@]host[:port][/database]
+    /// # Examples
     /// ```
+    /// // Using a URL string
+    /// let conn = Conn::new("mysql://root:password@localhost:3306/mydb").await?;
     ///
-    /// Examples:
-    /// - `mysql://localhost`
-    /// - `mysql://root:password@localhost:3306`
-    /// - `mysql://user:pass@127.0.0.1:3306/mydb`
+    /// // Using an Opts struct
+    /// let opts = Opts {
+    ///     host: Some("localhost".to_string()),
+    ///     port: 3306,
+    ///     user: "root".to_string(),
+    ///     password: Some("password".to_string()),
+    ///     db: Some("mydb".to_string()),
+    ///     ..Default::default()
+    /// };
+    /// let conn = Conn::new(opts).await?;
+    /// ```
     ///
     /// # Returns
     /// * `Ok(Conn)` - Authenticated connection ready for queries
     /// * `Err(Error)` - Connection or authentication failed
-    pub async fn new(url: &str) -> Result<Self> {
-        // Parse URL
-        let parsed = url::Url::parse(url)
-            .map_err(|e| Error::BadInputError(format!("Failed to parse MySQL URL: {}", e)))?;
+    pub async fn new<O: TryInto<crate::opts::Opts>>(opts: O) -> Result<Self>
+    where
+        Error: From<O::Error>,
+    {
+        let opts: crate::opts::Opts = opts.try_into()?;
 
-        // Verify scheme
-        if parsed.scheme() != "mysql" {
-            return Err(Error::BadInputError(format!(
-                "Invalid URL scheme '{}', expected 'mysql'",
-                parsed.scheme()
-            )));
+        // Handle socket connection
+        if let Some(_socket) = &opts.socket {
+            todo!("Unix socket connections not yet implemented");
         }
 
         // Extract host
-        let host = parsed
-            .host_str()
-            .ok_or_else(|| Error::BadInputError("Missing host in MySQL URL".to_string()))?;
-
-        // Extract port (default 3306)
-        let port = parsed.port().unwrap_or(3306);
-
-        // Extract username (default empty)
-        let username = if parsed.username().is_empty() {
-            ""
-        } else {
-            parsed.username()
-        };
-
-        // Extract password (default empty)
-        let password = parsed.password().unwrap_or("");
-
-        // Extract database from path
-        let database = parsed.path().trim_start_matches('/');
-        let database = if database.is_empty() {
-            None
-        } else {
-            Some(database)
-        };
+        let host = opts
+            .host
+            .as_ref()
+            .ok_or_else(|| Error::BadInputError("Missing host in connection options".to_string()))?;
 
         // Connect to server
-        let addr = format!("{}:{}", host, port);
+        let addr = format!("{}:{}", host, opts.port);
         let stream = TcpStream::connect(&addr).await?;
-        stream.set_nodelay(true)?;
+        stream.set_nodelay(opts.tcp_nodelay)?;
 
-        Self::new_with_stream(stream, username, password, database).await
+        Self::new_with_stream(
+            stream,
+            &opts.user,
+            opts.password.as_deref().unwrap_or(""),
+            opts.db.as_deref(),
+        )
+        .await
     }
 
     /// Create a new MySQL connection with an existing TCP stream (async)

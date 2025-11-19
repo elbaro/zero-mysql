@@ -5,9 +5,9 @@ use crate::constant::CapabilityFlags;
 use crate::error::{Error, Result};
 use crate::protocol::command::prepared::write_execute;
 use crate::protocol::command::prepared::{read_prepare_ok, write_prepare};
-use crate::protocol::packet::ErrPayloadBytes;
 use crate::protocol::packet::write_packet_header_array;
-use crate::protocol::r#trait::{ResultSetHandler, TextResultSetHandler, params::Params};
+use crate::protocol::packet::ErrPayloadBytes;
+use crate::protocol::r#trait::{params::Params, ResultSetHandler, TextResultSetHandler};
 
 /// A MySQL connection with a buffered TCP stream
 ///
@@ -28,77 +28,67 @@ pub struct Conn {
 }
 
 impl Conn {
-    /// Create a new MySQL connection from a URL
+    /// Create a new MySQL connection from connection options
     ///
     /// This performs the complete MySQL handshake protocol:
-    /// 1. Parses the MySQL URL
-    /// 2. Connects to the MySQL server via TCP
+    /// 1. Parses the connection options
+    /// 2. Connects to the MySQL server via TCP or Unix socket
     /// 3. Reads initial handshake from server
     /// 4. Sends handshake response with authentication
     /// 5. Handles auth plugin switching if needed
     /// 6. Returns ready-to-use connection
     ///
     /// # Arguments
-    /// * `url` - MySQL connection URL (e.g., "mysql://user:pass@host:3306/db")
+    /// * `opts` - Connection options (can be a URL string or an Opts struct)
     ///
-    /// # URL Format
-    /// ```text
-    /// mysql://[username[:password]@]host[:port][/database]
+    /// # Examples
     /// ```
+    /// // Using a URL string
+    /// let conn = Conn::new("mysql://root:password@localhost:3306/mydb")?;
     ///
-    /// Examples:
-    /// - `mysql://localhost`
-    /// - `mysql://root:password@localhost:3306`
-    /// - `mysql://user:pass@127.0.0.1:3306/mydb`
+    /// // Using an Opts struct
+    /// let opts = Opts {
+    ///     host: Some("localhost".to_string()),
+    ///     port: 3306,
+    ///     user: "root".to_string(),
+    ///     password: Some("password".to_string()),
+    ///     db: Some("mydb".to_string()),
+    ///     ..Default::default()
+    /// };
+    /// let conn = Conn::new(opts)?;
+    /// ```
     ///
     /// # Returns
     /// * `Ok(Conn)` - Authenticated connection ready for queries
     /// * `Err(Error)` - Connection or authentication failed
-    pub fn new(url: &str) -> Result<Self> {
-        // Parse URL
-        let parsed = url::Url::parse(url)
-            .map_err(|e| Error::BadInputError(format!("Failed to parse MySQL URL: {}", e)))?;
+    pub fn new<O: TryInto<crate::opts::Opts>>(opts: O) -> Result<Self>
+    where
+        Error: From<O::Error>,
+    {
+        let opts: crate::opts::Opts = opts.try_into()?;
 
-        // Verify scheme
-        if parsed.scheme() != "mysql" {
-            return Err(Error::BadInputError(format!(
-                "Invalid URL scheme '{}', expected 'mysql'",
-                parsed.scheme()
-            )));
+        // Handle socket connection
+        if let Some(_socket) = &opts.socket {
+            todo!("Unix socket connections not yet implemented");
         }
 
         // Extract host
-        let host = parsed
-            .host_str()
-            .ok_or_else(|| Error::BadInputError("Missing host in MySQL URL".to_string()))?;
-
-        // Extract port (default 3306)
-        let port = parsed.port().unwrap_or(3306);
-
-        // Extract username (default empty)
-        let username = if parsed.username().is_empty() {
-            ""
-        } else {
-            parsed.username()
-        };
-
-        // Extract password (default empty)
-        let password = parsed.password().unwrap_or("");
-
-        // Extract database from path
-        let database = parsed.path().trim_start_matches('/');
-        let database = if database.is_empty() {
-            None
-        } else {
-            Some(database)
-        };
+        let host = opts
+            .host
+            .as_ref()
+            .ok_or_else(|| Error::BadInputError("Missing host in connection options".to_string()))?;
 
         // Connect to server
-        let addr = format!("{}:{}", host, port);
+        let addr = format!("{}:{}", host, opts.port);
         let stream = TcpStream::connect(&addr)?;
-        stream.set_nodelay(true)?;
+        stream.set_nodelay(opts.tcp_nodelay)?;
 
-        Self::new_with_stream(stream, username, password, database)
+        Self::new_with_stream(
+            stream,
+            &opts.user,
+            opts.password.as_deref().unwrap_or(""),
+            opts.db.as_deref(),
+        )
     }
 
     /// Create a new MySQL connection with an existing TCP stream
@@ -139,7 +129,8 @@ impl Conn {
         let (server_version, capability_flags) = loop {
             // Read next packet
             buffer.clear();
-            let mut seq = read_payload(&mut conn_stream, &mut buffer)?;
+            read_payload(&mut conn_stream, &mut buffer)?;
+            let mut seq: u8 = 0;
 
             // Drive state machine with the payload
             match handshake.drive(&buffer)? {
@@ -192,6 +183,7 @@ impl Conn {
     ///
     /// # Arguments
     /// * `sequence_id` - Starting sequence ID (will auto-increment for multi-packet)
+    #[tracing::instrument(skip_all)]
     fn write_payload(&mut self, mut sequence_id: u8) -> Result<()> {
         self.write_headers_buffer.clear();
         self.ioslice_buffer.clear();
@@ -452,6 +444,7 @@ impl Conn {
     /// # Returns
     /// * `Ok(())` - Query executed successfully
     /// * `Err(Error)` - Query execution failed
+    #[tracing::instrument(skip_all)]
     pub fn exec_drop<P>(&mut self, statement_id: u32, params: P) -> Result<()>
     where
         P: Params,
@@ -514,7 +507,7 @@ impl Conn {
     where
         H: TextResultSetHandler<'a>,
     {
-        use crate::protocol::command::query::{Query, QueryResult, write_query};
+        use crate::protocol::command::query::{write_query, Query, QueryResult};
 
         // Write COM_QUERY - reuse struct buffer to avoid heap allocations
         self.write_buffer.clear();
@@ -571,7 +564,7 @@ impl Conn {
     /// * `Ok(())` - Query executed successfully
     /// * `Err(Error)` - Query execution failed
     pub fn query_drop(&mut self, sql: &str) -> Result<()> {
-        use crate::protocol::command::query::{Query, QueryResult, write_query};
+        use crate::protocol::command::query::{write_query, Query, QueryResult};
 
         // Write COM_QUERY - reuse struct buffer to avoid heap allocations
         self.write_buffer.clear();
@@ -626,7 +619,8 @@ impl Conn {
 /// # Returns
 /// * `Ok(sequence_id)` - The sequence ID; the payload is stored in `buffer`
 /// * `Err(Error)` - IO error or protocol error
-pub fn read_payload<R: BufRead>(reader: &mut R, buffer: &mut Vec<u8>) -> Result<u8> {
+#[tracing::instrument(skip_all)]
+pub fn read_payload<R: BufRead>(reader: &mut R, buffer: &mut Vec<u8>) -> Result<()> {
     buffer.clear();
 
     // Read first packet header (4 bytes)
@@ -636,10 +630,11 @@ pub fn read_payload<R: BufRead>(reader: &mut R, buffer: &mut Vec<u8>) -> Result<
         .map_err(|e| Error::IoError(e))?;
 
     let length = u32::from_le_bytes([header[0], header[1], header[2], 0]) as usize;
-    let sequence_id = header[3];
 
     // Reserve space for the payload
-    buffer.reserve(length);
+    if buffer.capacity() < length {
+        buffer.reserve(length - buffer.capacity());
+    }
 
     // Read first packet payload directly
     let start = buffer.len();
@@ -669,7 +664,7 @@ pub fn read_payload<R: BufRead>(reader: &mut R, buffer: &mut Vec<u8>) -> Result<
             .map_err(|e| Error::IoError(e))?;
     }
 
-    Ok(sequence_id)
+    Ok(())
 }
 
 /// Write a MySQL packet during handshake, splitting it into 16MB chunks if necessary

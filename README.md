@@ -17,10 +17,17 @@ Its test, benchmark and feature development is driven by the need of [pyro-mysql
     - user can process a row and throw it away without collecting into Vec
     - user can deserialize bytes to PyString without intermediate objects
     - user can choose even not to parse the packets
-    - for performance-critical location, you can define `#[repr(C)] struct Row` and transmute network packets into it
+    - for performance-critical query, you can define `#[repr(C)] struct Row` and transmute network packets into it
 
 ### Not Implemented (Yet)
+- Custom max_allowed_packet
+- Unix Socket
 - Sequence ID verification
 - SSL/TLS
 - Authentication plugins other than username/password
+- MariaDB-specific flags
+
+### Not Supported
+- MySQL <= 5.7.5
 - Old protocol (ColumnDefinition320 or MySQL 5.x)
+- Non-UTF8 Encoding

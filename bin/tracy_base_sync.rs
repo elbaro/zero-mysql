@@ -6,28 +6,16 @@ use mysql::*;
 //     tracy_client::ProfiledAllocator::new(std::alloc::System, 100);
 
 fn main() -> Result<()> {
-    // Initialize tracy client and tracing
-    tracy_client::Client::start();
+    // tracy_client::Client::start();
+    // use tracing_subscriber::layer::SubscriberExt;
+    // let subscriber = tracing_subscriber::registry().with(tracing_tracy::TracyLayer::default());
+    // tracing::subscriber::set_global_default(subscriber).unwrap();
 
-    use tracing_subscriber::layer::SubscriberExt;
-    let subscriber = tracing_subscriber::registry().with(tracing_tracy::TracyLayer::default());
-    tracing::subscriber::set_global_default(subscriber).unwrap();
-
-    // Connect to MySQL server
-    println!("Connecting to MySQL...");
-    let pool = Pool::new("mysql://test:1234@localhost/test")?;
+    let pool = Pool::new("mysql://test:1234@localhost/test?prefer_socket=false")?;
     let mut conn = pool.get_conn()?;
-    println!("Connected to MySQL");
 
-    // Drop and recreate the test table using MEMORY engine
     {
-        let _span = tracy_client::span!("create_table");
-        println!("Creating test table...");
-
-        // Drop existing table
         conn.query_drop("DROP TABLE IF EXISTS test_bench")?;
-
-        // Create new table with MEMORY engine
         conn.query_drop(
             r"CREATE TABLE test_bench (
                 id INT PRIMARY KEY AUTO_INCREMENT,
@@ -57,18 +45,12 @@ fn main() -> Result<()> {
         ));
     }
 
-    println!("Starting infinite loop: inserting 10,000 rows and truncating...");
     let mut iteration = 0u64;
-
     loop {
         iteration += 1;
         let iteration_start = std::time::Instant::now();
-
-        // Insert 10,000 rows
         {
-            let _span = tracing::info_span!("insert_10000_rows").entered();
             for (username, age, email, score, description) in &rows {
-                // let _trace = tracing::trace_span!("exec_drop").entered();
                 conn.exec_drop(
                     &insert_stmt,
                     (
@@ -83,17 +65,11 @@ fn main() -> Result<()> {
         }
         let elapsed = iteration_start.elapsed();
 
-        println!("Iteration {}: Inserted 10,000 rows", iteration);
-
-        // Truncate the table
-        {
-            conn.query_drop("TRUNCATE TABLE test_bench")?;
-        }
-
         println!(
-            "Iteration {}: Truncated table (took {:.2}ms)",
+            "Iteration {}: Inserted 10,000 rows (took {:.2}ms)",
             iteration,
             elapsed.as_secs_f64() * 1000.0
         );
+        conn.query_drop("TRUNCATE TABLE test_bench")?;
     }
 }
