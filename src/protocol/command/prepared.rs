@@ -2,28 +2,43 @@ use crate::constant::CommandByte;
 use crate::error::{Error, Result};
 use crate::protocol::BinaryRowPayload;
 use crate::protocol::connection::ColumnDefinitionBytes;
-use crate::protocol::packet::{ErrPayloadBytes, OkPayloadBytes};
 use crate::protocol::primitive::*;
+use crate::protocol::response::{ErrPayloadBytes, OkPayloadBytes};
 use crate::protocol::r#trait::params::Params;
 use zerocopy::byteorder::little_endian::{U16 as U16LE, U32 as U32LE};
 use zerocopy::{FromBytes, Immutable, KnownLayout};
 
 /// Prepared statement OK response (zero-copy)
-///
-/// Layout matches MySQL wire protocol after status byte:
-/// - statement_id: 4 bytes (little-endian)
-/// - num_columns: 2 bytes (little-endian)
-/// - num_params: 2 bytes (little-endian)
-/// - reserved: 1 byte (0x00)
-/// - warning_count: 2 bytes (little-endian)
 #[repr(C, packed)]
 #[derive(Debug, Clone, Copy, FromBytes, KnownLayout, Immutable)]
 pub struct PrepareOk {
-    pub statement_id: U32LE,
-    pub num_columns: U16LE,
-    pub num_params: U16LE,
-    pub _reserved: u8,
-    pub warning_count: U16LE,
+    statement_id: U32LE,
+    num_columns: U16LE,
+    num_params: U16LE,
+    _reserved: u8,
+    warning_count: U16LE,
+}
+
+impl PrepareOk {
+    /// Get the statement ID
+    pub fn statement_id(&self) -> u32 {
+        self.statement_id.get()
+    }
+
+    /// Get the number of columns in the result set
+    pub fn num_columns(&self) -> u16 {
+        self.num_columns.get()
+    }
+
+    /// Get the number of parameters in the prepared statement
+    pub fn num_params(&self) -> u16 {
+        self.num_params.get()
+    }
+
+    /// Get the warning count
+    pub fn warning_count(&self) -> u16 {
+        self.warning_count.get()
+    }
 }
 
 /// Write COM_STMT_PREPARE command
@@ -32,23 +47,11 @@ pub fn write_prepare(out: &mut Vec<u8>, sql: &str) {
     out.extend_from_slice(sql.as_bytes());
 }
 
-/// Read COM_STMT_PREPARE response (zero-copy)
+/// Read COM_STMT_PREPARE response
 pub fn read_prepare_ok(payload: &[u8]) -> Result<&PrepareOk> {
     let (status, data) = read_int_1(payload)?;
-    if status != 0x00 {
-        return Err(Error::InvalidPacket);
-    }
-
-    // PrepareOk is 11 bytes (4 + 2 + 2 + 1 + 2)
-    if data.len() < 11 {
-        return Err(Error::InvalidPacket);
-    }
-
+    debug_assert_eq!(status, 0x00);
     PrepareOk::ref_from_bytes(&data[..11]).map_err(|_| Error::InvalidPacket)
-
-    // Note: If num_params > 0, server will send param definitions
-    // Note: If num_columns > 0, server will send column definitions
-    // These are read separately by the caller
 }
 
 /// Write COM_STMT_EXECUTE command
@@ -66,17 +69,18 @@ pub fn write_execute<P: Params>(out: &mut Vec<u8>, statement_id: u32, params: P)
 
     if num_params > 0 {
         // NULL bitmap: (num_params + 7) / 8 bytes
-        params.write_null_bitmap(out);
+        params.encode_null_bitmap(out);
 
         // new-params-bound-flag (1 byte)
-        if params.send_types_to_server() {
+        let send_types_to_server = true;
+        if send_types_to_server {
             write_int_1(out, 0x01);
-            params.write_types(out);
+            params.encode_types(out);
         } else {
             write_int_1(out, 0x00);
         }
 
-        params.write_values(out)?; // Ignore errors for now (non-priority)
+        params.encode_values(out)?; // Ignore errors for now (non-priority)
     }
     Ok(())
 }

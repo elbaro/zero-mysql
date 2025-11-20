@@ -26,7 +26,7 @@ Its test, benchmark and feature development is driven by the need of [pyro-mysql
 - SSL/TLS
 - Authentication plugins other than username/password
 - MariaDB-specific flags
-- CLIENT_SESSION_TRACK, CLIENT_CONNECT_ATTRS
+- CLIENT_SESSION_TRACK, CLIENT_CONNECT_ATTRS, CLIENT_OPTIONAL_RESULTSET_METADATA
 
 ### Not Supported
 - MySQL <= 5.7.5

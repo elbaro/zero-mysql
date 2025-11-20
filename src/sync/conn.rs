@@ -1,14 +1,16 @@
-use std::io::{BufRead, BufReader, IoSlice, Write};
-use std::net::TcpStream;
-
 use zerocopy::IntoBytes;
 
 use crate::constant::CapabilityFlags;
 use crate::error::{Error, Result};
 use crate::protocol::command::prepared::write_execute;
 use crate::protocol::command::prepared::{read_prepare_ok, write_prepare};
-use crate::protocol::packet::{ErrPayloadBytes, PacketHeader};
+use crate::protocol::connection::{Handshake, HandshakeResult};
+use crate::protocol::packet::PacketHeader;
+use crate::protocol::response::ErrPayloadBytes;
 use crate::protocol::r#trait::{ResultSetHandler, TextResultSetHandler, params::Params};
+use std::hint::unlikely;
+use std::io::{BufRead, BufReader, IoSlice, Write};
+use std::net::TcpStream;
 
 /// A MySQL connection with a buffered TCP stream
 ///
@@ -31,17 +33,6 @@ pub struct Conn {
 impl Conn {
     /// Create a new MySQL connection from connection options
     ///
-    /// This performs the complete MySQL handshake protocol:
-    /// 1. Parses the connection options
-    /// 2. Connects to the MySQL server via TCP or Unix socket
-    /// 3. Reads initial handshake from server
-    /// 4. Sends handshake response with authentication
-    /// 5. Handles auth plugin switching if needed
-    /// 6. Returns ready-to-use connection
-    ///
-    /// # Arguments
-    /// * `opts` - Connection options (can be a URL string or an Opts struct)
-    ///
     /// # Examples
     /// ```
     /// // Using a URL string
@@ -57,11 +48,11 @@ impl Conn {
     ///     ..Default::default()
     /// };
     /// let conn = Conn::new(opts)?;
-    /// ```
     ///
-    /// # Returns
-    /// * `Ok(Conn)` - Authenticated connection ready for queries
-    /// * `Err(Error)` - Connection or authentication failed
+    /// // Reuse with connection pool
+    /// let mut opts = Opts::from_url("mysql://root:password@localhost:3306/mydb")?;
+    /// let pool = MyCustomPool::new(opts);
+    /// ```
     pub fn new<O: TryInto<crate::opts::Opts>>(opts: O) -> Result<Self>
     where
         Error: From<O::Error>,
@@ -89,27 +80,12 @@ impl Conn {
     }
 
     /// Create a new MySQL connection with an existing TCP stream
-    ///
-    /// This is useful when you need more control over the TCP connection,
-    /// such as setting socket options before connecting.
-    ///
-    /// # Arguments
-    /// * `stream` - TCP stream connected to MySQL server
-    /// * `username` - MySQL username
-    /// * `password` - MySQL password (plain text)
-    /// * `database` - Optional database name to connect to
-    ///
-    /// # Returns
-    /// * `Ok(Conn)` - Authenticated connection ready for queries
-    /// * `Err(Error)` - Connection or authentication failed
     pub fn new_with_stream(
         stream: TcpStream,
         username: &str,
         password: &str,
         database: Option<&str>,
     ) -> Result<Self> {
-        use crate::protocol::connection::handshake::{Handshake, HandshakeResult};
-
         let mut conn_stream = BufReader::new(stream);
         let mut buffer = Vec::new();
         let mut headers_buffer = Vec::new();
@@ -159,7 +135,6 @@ impl Conn {
         })
     }
 
-    /// Get the server version string
     pub fn server_version(&self) -> &str {
         &self.server_version
     }
@@ -169,10 +144,7 @@ impl Conn {
         self.capability_flags
     }
 
-    /// Write a MySQL packet from write_buffer, splitting it into 16MB chunks if necessary
-    ///
-    /// # Arguments
-    /// * `sequence_id` - Starting sequence ID (will auto-increment for multi-packet)
+    /// Write abytes in write_buffer to stream, splitting it into 16MB chunks if necessary
     #[tracing::instrument(skip_all)]
     fn write_payload(&mut self, mut sequence_id: u8) -> Result<()> {
         self.write_headers_buffer.clear();
@@ -201,12 +173,6 @@ impl Conn {
         remaining = payload;
         for header in self.write_headers_buffer.iter() {
             let chunk_size = header.length();
-
-            // Safety: We extend the lifetime of IoSlice to 'static for storage in the Vec.
-            // This is safe because:
-            // 1. The IoSlice references are only used in write_all_vectored() below
-            // 2. Both header and payload outlive this function call
-            // 3. ioslice_buffer is cleared at the start of each write_payload call
             self.ioslice_buffer.push(unsafe {
                 std::mem::transmute::<IoSlice<'_>, IoSlice<'static>>(IoSlice::new(
                     header.as_bytes(),
@@ -231,14 +197,7 @@ impl Conn {
         Ok(())
     }
 
-    /// Prepare a SQL statement
-    ///
-    /// # Arguments
-    /// * `sql` - SQL statement to prepare
-    ///
-    /// # Returns
-    /// * `Ok(statement_id)` - Statement ID for use in execute
-    /// * `Err(Error)` - Preparation failed
+    /// Returns `Ok(statement_id) on success
     pub fn prepare(&mut self, sql: &str) -> Result<u32> {
         self.read_buffer.clear();
         self.write_buffer.clear();
@@ -248,35 +207,25 @@ impl Conn {
         self.write_payload(0)?;
         read_payload(&mut self.stream, &mut self.read_buffer)?;
 
-        if !self.read_buffer.is_empty() && self.read_buffer[0] == 0xFF {
+        if unlikely(!self.read_buffer.is_empty() && self.read_buffer[0] == 0xFF) {
             Err(ErrPayloadBytes(&self.read_buffer))?
         }
 
         let prepare_ok = read_prepare_ok(&self.read_buffer)?;
-        let statement_id = prepare_ok.statement_id.get();
-        let num_params = prepare_ok.num_params.get();
-        let num_columns = prepare_ok.num_columns.get();
+        let statement_id = prepare_ok.statement_id();
+        let num_params = prepare_ok.num_params();
+        let num_columns = prepare_ok.num_columns();
 
         if num_params > 0 {
+            // TODO: && !CLIENT_OPTIONAL_RESULTSET_METADATA || medatdata_follows==RESULTSET_METADATA_FULL
             for _ in 0..num_params {
-                read_payload(&mut self.stream, &mut self.read_buffer)?;
-            }
-            if !self
-                .capability_flags
-                .contains(CapabilityFlags::CLIENT_DEPRECATE_EOF)
-            {
                 read_payload(&mut self.stream, &mut self.read_buffer)?;
             }
         }
 
         if num_columns > 0 {
+            // TODO: && !CLIENT_OPTIONAL_RESULTSET_METADATA || medatdata_follows==RESULTSET_METADATA_FULL
             for _ in 0..num_columns {
-                read_payload(&mut self.stream, &mut self.read_buffer)?;
-            }
-            if !self
-                .capability_flags
-                .contains(CapabilityFlags::CLIENT_DEPRECATE_EOF)
-            {
                 read_payload(&mut self.stream, &mut self.read_buffer)?;
             }
         }
@@ -330,15 +279,6 @@ impl Conn {
     }
 
     /// Execute a prepared statement and return only the first row, dropping the rest
-    ///
-    /// This is optimized for queries where you only need the first result.
-    /// After receiving the first row, it efficiently discards remaining rows without
-    /// processing them through the handler.
-    ///
-    /// # Arguments
-    /// * `statement_id` - The prepared statement ID
-    /// * `params` - Parameters implementing the Params trait
-    /// * `handler` - Mutable reference to a ResultSetHandler implementation
     ///
     /// # Returns
     /// * `Ok(true)` - First row was found and processed
@@ -399,18 +339,6 @@ impl Conn {
     }
 
     /// Execute a prepared statement and discard all results
-    ///
-    /// This is optimized for queries where you don't need to process any results,
-    /// such as INSERT/UPDATE/DELETE statements or when you only care about whether
-    /// the query succeeded.
-    ///
-    /// # Arguments
-    /// * `statement_id` - The prepared statement ID
-    /// * `params` - Parameters implementing the Params trait
-    ///
-    /// # Returns
-    /// * `Ok(())` - Query executed successfully
-    /// * `Err(Error)` - Query execution failed
     #[tracing::instrument(skip_all)]
     pub fn exec_drop<P>(&mut self, statement_id: u32, params: P) -> Result<()>
     where
@@ -449,14 +377,6 @@ impl Conn {
     }
 
     /// Execute a text protocol SQL query
-    ///
-    /// # Arguments
-    /// * `sql` - SQL query to execute
-    /// * `handler` - Handler for result set events
-    ///
-    /// # Returns
-    /// * `Ok(())` - Query executed successfully
-    /// * `Err(Error)` - Query failed
     pub fn query<'a, H>(&mut self, sql: &str, handler: &mut H) -> Result<()>
     where
         H: TextResultSetHandler<'a>,
@@ -500,18 +420,7 @@ impl Conn {
         }
     }
 
-    /// Execute a text protocol SQL query and discard all results
-    ///
-    /// This is optimized for queries where you don't need to process any results,
-    /// such as DDL statements (CREATE, DROP, ALTER), DML statements without results
-    /// (INSERT, UPDATE, DELETE), or when you only care about whether the query succeeded.
-    ///
-    /// # Arguments
-    /// * `sql` - SQL query to execute
-    ///
-    /// # Returns
-    /// * `Ok(())` - Query executed successfully
-    /// * `Err(Error)` - Query execution failed
+    /// Execute a text protocol SQL query and discard the result
     pub fn query_drop(&mut self, sql: &str) -> Result<()> {
         use crate::protocol::command::query::{Query, QueryResult, write_query};
 
@@ -547,11 +456,6 @@ impl Conn {
     /// Send a ping to the server to check if the connection is alive
     ///
     /// This sends a COM_PING command to the MySQL server and waits for an OK response.
-    /// It's useful for checking connection health or preventing connection timeouts.
-    ///
-    /// # Returns
-    /// * `Ok(())` - Server responded successfully (connection is alive)
-    /// * `Err(Error)` - Ping failed (connection may be dead or network issue)
     pub fn ping(&mut self) -> Result<()> {
         use crate::protocol::command::utility::write_ping;
 
@@ -567,16 +471,7 @@ impl Conn {
     }
 }
 
-/// Read a complete MySQL payload, concatenating packets if they span multiple 16MB chunks.
-/// This function performs minimal copies and uses buffered reads to reduce syscalls.
-///
-/// # Arguments
-/// * `reader` - A buffered reader (e.g., BufReader<TcpStream>)
-/// * `buffer` - Reusable buffer for storing the payload (to minimize allocations)
-///
-/// # Returns
-/// * `Ok(sequence_id)` - The sequence ID; the payload is stored in `buffer`
-/// * `Err(Error)` - IO error or protocol error
+/// Read a complete MySQL payload, concatenating packets if they span multiple 16MB chunks
 #[tracing::instrument(skip_all)]
 pub fn read_payload<R: BufRead>(reader: &mut R, buffer: &mut Vec<u8>) -> Result<()> {
     buffer.clear();
@@ -611,14 +506,6 @@ pub fn read_payload<R: BufRead>(reader: &mut R, buffer: &mut Vec<u8>) -> Result<
 }
 
 /// Write a MySQL packet during handshake, splitting it into 16MB chunks if necessary
-/// (standalone version for use before Conn is fully initialized)
-///
-/// # Arguments
-/// * `stream` - The TCP stream to write to
-/// * `sequence_id` - Starting sequence ID (will auto-increment for multi-packet)
-/// * `payload` - The payload bytes to send
-/// * `headers_buffer` - Reusable buffer for packet headers (reduces heap allocations)
-/// * `ioslice_buffer` - Reusable buffer for IoSlice (reduces heap allocations)
 fn write_handshake_payload<W: Write>(
     stream: &mut W,
     mut sequence_id: u8,
@@ -652,11 +539,6 @@ fn write_handshake_payload<W: Write>(
     for header in headers_buffer.iter() {
         let chunk_size = header.length();
 
-        // Safety: We extend the lifetime of IoSlice to 'static for storage in the Vec.
-        // This is safe because:
-        // 1. The IoSlice references are only used in write_all_vectored() below
-        // 2. Both header and payload outlive this function call
-        // 3. ioslice_buffer is cleared at the start of each write_payload call
         ioslice_buffer.push(unsafe {
             std::mem::transmute::<IoSlice<'_>, IoSlice<'static>>(IoSlice::new(header.as_bytes()))
         });

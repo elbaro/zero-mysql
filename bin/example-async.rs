@@ -1,5 +1,6 @@
 use zero_mysql::error::Result;
 use zero_mysql::protocol::connection::ColumnTypeAndFlags;
+use zero_mysql::protocol::response::OkPayloadBytes;
 use zero_mysql::protocol::value::Value;
 use zero_mysql::tokio::Conn;
 
@@ -35,10 +36,7 @@ async fn main() -> Result<()> {
     }
 
     impl<'a> zero_mysql::protocol::r#trait::ResultSetHandler<'a> for Handler {
-        fn no_result_set(
-            &mut self,
-            _ok: zero_mysql::protocol::packet::OkPayloadBytes,
-        ) -> Result<()> {
+        fn no_result_set(&mut self, _ok: OkPayloadBytes) -> Result<()> {
             println!("Received no result set");
             Ok(())
         }
@@ -76,10 +74,7 @@ async fn main() -> Result<()> {
             Ok(())
         }
 
-        fn resultset_end(
-            &mut self,
-            _eof: zero_mysql::protocol::packet::OkPayloadBytes,
-        ) -> Result<()> {
+        fn resultset_end(&mut self, _eof: OkPayloadBytes) -> Result<()> {
             println!(
                 "Result set finished (EOF received) : {:?}",
                 zero_mysql::protocol::response::OkPayload::try_from(_eof)?

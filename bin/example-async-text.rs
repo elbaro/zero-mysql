@@ -1,6 +1,7 @@
 use zero_mysql::error::Result;
 use zero_mysql::protocol::TextRowPayload;
 use zero_mysql::protocol::connection::ColumnDefinitionBytes;
+use zero_mysql::protocol::response::OkPayloadBytes;
 use zero_mysql::tokio::Conn;
 
 #[tokio::main]
@@ -30,10 +31,7 @@ async fn main() -> Result<()> {
     }
 
     impl<'a> zero_mysql::protocol::r#trait::TextResultSetHandler<'a> for TextHandler {
-        fn no_result_set(
-            &mut self,
-            ok: zero_mysql::protocol::packet::OkPayloadBytes,
-        ) -> Result<()> {
+        fn no_result_set(&mut self, ok: OkPayloadBytes) -> Result<()> {
             let ok_payload = zero_mysql::protocol::response::OkPayload::try_from(ok)?;
             println!("Query OK, {} rows affected", ok_payload.affected_rows);
             Ok(())
@@ -59,10 +57,7 @@ async fn main() -> Result<()> {
             Ok(())
         }
 
-        fn resultset_end(
-            &mut self,
-            eof: zero_mysql::protocol::packet::OkPayloadBytes,
-        ) -> Result<()> {
+        fn resultset_end(&mut self, eof: OkPayloadBytes) -> Result<()> {
             println!(
                 "Result set finished (EOF received): {:?}",
                 zero_mysql::protocol::response::OkPayload::try_from(eof)?

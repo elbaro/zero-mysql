@@ -1,4 +1,6 @@
 #![feature(write_all_vectored)]
+#![feature(cold_path)]
+#![feature(likely_unlikely)]
 
 pub mod constant;
 pub mod error;

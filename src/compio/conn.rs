@@ -10,7 +10,7 @@ use crate::constant::CapabilityFlags;
 use crate::error::{Error, Result};
 use crate::protocol::command::prepared::{read_prepare_ok, write_execute, write_prepare};
 use crate::protocol::connection::handshake::{Handshake, HandshakeResult};
-use crate::protocol::packet::ErrPayloadBytes;
+use crate::protocol::response::ErrPayloadBytes;
 use crate::protocol::r#trait::{ResultSetHandler, TextResultSetHandler, params::Params};
 
 use zerocopy::IntoBytes;
@@ -276,9 +276,9 @@ impl Conn {
 
         // Parse PrepareOk
         let prepare_ok = read_prepare_ok(&buffer)?;
-        let statement_id = prepare_ok.statement_id.get();
-        let num_params = prepare_ok.num_params.get();
-        let num_columns = prepare_ok.num_columns.get();
+        let statement_id = prepare_ok.statement_id();
+        let num_params = prepare_ok.num_params();
+        let num_columns = prepare_ok.num_columns();
 
         // Return buffer to pool
         self.return_buffer(buffer);

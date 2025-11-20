@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use crate::protocol::{packet::ErrPayloadBytes, response::ErrPayload};
+use crate::protocol::{response::ErrPayload, response::ErrPayloadBytes};
 
 #[derive(Debug, Error)]
 pub enum Error {

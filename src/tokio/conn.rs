@@ -6,14 +6,12 @@ use zerocopy::{FromZeros, IntoBytes};
 use crate::constant::CapabilityFlags;
 use crate::error::{Error, Result};
 use crate::protocol::command::prepared::{read_prepare_ok, write_execute, write_prepare};
-use crate::protocol::connection::handshake::{Handshake, HandshakeResult};
-use crate::protocol::packet::{ErrPayloadBytes, PacketHeader};
+use crate::protocol::connection::{Handshake, HandshakeResult};
+use crate::protocol::packet::PacketHeader;
+use crate::protocol::response::ErrPayloadBytes;
 use crate::protocol::r#trait::{ResultSetHandler, TextResultSetHandler, params::Params};
 
-/// A MySQL connection with a buffered async TCP stream
-///
-/// This struct holds the connection state including server information
-/// obtained during the handshake phase.
+/// A MySQL connection
 pub struct Conn {
     stream: BufReader<TcpStream>,
     server_version: String,
@@ -32,38 +30,6 @@ pub struct Conn {
 
 impl Conn {
     /// Create a new MySQL connection from connection options (async)
-    ///
-    /// This performs the complete MySQL handshake protocol:
-    /// 1. Parses the connection options
-    /// 2. Connects to the MySQL server via TCP or Unix socket
-    /// 3. Reads initial handshake from server
-    /// 4. Sends handshake response with authentication
-    /// 5. Handles auth plugin switching if needed
-    /// 6. Returns ready-to-use connection
-    ///
-    /// # Arguments
-    /// * `opts` - Connection options (can be a URL string or an Opts struct)
-    ///
-    /// # Examples
-    /// ```
-    /// // Using a URL string
-    /// let conn = Conn::new("mysql://root:password@localhost:3306/mydb").await?;
-    ///
-    /// // Using an Opts struct
-    /// let opts = Opts {
-    ///     host: Some("localhost".to_string()),
-    ///     port: 3306,
-    ///     user: "root".to_string(),
-    ///     password: Some("password".to_string()),
-    ///     db: Some("mydb".to_string()),
-    ///     ..Default::default()
-    /// };
-    /// let conn = Conn::new(opts).await?;
-    /// ```
-    ///
-    /// # Returns
-    /// * `Ok(Conn)` - Authenticated connection ready for queries
-    /// * `Err(Error)` - Connection or authentication failed
     pub async fn new<O: TryInto<crate::opts::Opts>>(opts: O) -> Result<Self>
     where
         Error: From<O::Error>,
@@ -92,19 +58,6 @@ impl Conn {
     }
 
     /// Create a new MySQL connection with an existing TCP stream (async)
-    ///
-    /// This is useful when you need more control over the TCP connection,
-    /// such as setting socket options before connecting.
-    ///
-    /// # Arguments
-    /// * `stream` - TCP stream connected to MySQL server
-    /// * `username` - MySQL username
-    /// * `password` - MySQL password (plain text)
-    /// * `database` - Optional database name to connect to
-    ///
-    /// # Returns
-    /// * `Ok(Conn)` - Authenticated connection ready for queries
-    /// * `Err(Error)` - Connection or authentication failed
     pub async fn new_with_stream(
         stream: TcpStream,
         username: &str,
@@ -162,7 +115,6 @@ impl Conn {
         })
     }
 
-    /// Get the server version string
     pub fn server_version(&self) -> &str {
         &self.server_version
     }
@@ -173,9 +125,6 @@ impl Conn {
     }
 
     /// Write a MySQL packet from write_buffer asynchronously, splitting it into 16MB chunks if necessary
-    ///
-    /// # Arguments
-    /// * `sequence_id` - Starting sequence ID (will auto-increment for multi-packet)
     #[instrument(skip_all)]
     async fn write_payload(&mut self, mut sequence_id: u8) -> Result<()> {
         let payload = self.write_buffer.as_slice();
@@ -224,15 +173,7 @@ impl Conn {
 
     /// Prepare a statement and return the statement ID (async)
     ///
-    /// This sends a COM_STMT_PREPARE command to the server and returns the statement ID
-    /// that can be used with exec_* methods.
-    ///
-    /// # Arguments
-    /// * `sql` - The SQL statement to prepare
-    ///
-    /// # Returns
-    /// * `Ok(statement_id)` - The prepared statement ID
-    /// * `Err(Error)` - Prepare failed
+    /// Returns `Ok(statement_id)` on success.
     pub async fn prepare(&mut self, sql: &str) -> Result<u32> {
         self.read_buffer.clear();
         self.write_buffer.clear();
@@ -248,9 +189,9 @@ impl Conn {
         }
 
         let prepare_ok = read_prepare_ok(&self.read_buffer)?;
-        let statement_id = prepare_ok.statement_id.get();
-        let num_params = prepare_ok.num_params.get();
-        let num_columns = prepare_ok.num_columns.get();
+        let statement_id = prepare_ok.statement_id();
+        let num_params = prepare_ok.num_params();
+        let num_columns = prepare_ok.num_columns();
 
         for _ in 0..num_params {
             read_payload(&mut self.stream, &mut self.read_buffer).await?;
@@ -264,18 +205,6 @@ impl Conn {
     }
 
     /// Execute a prepared statement with a result set handler (async)
-    ///
-    /// This method provides a streaming, callback-based API for processing query results.
-    /// It drives the exec state machine and calls handler methods for each event.
-    ///
-    /// # Arguments
-    /// * `statement_id` - The prepared statement ID
-    /// * `params` - Parameters implementing the Params trait
-    /// * `handler` - Mutable reference to a ResultSetHandler implementation
-    ///
-    /// # Returns
-    /// * `Ok(())` - Query execution completed successfully
-    /// * `Err(Error)` - Query execution or handler callback failed
     pub async fn exec<'a, P, H>(
         &mut self,
         statement_id: u32,
@@ -327,15 +256,6 @@ impl Conn {
     }
 
     /// Execute a prepared statement and return only the first row, dropping the rest (async)
-    ///
-    /// This is optimized for queries where you only need the first result.
-    /// After receiving the first row, it efficiently discards remaining rows without
-    /// processing them through the handler.
-    ///
-    /// # Arguments
-    /// * `statement_id` - The prepared statement ID
-    /// * `params` - Parameters implementing the Params trait
-    /// * `handler` - Mutable reference to a ResultSetHandler implementation
     ///
     /// # Returns
     /// * `Ok(true)` - First row was found and processed
@@ -396,18 +316,6 @@ impl Conn {
     }
 
     /// Execute a prepared statement and discard all results (async)
-    ///
-    /// This is optimized for queries where you don't need to process any results,
-    /// such as INSERT/UPDATE/DELETE statements or when you only care about whether
-    /// the query succeeded.
-    ///
-    /// # Arguments
-    /// * `statement_id` - The prepared statement ID
-    /// * `params` - Parameters implementing the Params trait
-    ///
-    /// # Returns
-    /// * `Ok(())` - Query executed successfully
-    /// * `Err(Error)` - Query execution failed
     #[instrument(skip_all)]
     pub async fn exec_drop<P>(&mut self, statement_id: u32, params: P) -> Result<()>
     where
@@ -445,14 +353,6 @@ impl Conn {
     }
 
     /// Execute a text protocol SQL query (async)
-    ///
-    /// # Arguments
-    /// * `sql` - SQL query to execute
-    /// * `handler` - Handler for result set events
-    ///
-    /// # Returns
-    /// * `Ok(())` - Query executed successfully
-    /// * `Err(Error)` - Query failed
     pub async fn query<'a, H>(&mut self, sql: &str, handler: &mut H) -> Result<()>
     where
         H: TextResultSetHandler<'a>,
@@ -497,17 +397,6 @@ impl Conn {
     }
 
     /// Execute a text protocol SQL query and discard all results (async)
-    ///
-    /// This is optimized for queries where you don't need to process any results,
-    /// such as DDL statements (CREATE, DROP, ALTER), DML statements without results
-    /// (INSERT, UPDATE, DELETE), or when you only care about whether the query succeeded.
-    ///
-    /// # Arguments
-    /// * `sql` - SQL query to execute
-    ///
-    /// # Returns
-    /// * `Ok(())` - Query executed successfully
-    /// * `Err(Error)` - Query execution failed
     #[instrument(skip_all)]
     pub async fn query_drop(&mut self, sql: &str) -> Result<()> {
         use crate::protocol::command::query::{Query, QueryResult, write_query};
@@ -544,11 +433,6 @@ impl Conn {
     /// Send a ping to the server to check if the connection is alive (async)
     ///
     /// This sends a COM_PING command to the MySQL server and waits for an OK response.
-    /// It's useful for checking connection health or preventing connection timeouts.
-    ///
-    /// # Returns
-    /// * `Ok(())` - Server responded successfully (connection is alive)
-    /// * `Err(Error)` - Ping failed (connection may be dead or network issue)
     pub async fn ping(&mut self) -> Result<()> {
         use crate::protocol::command::utility::write_ping;
 
@@ -600,16 +484,7 @@ async fn write_all_vectored_async<W: AsyncWrite + Unpin>(
     Ok(())
 }
 
-/// Read a complete MySQL payload asynchronously, concatenating packets if they span multiple 16MB chunks.
-/// This function performs minimal copies and uses buffered reads to reduce syscalls.
-///
-/// # Arguments
-/// * `reader` - A buffered async reader (e.g., BufReader<TcpStream>)
-/// * `buffer` - Reusable buffer for storing the payload (to minimize allocations)
-///
-/// # Returns
-/// * `Ok(sequence_id)` - The sequence ID; the payload is stored in `buffer`
-/// * `Err(Error)` - IO error or protocol error
+/// Read a complete MySQL payload asynchronously, concatenating packets if they span multiple 16MB chunks
 #[instrument(skip_all)]
 pub async fn read_payload<R: AsyncBufRead + Unpin>(
     reader: &mut R,
@@ -643,14 +518,6 @@ pub async fn read_payload<R: AsyncBufRead + Unpin>(
 }
 
 /// Write a MySQL packet during handshake asynchronously, splitting it into 16MB chunks if necessary
-/// (standalone version for use before Conn is fully initialized)
-///
-/// # Arguments
-/// * `stream` - The async TCP stream to write to
-/// * `sequence_id` - Starting sequence ID (will auto-increment for multi-packet)
-/// * `payload` - The payload bytes to send
-/// * `headers_buffer` - Reusable buffer for packet headers (reduces heap allocations)
-/// * `ioslice_buffer` - Reusable buffer for IoSlice (reduces heap allocations)
 async fn write_handshake_payload<W: AsyncWrite + Unpin>(
     stream: &mut W,
     mut sequence_id: u8,

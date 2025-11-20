@@ -3,14 +3,11 @@ use crate::protocol::r#trait::param::Param;
 
 /// Trait for parameter binding in prepared statements
 ///
-/// This trait is implemented by external libraries to provide parameter serialization
-/// with minimal copying. The implementation is responsible for encoding parameters
-/// according to MySQL binary protocol.
+/// This trait is implemented by external libraries to provide a custom parameter serialization.
 pub trait Params {
     /// Number of parameters
     fn len(&self) -> usize;
 
-    /// Check if there are no parameters
     fn is_empty(&self) -> bool {
         self.len() == 0
     }
@@ -19,50 +16,32 @@ pub trait Params {
     ///
     /// The NULL bitmap is (num_params + 7) / 8 bytes long.
     /// Bit is set to 1 if the parameter is NULL.
-    fn write_null_bitmap(&self, out: &mut Vec<u8>);
-
-    /// Whether to send parameter types to server
-    ///
-    /// Typically true on first execute, false on subsequent executes
-    /// with the same statement (optimization).
-    fn send_types_to_server(&self) -> bool {
-        // TODO: add a param_example=(..) arg to prepare()
-        true
-    }
+    fn encode_null_bitmap(&self, out: &mut Vec<u8>);
 
     /// Write parameter types
     ///
     /// Each parameter type is 2 bytes:
     /// - 1 byte: MySQL type (MYSQL_TYPE_*)
     /// - 1 byte: unsigned flag (0x80 if unsigned, 0x00 otherwise)
-    ///
-    /// Called only if send_types_to_server() returns true.
-    fn write_types(&self, out: &mut Vec<u8>);
+    fn encode_types(&self, out: &mut Vec<u8>);
 
     /// Write parameter values (binary encoded)
     ///
     /// Values are encoded according to MySQL binary protocol.
     /// NULL parameters should be skipped (they're already in the NULL bitmap).
-    ///
-    /// The encoding is type-specific:
-    /// - Integers: little-endian fixed-width
-    /// - Floats/Doubles: IEEE 754 little-endian
-    /// - Strings/Bytes: length-encoded
-    /// - Date/Time: special encoding
-    fn write_values(&self, out: &mut Vec<u8>) -> Result<()>;
+    fn encode_values(&self, out: &mut Vec<u8>) -> Result<()>;
 }
 
-/// Empty parameters (no parameters)
 impl Params for () {
     fn len(&self) -> usize {
         0
     }
 
-    fn write_null_bitmap(&self, _out: &mut Vec<u8>) {}
+    fn encode_null_bitmap(&self, _out: &mut Vec<u8>) {}
 
-    fn write_types(&self, _out: &mut Vec<u8>) {}
+    fn encode_types(&self, _out: &mut Vec<u8>) {}
 
-    fn write_values(&self, _out: &mut Vec<u8>) -> Result<()> {
+    fn encode_values(&self, _out: &mut Vec<u8>) -> Result<()> {
         Ok(())
     }
 }
@@ -77,7 +56,7 @@ impl<T: Param> Params for &[T] {
         (*self).len()
     }
 
-    fn write_null_bitmap(&self, out: &mut Vec<u8>) {
+    fn encode_null_bitmap(&self, out: &mut Vec<u8>) {
         // Calculate number of bytes needed for NULL bitmap
         let num_bytes = self.len().div_ceil(8);
         let start_len = out.len();
@@ -93,16 +72,16 @@ impl<T: Param> Params for &[T] {
         }
     }
 
-    fn write_types(&self, out: &mut Vec<u8>) {
+    fn encode_types(&self, out: &mut Vec<u8>) {
         for param in self.iter() {
-            param.write_type(out);
+            param.encode_type(out);
         }
     }
 
-    fn write_values(&self, out: &mut Vec<u8>) -> Result<()> {
+    fn encode_values(&self, out: &mut Vec<u8>) -> Result<()> {
         for param in self.iter() {
             if !param.is_null() {
-                param.write_value(out)?;
+                param.encode_value(out)?;
             }
         }
         Ok(())
@@ -115,16 +94,16 @@ impl<T: Param, const N: usize> Params for [T; N] {
         N
     }
 
-    fn write_null_bitmap(&self, out: &mut Vec<u8>) {
-        self.as_slice().write_null_bitmap(out)
+    fn encode_null_bitmap(&self, out: &mut Vec<u8>) {
+        self.as_slice().encode_null_bitmap(out)
     }
 
-    fn write_types(&self, out: &mut Vec<u8>) {
-        self.as_slice().write_types(out)
+    fn encode_types(&self, out: &mut Vec<u8>) {
+        self.as_slice().encode_types(out)
     }
 
-    fn write_values(&self, out: &mut Vec<u8>) -> Result<()> {
-        self.as_slice().write_values(out)
+    fn encode_values(&self, out: &mut Vec<u8>) -> Result<()> {
+        self.as_slice().encode_values(out)
     }
 }
 
@@ -144,7 +123,7 @@ macro_rules! impl_params_for_tuple {
                 count
             }
 
-            fn write_null_bitmap(&self, out: &mut Vec<u8>) {
+            fn encode_null_bitmap(&self, out: &mut Vec<u8>) {
                 let num_bytes = self.len().div_ceil(8);
                 let start_len = out.len();
                 out.resize(start_len + num_bytes, 0);
@@ -158,16 +137,16 @@ macro_rules! impl_params_for_tuple {
                 )+
             }
 
-            fn write_types(&self, out: &mut Vec<u8>) {
+            fn encode_types(&self, out: &mut Vec<u8>) {
                 $(
-                    self.$idx.write_type(out);
+                    self.$idx.encode_type(out);
                 )+
             }
 
-            fn write_values(&self, out: &mut Vec<u8>) -> Result<()> {
+            fn encode_values(&self, out: &mut Vec<u8>) -> Result<()> {
                 $(
                     if !self.$idx.is_null() {
-                        self.$idx.write_value(out)?;
+                        self.$idx.encode_value(out)?;
                     }
                 )+
                 Ok(())
@@ -204,15 +183,15 @@ mod tests {
         assert_eq!(params.len(), 3);
 
         let mut null_bitmap = Vec::new();
-        params.write_null_bitmap(&mut null_bitmap);
+        params.encode_null_bitmap(&mut null_bitmap);
         assert_eq!(null_bitmap, vec![0]); // No NULLs
 
         let mut types = Vec::new();
-        params.write_types(&mut types);
+        params.encode_types(&mut types);
         assert_eq!(types.len(), 6); // 2 bytes per parameter
 
         let mut values = Vec::new();
-        params.write_values(&mut values).unwrap();
+        params.encode_values(&mut values).unwrap();
         assert_eq!(values.len(), 12); // 4 bytes per i32
     }
 
@@ -223,7 +202,7 @@ mod tests {
         assert_eq!(params_slice.len(), 3);
 
         let mut values = Vec::new();
-        params_slice.write_values(&mut values).unwrap();
+        params_slice.encode_values(&mut values).unwrap();
         assert_eq!(values.len(), 12);
     }
 
@@ -233,7 +212,7 @@ mod tests {
         assert_eq!(params.len(), 5);
 
         let mut types = Vec::new();
-        params.write_types(&mut types);
+        params.encode_types(&mut types);
         assert_eq!(types.len(), 10); // 2 bytes per parameter
     }
 
@@ -243,15 +222,15 @@ mod tests {
         assert_eq!(params.len(), 3);
 
         let mut null_bitmap = Vec::new();
-        params.write_null_bitmap(&mut null_bitmap);
+        params.encode_null_bitmap(&mut null_bitmap);
         assert_eq!(null_bitmap, vec![0]); // No NULLs
 
         let mut types = Vec::new();
-        params.write_types(&mut types);
+        params.encode_types(&mut types);
         assert_eq!(types.len(), 6); // 2 bytes per parameter
 
         let mut values = Vec::new();
-        params.write_values(&mut values).unwrap();
+        params.encode_values(&mut values).unwrap();
         // i32 (4 bytes) + string length-encoded + f64 (8 bytes)
         assert!(values.len() > 12);
     }
@@ -262,12 +241,12 @@ mod tests {
         assert_eq!(params.len(), 3);
 
         let mut null_bitmap = Vec::new();
-        params.write_null_bitmap(&mut null_bitmap);
+        params.encode_null_bitmap(&mut null_bitmap);
         // Bitmap: bit 1 should be set (second param is NULL)
         assert_eq!(null_bitmap, vec![0b00000010]);
 
         let mut values = Vec::new();
-        params.write_values(&mut values).unwrap();
+        params.encode_values(&mut values).unwrap();
         // Only non-NULL values are written
         // i32 (4 bytes) + "test" length-encoded (1 + 4 = 5 bytes)
         assert_eq!(values.len(), 9);
@@ -281,11 +260,11 @@ mod tests {
         assert_eq!(params.len(), 11);
 
         let mut types = Vec::new();
-        params.write_types(&mut types);
+        params.encode_types(&mut types);
         assert_eq!(types.len(), 22); // 2 bytes per parameter
 
         let mut values = Vec::new();
-        params.write_values(&mut values).unwrap();
+        params.encode_values(&mut values).unwrap();
         // 1+2+4+8+1+2+4+8+4+8+6 = 48 bytes
         assert_eq!(values.len(), 48);
     }
@@ -300,7 +279,7 @@ mod tests {
         assert_eq!(params.len(), 3);
 
         let mut values = Vec::new();
-        params.write_values(&mut values).unwrap();
+        params.encode_values(&mut values).unwrap();
         // "hello" (1+5) + "world" (1+5) + "test" (1+4) = 17 bytes
         assert_eq!(values.len(), 17);
     }
@@ -315,7 +294,7 @@ mod tests {
         assert_eq!(params.len(), 3);
 
         let mut values = Vec::new();
-        params.write_values(&mut values).unwrap();
+        params.encode_values(&mut values).unwrap();
         // [1,2,3] (1+3) + [4,5,6] (1+3) + [7,8] (1+2) = 11 bytes
         assert_eq!(values.len(), 11);
     }

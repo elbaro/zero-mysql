@@ -1,10 +1,4 @@
-// ============================================================================
-// MySQL Binary Protocol Value Types
-// ============================================================================
-//
-// Zero-copy value types that wrap slices from the buffer.
-// These types use the zerocopy crate for safe zero-copy parsing.
-
+/// MySQL Binary Protocol Value Types
 use crate::constant::{ColumnFlags, ColumnType};
 use crate::error::{Error, Result};
 use crate::protocol::connection::ColumnTypeAndFlags;
@@ -43,16 +37,9 @@ pub enum Value<'a> {
 }
 
 impl<'a> Value<'a> {
-    /// Parse a binary protocol value based on column type and flags
+    /// Parse a single binary protocol value based on column type and flags
     ///
     /// Returns the parsed value and the remaining bytes
-    ///
-    /// # Arguments
-    /// * `type_and_flags` - Column type and flags metadata
-    /// * `data` - Raw bytes to parse from
-    ///
-    /// # Returns
-    /// A tuple of (parsed Value, remaining bytes)
     pub fn parse(type_and_flags: &ColumnTypeAndFlags, data: &'a [u8]) -> Result<(Self, &'a [u8])> {
         let is_unsigned = type_and_flags.flags.contains(ColumnFlags::UNSIGNED_FLAG);
 
@@ -192,7 +179,6 @@ impl<'a> Value<'a> {
 // ============================================================================
 
 /// TIMESTAMP - 4 bytes (DATE/DATETIME/TIMESTAMP with date only)
-/// Format: year (2 bytes LE), month (1 byte), day (1 byte)
 #[repr(C, packed)]
 #[derive(Debug, Clone, Copy, FromBytes, KnownLayout, Immutable)]
 pub struct Timestamp4 {
@@ -208,7 +194,6 @@ impl Timestamp4 {
 }
 
 /// TIMESTAMP - 7 bytes (DATE/DATETIME/TIMESTAMP without microseconds)
-/// Format: year (2 LE), month (1), day (1), hour (1), minute (1), second (1)
 #[repr(C, packed)]
 #[derive(Debug, Clone, Copy, FromBytes, KnownLayout, Immutable)]
 pub struct Timestamp7 {
@@ -227,7 +212,6 @@ impl Timestamp7 {
 }
 
 /// TIMESTAMP - 11 bytes (DATE/DATETIME/TIMESTAMP with microseconds)
-/// Format: year (2 LE), month (1), day (1), hour (1), minute (1), second (1), microsecond (4 LE)
 #[repr(C, packed)]
 #[derive(Debug, Clone, Copy, FromBytes, KnownLayout, Immutable)]
 pub struct Timestamp11 {
@@ -251,7 +235,6 @@ impl Timestamp11 {
 }
 
 /// TIME - 8 bytes
-/// Format: is_negative (1), days (4 LE), hour (1), minute (1), second (1)
 #[repr(C, packed)]
 #[derive(Debug, Clone, Copy, FromBytes, KnownLayout, Immutable)]
 pub struct Time8 {
@@ -272,8 +255,7 @@ impl Time8 {
     }
 }
 
-/// TIME - 12 bytes
-/// Format: is_negative (1), days (4 LE), hour (1), minute (1), second (1), microsecond (4 LE)
+/// TIME - 12 bytesative (1), days (4 LE), hour (1), minute (1), second (1), microsecond (4 LE)
 #[repr(C, packed)]
 #[derive(Debug, Clone, Copy, FromBytes, KnownLayout, Immutable)]
 pub struct Time12 {

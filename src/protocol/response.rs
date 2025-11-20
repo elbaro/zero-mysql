@@ -1,9 +1,26 @@
 use crate::constant::StatusFlags;
 use crate::error::{Error, Result};
-use crate::protocol::packet::{ErrPayloadBytes, OkPayloadBytes};
 use crate::protocol::primitive::*;
 use zerocopy::byteorder::little_endian::U16 as U16LE;
 use zerocopy::{FromBytes, Immutable, KnownLayout};
+
+/// The payload part of OK packet
+#[derive(Debug)]
+pub struct OkPayloadBytes<'a>(pub &'a [u8]);
+
+impl<'a> OkPayloadBytes<'a> {
+    pub fn assert_eof(&self) -> Result<()> {
+        if self.0[0] == 0xFE {
+            Ok(())
+        } else {
+            Err(Error::InvalidPacket)
+        }
+    }
+
+    pub fn bytes(&self) -> &[u8] {
+        self.0
+    }
+}
 
 /// The OK packet parsed from OkPayloadBytes
 #[derive(Debug, Clone)]
@@ -40,6 +57,9 @@ impl TryFrom<OkPayloadBytes<'_>> for OkPayload {
         })
     }
 }
+
+#[derive(Debug)]
+pub struct ErrPayloadBytes<'a>(pub &'a [u8]);
 
 /// The ERR packet parsed from ErrPayloadBytes
 #[derive(Debug, Clone, thiserror::Error)]

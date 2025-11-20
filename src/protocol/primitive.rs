@@ -1,3 +1,5 @@
+use std::hint::cold_path;
+
 use crate::error::{Error, Result};
 use zerocopy::FromBytes;
 use zerocopy::byteorder::little_endian::{U16 as U16LE, U32 as U32LE, U64 as U64LE};
@@ -63,25 +65,23 @@ pub fn read_int_8(data: &[u8]) -> Result<(u64, &[u8])> {
 
 /// Read length-encoded integer
 pub fn read_int_lenenc(data: &[u8]) -> Result<(u64, &[u8])> {
-    if data.is_empty() {
-        return Err(Error::InvalidPacket);
-    }
-
-    match data[0] {
-        0xFC => {
+    match data.first() {
+        Some(0xFC) => {
             let (val, rest) = read_int_2(&data[1..])?;
             Ok((val as u64, rest))
         }
-        0xFD => {
+        Some(0xFD) => {
             let (val, rest) = read_int_3(&data[1..])?;
             Ok((val as u64, rest))
         }
-        0xFE => {
+        Some(0xFE) => {
             let (val, rest) = read_int_8(&data[1..])?;
             Ok((val, rest))
         }
-        val => {
-            Ok((val as u64, &data[1..]))
+        Some(val) => Ok((*val as u64, &data[1..])),
+        None => {
+            cold_path();
+            Err(Error::InvalidPacket)
         }
     }
 }

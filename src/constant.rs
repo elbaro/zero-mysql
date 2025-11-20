@@ -123,11 +123,11 @@ pub const CAPABILITIES_CONFIGURABLE: CapabilityFlags = CapabilityFlags::CLIENT_F
     .union(CapabilityFlags::CLIENT_IGNORE_SPACE)
     .union(CapabilityFlags::CLIENT_SSL)
     .union(CapabilityFlags::CLIENT_CAN_HANDLE_EXPIRED_PASSWORDS)
-    .union(CapabilityFlags::CLIENT_OPTIONAL_RESULTSET_METADATA)
     .union(CapabilityFlags::CLIENT_CONNECT_WITH_DB);
 
 // Capabilities that are always disabled (deprecated, not implemented, or not applicable)
 pub const CAPABILITIES_ALWAYS_DISABLED: CapabilityFlags = CapabilityFlags::CLIENT_LONG_PASSWORD
+    .union(CapabilityFlags::CLIENT_OPTIONAL_RESULTSET_METADATA) // TODO
     .union(CapabilityFlags::CLIENT_NO_SCHEMA)
     .union(CapabilityFlags::CLIENT_ODBC)
     .union(CapabilityFlags::CLIENT_INTERACTIVE)

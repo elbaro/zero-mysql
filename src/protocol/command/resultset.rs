@@ -1,4 +1,4 @@
-use crate::error::{Error, Result};
+use crate::error::Result;
 use crate::protocol::BinaryRowPayload;
 use crate::protocol::primitive::*;
 use crate::protocol::value::NullBitmap;
@@ -20,9 +20,7 @@ pub fn read_binary_resultset_header(payload: &[u8]) -> Result<ResultSetHeader> {
 pub fn read_binary_row<'a>(payload: &'a [u8], num_columns: usize) -> Result<BinaryRowPayload<'a>> {
     // Binary protocol row packet starts with 0x00
     let (header, mut data) = read_int_1(payload)?;
-    if header != 0x00 {
-        return Err(Error::InvalidPacket);
-    }
+    debug_assert_eq!(header, 0x00);
 
     // NULL bitmap: (num_columns + 7 + 2) / 8 bytes
     // The +2 offset is for binary protocol

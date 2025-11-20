@@ -1,7 +1,7 @@
 use crate::constant::CapabilityFlags;
 use crate::error::{Error, Result};
-use crate::protocol::packet::ErrPayloadBytes;
 use crate::protocol::primitive::*;
+use crate::protocol::response::ErrPayloadBytes;
 
 // ============================================================================
 // Initial Handshake Packet (Server -> Client)

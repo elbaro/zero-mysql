@@ -1,6 +1,7 @@
 use zero_mysql::error::Result;
 use zero_mysql::protocol::TextRowPayload;
 use zero_mysql::protocol::connection::ColumnDefinitionBytes;
+use zero_mysql::protocol::response::OkPayloadBytes;
 use zero_mysql::tokio::Conn;
 
 // #[global_allocator]
@@ -11,7 +12,7 @@ use zero_mysql::tokio::Conn;
 struct DropHandler;
 
 impl<'a> zero_mysql::protocol::r#trait::TextResultSetHandler<'a> for DropHandler {
-    fn no_result_set(&mut self, _ok: zero_mysql::protocol::packet::OkPayloadBytes) -> Result<()> {
+    fn no_result_set(&mut self, _ok: OkPayloadBytes) -> Result<()> {
         Ok(())
     }
 
@@ -27,7 +28,7 @@ impl<'a> zero_mysql::protocol::r#trait::TextResultSetHandler<'a> for DropHandler
         Ok(())
     }
 
-    fn resultset_end(&mut self, _eof: zero_mysql::protocol::packet::OkPayloadBytes) -> Result<()> {
+    fn resultset_end(&mut self, _eof: OkPayloadBytes) -> Result<()> {
         Ok(())
     }
 }

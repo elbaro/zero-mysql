@@ -3,7 +3,7 @@ pub mod params;
 
 use crate::error::Result;
 use crate::protocol::connection::ColumnDefinitionBytes;
-use crate::protocol::packet::OkPayloadBytes;
+use crate::protocol::response::OkPayloadBytes;
 use crate::protocol::{BinaryRowPayload, TextRowPayload};
 
 /// Trait for decoding a single row from raw bytes

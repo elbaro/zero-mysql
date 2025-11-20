@@ -2,8 +2,8 @@ use crate::constant::CommandByte;
 use crate::error::{Error, Result};
 use crate::protocol::TextRowPayload;
 use crate::protocol::connection::ColumnDefinitionBytes;
-use crate::protocol::packet::{ErrPayloadBytes, OkPayloadBytes};
 use crate::protocol::primitive::*;
+use crate::protocol::response::{ErrPayloadBytes, OkPayloadBytes};
 
 const MAX_PAYLOAD_LENGTH: usize = (1 << 24) - 4;
 
