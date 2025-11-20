@@ -1,9 +1,9 @@
-use crate::col::ColumnDefinitionBytes;
 use crate::constant::CommandByte;
 use crate::error::{Error, Result};
+use crate::protocol::TextRowPayload;
+use crate::protocol::connection::ColumnDefinitionBytes;
 use crate::protocol::packet::{ErrPayloadBytes, OkPayloadBytes};
 use crate::protocol::primitive::*;
-use crate::row::TextRowPayload;
 
 const MAX_PAYLOAD_LENGTH: usize = (1 << 24) - 4;
 
@@ -25,22 +25,12 @@ pub fn read_query_response(payload: &[u8]) -> Result<QueryResponse<'_>> {
     }
 
     match payload[0] {
-        0xFF => {
-            // Error packet - convert to Error
-            Err(ErrPayloadBytes(payload).into())
-        }
-        0x00 => {
-            // OK packet - query succeeded without result set
-            Ok(QueryResponse::Ok(OkPayloadBytes(payload)))
-        }
-        0xFB => {
-            // LOCAL INFILE packet - not yet supported
-            Err(Error::BadInputError(
-                "LOCAL INFILE queries are not yet supported".to_string(),
-            ))
-        }
+        0xFF => Err(ErrPayloadBytes(payload).into()),
+        0x00 => Ok(QueryResponse::Ok(OkPayloadBytes(payload))),
+        0xFB => Err(Error::BadConfigError(
+            "LOCAL INFILE queries are not yet supported".to_string(),
+        )),
         _ => {
-            // Result set - first byte is column count (length-encoded integer)
             let (column_count, _rest) = read_int_lenenc(payload)?;
             Ok(QueryResponse::ResultSet { column_count })
         }
@@ -52,14 +42,6 @@ pub fn read_query_response(payload: &[u8]) -> Result<QueryResponse<'_>> {
 pub enum QueryResponse<'a> {
     Ok(OkPayloadBytes<'a>),
     ResultSet { column_count: u64 },
-}
-
-/// Read text protocol row from query response
-pub fn read_text_row<'a>(payload: &'a [u8], num_columns: usize) -> Result<TextRowPayload<'a>> {
-    Ok(TextRowPayload {
-        data: payload,
-        num_columns,
-    })
 }
 
 // ============================================================================
@@ -89,26 +71,20 @@ pub enum QueryResult<'a> {
 ///
 /// Pure parsing state machine without handler dependencies.
 /// Each call to `drive()` can accept a payload with its own independent lifetime.
+#[derive(Default)]
 pub enum Query {
     /// Waiting for initial query response
+    #[default]
     Start,
     /// Reading column definitions
-    ReadingColumns {
-        num_columns: usize,
-        remaining: usize,
-    },
+    ReadingColumns { remaining: usize },
     /// Reading rows
-    ReadingRows { num_columns: usize },
+    ReadingRows,
     /// Finished
     Finished,
 }
 
 impl Query {
-    /// Create a new query state machine
-    pub fn new() -> Self {
-        Self::Start
-    }
-
     /// Drive the state machine with the next payload
     ///
     /// # Arguments
@@ -120,19 +96,16 @@ impl Query {
     pub fn drive<'a>(&mut self, payload: &'a [u8]) -> Result<QueryResult<'a>> {
         match self {
             Self::Start => {
-                // Parse query response
                 let response = read_query_response(payload)?;
 
                 match response {
                     QueryResponse::Ok(ok_bytes) => {
-                        // No rows to process
                         *self = Self::Finished;
                         Ok(QueryResult::NoResultSet(ok_bytes))
                     }
                     QueryResponse::ResultSet { column_count } => {
                         let num_columns = column_count as usize;
                         *self = Self::ReadingColumns {
-                            num_columns,
                             remaining: num_columns,
                         };
                         Ok(QueryResult::NeedPayload)
@@ -140,22 +113,16 @@ impl Query {
                 }
             }
 
-            Self::ReadingColumns {
-                num_columns,
-                remaining,
-            } => {
-                // Store the raw packet bytes
+            Self::ReadingColumns { remaining } => {
                 *remaining -= 1;
 
                 if *remaining == 0 {
-                    *self = Self::ReadingRows {
-                        num_columns: *num_columns,
-                    };
+                    *self = Self::ReadingRows;
                 }
                 Ok(QueryResult::Column(ColumnDefinitionBytes(payload)))
             }
 
-            Self::ReadingRows { num_columns } => {
+            Self::ReadingRows => {
                 // A valid row's first item is NULL (0xFB) or string<lenenc>.
                 // string<lenenc> starts with int<lenenc> which cannot start with 0xFF (ErrPacket header).
                 // Hence, 0xFF always means Err.
@@ -163,27 +130,16 @@ impl Query {
                 // Similarly, string<lenenc> starting with 0xFE means that the length of a string is at least 2^24, which means the packet is of the size 2^24.
                 // The Ok-Packet for EOF cannot be this long, therefore 0xFE with payload.len() determines the payload length.
                 match payload.first() {
-                    Some(0xFF) => {
-                        // ErrPacket
-                        Err(ErrPayloadBytes(payload))?
-                    }
+                    Some(0xFF) => Err(ErrPayloadBytes(payload))?,
                     Some(0xFE) if payload.len() != MAX_PAYLOAD_LENGTH => {
-                        // OkPacket (EOF)
                         *self = Self::Finished;
                         Ok(QueryResult::Eof(OkPayloadBytes(payload)))
                     }
-                    _ => {
-                        // Text protocol row (doesn't start with 0x00 or 0xFE)
-                        let row = read_text_row(payload, *num_columns)?;
-                        Ok(QueryResult::Row(row))
-                    }
+                    _ => Ok(QueryResult::Row(TextRowPayload(payload))),
                 }
             }
 
-            Self::Finished => {
-                // Should not receive more data after done
-                Err(Error::InvalidPacket)
-            }
+            Self::Finished => Err(Error::InvalidPacket),
         }
     }
 }

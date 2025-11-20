@@ -1,6 +1,6 @@
-use zero_mysql::col::ColumnDefinitionBytes;
 use zero_mysql::error::Result;
-use zero_mysql::row::TextRowPayload;
+use zero_mysql::protocol::TextRowPayload;
+use zero_mysql::protocol::connection::ColumnDefinitionBytes;
 use zero_mysql::tokio::Conn;
 
 #[tokio::main]
@@ -20,12 +20,12 @@ async fn main() -> Result<()> {
 
     // Create a simple handler using the new TextResultSetHandler trait
     struct TextHandler {
-        column_count: usize,
+        num_columns: usize,
     }
 
     impl TextHandler {
         fn new() -> Self {
-            Self { column_count: 0 }
+            Self { num_columns: 0 }
         }
     }
 
@@ -41,23 +41,19 @@ async fn main() -> Result<()> {
 
         fn resultset_start(&mut self, num_columns: usize) -> Result<()> {
             println!("Result set started with {} columns", num_columns);
-            self.column_count = num_columns;
+            self.num_columns = num_columns;
             Ok(())
         }
 
         fn col(&mut self, col: ColumnDefinitionBytes) -> Result<()> {
             // Parse the full column definition to get the name
-            let col_def: zero_mysql::col::ColumnDefinition = col.try_into()?;
-            println!("  Column: {}", col_def.name);
+            let col_def: zero_mysql::protocol::connection::ColumnDefinition = col.try_into()?;
+            println!("  Column: {:?}", col_def.name);
             Ok(())
         }
 
         fn row(&mut self, row: &TextRowPayload) -> Result<()> {
-            println!(
-                "Row data (raw bytes, {} columns): {} bytes",
-                row.num_columns(),
-                row.data().len()
-            );
+            println!("Row data (raw bytes): {} bytes", row.0.len());
             // Note: Text protocol row parsing would be done by an external library
             // For now we just show the raw data exists
             Ok(())

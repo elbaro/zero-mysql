@@ -5,9 +5,9 @@
 // Zero-copy value types that wrap slices from the buffer.
 // These types use the zerocopy crate for safe zero-copy parsing.
 
-use crate::col::ColumnTypeAndFlags;
 use crate::constant::{ColumnFlags, ColumnType};
 use crate::error::{Error, Result};
+use crate::protocol::connection::ColumnTypeAndFlags;
 use crate::protocol::primitive::*;
 use zerocopy::byteorder::little_endian::{U16 as U16LE, U32 as U32LE};
 use zerocopy::{FromBytes, Immutable, KnownLayout};

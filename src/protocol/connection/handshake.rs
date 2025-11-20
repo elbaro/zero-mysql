@@ -193,13 +193,12 @@ pub fn write_handshake_response(out: &mut Vec<u8>, response: &HandshakeResponse4
     }
 
     // auth plugin name (null-terminated, if CLIENT_PLUGIN_AUTH)
-    if let Some(plugin) = response.auth_plugin_name {
-        if response
+    if let Some(plugin) = response.auth_plugin_name
+        && response
             .capability_flags
             .contains(CapabilityFlags::CLIENT_PLUGIN_AUTH)
-        {
-            write_string_null(out, plugin);
-        }
+    {
+        write_string_null(out, plugin);
     }
 
     // TODO: CLIENT_CONNECT_ATTRS
@@ -287,13 +286,13 @@ pub fn auth_mysql_native_password(password: &str, challenge: &[u8]) -> [u8; 20] 
 
     // stage2_hash = SHA1(stage1_hash)
     let mut hasher = Sha1::new();
-    hasher.update(&stage1_hash);
+    hasher.update(stage1_hash);
     let stage2_hash = hasher.finalize();
 
     // token_hash = SHA1(challenge + stage2_hash)
     let mut hasher = Sha1::new();
     hasher.update(challenge);
-    hasher.update(&stage2_hash);
+    hasher.update(stage2_hash);
     let token_hash = hasher.finalize();
 
     // result = stage1_hash XOR token_hash
@@ -331,12 +330,12 @@ pub fn auth_caching_sha2_password(password: &str, challenge: &[u8]) -> [u8; 32] 
 
     // stage2 = SHA256(stage1)
     let mut hasher = Sha256::new();
-    hasher.update(&stage1);
+    hasher.update(stage1);
     let stage2 = hasher.finalize();
 
     // scramble = SHA256(stage2 + challenge)
     let mut hasher = Sha256::new();
-    hasher.update(&stage2);
+    hasher.update(stage2);
     hasher.update(challenge);
     let scramble = hasher.finalize();
 
@@ -365,7 +364,7 @@ pub fn read_caching_sha2_password_fast_auth_result(
     payload: &[u8],
 ) -> Result<CachingSha2PasswordFastAuthResult> {
     if payload.is_empty() {
-        return Err(Error::UnexpectedEof);
+        return Err(Error::InvalidPacket);
     }
 
     match payload[0] {
@@ -532,7 +531,7 @@ impl Handshake {
                 server_version,
             } => {
                 if payload.is_empty() {
-                    return Err(Error::UnexpectedEof);
+                    return Err(Error::InvalidPacket);
                 }
 
                 match payload[0] {
@@ -612,7 +611,7 @@ impl Handshake {
                 server_version,
             } => {
                 if payload.is_empty() {
-                    return Err(Error::UnexpectedEof);
+                    return Err(Error::InvalidPacket);
                 }
 
                 match payload[0] {

@@ -3,8 +3,9 @@ pub mod connection;
 pub mod packet;
 pub mod primitive;
 pub mod response;
+mod row;
 pub mod r#trait;
 pub mod value;
 
-// Re-export common traits
+pub use row::{BinaryRowPayload, TextRowPayload};
 pub use r#trait::{ResultSetHandler, RowDecoder};

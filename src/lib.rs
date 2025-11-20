@@ -1,11 +1,9 @@
 #![feature(write_all_vectored)]
 
-pub mod col;
-mod opts;
 pub mod constant;
 pub mod error;
+mod opts;
 pub mod protocol;
-pub mod row;
 pub mod sync;
 
 pub use opts::Opts;

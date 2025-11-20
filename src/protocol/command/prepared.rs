@@ -1,10 +1,10 @@
-use crate::col::ColumnDefinitionBytes;
 use crate::constant::CommandByte;
 use crate::error::{Error, Result};
+use crate::protocol::BinaryRowPayload;
+use crate::protocol::connection::ColumnDefinitionBytes;
 use crate::protocol::packet::{ErrPayloadBytes, OkPayloadBytes};
 use crate::protocol::primitive::*;
 use crate::protocol::r#trait::params::Params;
-use crate::row::RowPayload;
 use zerocopy::byteorder::little_endian::{U16 as U16LE, U32 as U32LE};
 use zerocopy::{FromBytes, Immutable, KnownLayout};
 
@@ -41,10 +41,9 @@ pub fn read_prepare_ok(payload: &[u8]) -> Result<&PrepareOk> {
 
     // PrepareOk is 11 bytes (4 + 2 + 2 + 1 + 2)
     if data.len() < 11 {
-        return Err(Error::UnexpectedEof);
+        return Err(Error::InvalidPacket);
     }
 
-    // Zero-copy cast using zerocopy
     PrepareOk::ref_from_bytes(&data[..11]).map_err(|_| Error::InvalidPacket)
 
     // Note: If num_params > 0, server will send param definitions
@@ -72,13 +71,11 @@ pub fn write_execute<P: Params>(out: &mut Vec<u8>, statement_id: u32, params: P)
         // new-params-bound-flag (1 byte)
         if params.send_types_to_server() {
             write_int_1(out, 0x01);
-            // Write parameter types
             params.write_types(out);
         } else {
             write_int_1(out, 0x00);
         }
 
-        // Write parameter values
         params.write_values(out)?; // Ignore errors for now (non-priority)
     }
     Ok(())
@@ -93,12 +90,8 @@ pub fn read_execute_response(payload: &[u8]) -> Result<ExecuteResponse<'_>> {
 
     match payload[0] {
         0x00 => Ok(ExecuteResponse::Ok(OkPayloadBytes(payload))),
-        0xFF => {
-            // Error packet - convert to Error
-            Err(ErrPayloadBytes(payload).into())
-        }
+        0xFF => Err(ErrPayloadBytes(payload).into()),
         _ => {
-            // Result set - first byte is column count
             let (column_count, _rest) = read_int_lenenc(payload)?;
             Ok(ExecuteResponse::ResultSet { column_count })
         }
@@ -113,7 +106,7 @@ pub enum ExecuteResponse<'a> {
 }
 
 /// Read binary protocol row from execute response
-pub fn read_binary_row<'a>(payload: &'a [u8], num_columns: usize) -> Result<RowPayload<'a>> {
+pub fn read_binary_row<'a>(payload: &'a [u8], num_columns: usize) -> Result<BinaryRowPayload<'a>> {
     crate::protocol::command::resultset::read_binary_row(payload, num_columns)
 }
 
@@ -149,7 +142,7 @@ pub enum ExecResult<'a> {
     /// Caller should parse these into ColumnDefinition using read_column_definition
     Column(ColumnDefinitionBytes<'a>),
     /// Row data received
-    Row(RowPayload<'a>),
+    Row(BinaryRowPayload<'a>),
     /// Result set finished with EOF
     Eof(OkPayloadBytes<'a>),
 }
@@ -158,8 +151,10 @@ pub enum ExecResult<'a> {
 ///
 /// Pure parsing state machine without handler dependencies.
 /// Each call to `drive()` can accept a payload with its own independent lifetime.
+#[derive(Default)]
 pub enum Exec {
     /// Waiting for initial execute response
+    #[default]
     Start,
     /// Reading column definitions
     ReadingColumns {
@@ -173,11 +168,6 @@ pub enum Exec {
 }
 
 impl Exec {
-    /// Create a new exec_fold state machine
-    pub fn new() -> Self {
-        Self::Start
-    }
-
     /// Drive the state machine with the next payload
     ///
     /// # Arguments
@@ -189,12 +179,10 @@ impl Exec {
     pub fn drive<'a>(&mut self, payload: &'a [u8]) -> Result<ExecResult<'a>> {
         match self {
             Self::Start => {
-                // Parse execute response
                 let response = read_execute_response(payload)?;
 
                 match response {
                     ExecuteResponse::Ok(ok_bytes) => {
-                        // No rows to process
                         *self = Self::Finished;
                         Ok(ExecResult::NoResultSet(ok_bytes))
                     }
@@ -213,7 +201,6 @@ impl Exec {
                 num_columns,
                 remaining,
             } => {
-                // Store the raw packet bytes
                 *remaining -= 1;
 
                 if *remaining == 0 {
@@ -224,28 +211,21 @@ impl Exec {
                 Ok(ExecResult::Column(ColumnDefinitionBytes(payload)))
             }
 
-            Self::ReadingRows { num_columns } => {
-                match payload[0] {
-                    0x00 => {
-                        // Row packet
-                        let row = read_binary_row(payload, *num_columns)?;
-                        Ok(ExecResult::Row(row))
-                    }
-                    0xFE => {
-                        // EOF packet
-                        let eof_bytes = OkPayloadBytes(payload);
-                        eof_bytes.assert_eof()?;
-                        *self = Self::Finished;
-                        Ok(ExecResult::Eof(eof_bytes))
-                    }
-                    _ => Err(Error::InvalidPacket),
+            Self::ReadingRows { num_columns } => match payload[0] {
+                0x00 => {
+                    let row = read_binary_row(payload, *num_columns)?;
+                    Ok(ExecResult::Row(row))
                 }
-            }
+                0xFE => {
+                    let eof_bytes = OkPayloadBytes(payload);
+                    eof_bytes.assert_eof()?;
+                    *self = Self::Finished;
+                    Ok(ExecResult::Eof(eof_bytes))
+                }
+                _ => Err(Error::InvalidPacket),
+            },
 
-            Self::Finished => {
-                // Should not receive more data after done
-                Err(Error::InvalidPacket)
-            }
+            Self::Finished => Err(Error::InvalidPacket),
         }
     }
 }

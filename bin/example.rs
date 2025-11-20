@@ -1,5 +1,5 @@
-use zero_mysql::col::ColumnTypeAndFlags;
 use zero_mysql::error::Result;
+use zero_mysql::protocol::connection::ColumnTypeAndFlags;
 use zero_mysql::protocol::value::Value;
 use zero_mysql::sync::Conn;
 
@@ -51,12 +51,15 @@ fn main() -> Result<()> {
             Ok(())
         }
 
-        fn col(&mut self, col: zero_mysql::col::ColumnDefinitionBytes) -> Result<()> {
+        fn col(
+            &mut self,
+            col: zero_mysql::protocol::connection::ColumnDefinitionBytes,
+        ) -> Result<()> {
             self.cols.push(col.tail()?.type_and_flags()?);
             Ok(())
         }
 
-        fn row(&mut self, row: &zero_mysql::row::RowPayload) -> Result<()> {
+        fn row(&mut self, row: &zero_mysql::protocol::BinaryRowPayload) -> Result<()> {
             let mut values = vec![];
             let mut bytes = row.values();
             for i in 0..self.cols.len() {

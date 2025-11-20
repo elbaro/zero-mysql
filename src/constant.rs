@@ -1,4 +1,3 @@
-/// MySQL command bytes
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CommandByte {
@@ -36,7 +35,6 @@ pub enum CommandByte {
 }
 
 bitflags::bitflags! {
-    /// MySQL Client Capability Flags
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct CapabilityFlags: u32 {
         /// Use the improved version of Old Password Authentication (deprecated, assumed set since 4.1.1)
@@ -106,7 +104,7 @@ bitflags::bitflags! {
     }
 }
 
-// Capabilities that are always enabled (core library capabilities)
+// Capabilities that are always enabled (required by zero-mysql)
 pub const CAPABILITIES_ALWAYS_ENABLED: CapabilityFlags = CapabilityFlags::CLIENT_LONG_FLAG
     .union(CapabilityFlags::CLIENT_PROTOCOL_41)
     .union(CapabilityFlags::CLIENT_TRANSACTIONS)
@@ -118,14 +116,13 @@ pub const CAPABILITIES_ALWAYS_ENABLED: CapabilityFlags = CapabilityFlags::CLIENT
     .union(CapabilityFlags::CLIENT_PLUGIN_AUTH_LENENC_CLIENT_DATA)
     .union(CapabilityFlags::CLIENT_DEPRECATE_EOF);
 
-// Capabilities that are user configurable per connection
+// Capabilities that are configurable by user
 pub const CAPABILITIES_CONFIGURABLE: CapabilityFlags = CapabilityFlags::CLIENT_FOUND_ROWS
     .union(CapabilityFlags::CLIENT_COMPRESS)
     .union(CapabilityFlags::CLIENT_LOCAL_FILES)
     .union(CapabilityFlags::CLIENT_IGNORE_SPACE)
     .union(CapabilityFlags::CLIENT_SSL)
     .union(CapabilityFlags::CLIENT_CAN_HANDLE_EXPIRED_PASSWORDS)
-    .union(CapabilityFlags::CLIENT_SESSION_TRACK)
     .union(CapabilityFlags::CLIENT_OPTIONAL_RESULTSET_METADATA)
     .union(CapabilityFlags::CLIENT_CONNECT_WITH_DB);
 
@@ -136,19 +133,19 @@ pub const CAPABILITIES_ALWAYS_DISABLED: CapabilityFlags = CapabilityFlags::CLIEN
     .union(CapabilityFlags::CLIENT_INTERACTIVE)
     .union(CapabilityFlags::CLIENT_IGNORE_SIGPIPE)
     .union(CapabilityFlags::CLIENT_RESERVED)
-    // .union(CapabilityFlags::CLIENT_SECURE_CONNECTION)
     .union(CapabilityFlags::CLIENT_QUERY_ATTRIBUTES)
     .union(CapabilityFlags::CLIENT_ZSTD_COMPRESSION_ALGORITHM)
     .union(CapabilityFlags::CLIENT_MULTI_FACTOR_AUTHENTICATION)
     .union(CapabilityFlags::CLIENT_CAPABILITY_EXTENSION)
     .union(CapabilityFlags::CLIENT_SSL_VERIFY_SERVER_CERT)
     .union(CapabilityFlags::CLIENT_REMEMBER_OPTIONS)
-    .union(CapabilityFlags::CLIENT_CONNECT_ATTRS); // TODO
+    .union(CapabilityFlags::CLIENT_CONNECT_ATTRS) // TODO
+    .union(CapabilityFlags::CLIENT_SESSION_TRACK); // To support this flag, we need to update the parsing logic
 
-/// Server status flags
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StatusFlags(pub u16);
 
+/// 0x0004 does not exist
 impl StatusFlags {
     pub const SERVER_STATUS_IN_TRANS: u16 = 0x0001;
     pub const SERVER_STATUS_AUTOCOMMIT: u16 = 0x0002;
@@ -213,7 +210,6 @@ bitflags::bitflags! {
     }
 }
 
-/// MySQL column types
 #[allow(non_camel_case_types)]
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

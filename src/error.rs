@@ -10,17 +10,8 @@ pub enum Error {
     #[error("IO error: {0}")]
     IoError(#[from] std::io::Error),
 
-    #[error("Unknown protocol error: {0}")]
-    UnknownProtocolError(String),
-
-    #[error("Bad input error: {0}")]
-    BadInputError(String),
-
-    #[error("Library bug: {0}")]
-    LibraryBug(String),
-
-    #[error("Unexpected EOF")]
-    UnexpectedEof,
+    #[error("Bad config error: {0}")]
+    BadConfigError(String),
 
     #[error("Invalid packet")]
     InvalidPacket,

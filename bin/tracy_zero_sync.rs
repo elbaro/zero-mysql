@@ -1,6 +1,4 @@
-use zero_mysql::col::ColumnTypeAndFlags;
 use zero_mysql::error::Result;
-use zero_mysql::protocol::value::Value;
 use zero_mysql::sync::Conn;
 
 // #[global_allocator]

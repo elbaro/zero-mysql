@@ -1,3 +1,4 @@
+use crate::protocol::packet::PacketHeader;
 use compio::buf::BufResult;
 use compio::buf::IntoInner;
 use compio::buf::IoBuf;
@@ -10,8 +11,9 @@ use crate::error::{Error, Result};
 use crate::protocol::command::prepared::{read_prepare_ok, write_execute, write_prepare};
 use crate::protocol::connection::handshake::{Handshake, HandshakeResult};
 use crate::protocol::packet::ErrPayloadBytes;
-use crate::protocol::packet::write_packet_header_array;
 use crate::protocol::r#trait::{ResultSetHandler, TextResultSetHandler, params::Params};
+
+use zerocopy::IntoBytes;
 
 /// A MySQL connection with an async TCP stream (compio runtime)
 ///
@@ -75,10 +77,9 @@ impl Conn {
         }
 
         // Extract host
-        let host = opts
-            .host
-            .as_ref()
-            .ok_or_else(|| Error::BadInputError("Missing host in connection options".to_string()))?;
+        let host = opts.host.as_ref().ok_or_else(|| {
+            Error::BadConfigError("Missing host in connection options".to_string())
+        })?;
 
         // Connect to server
         let stream = TcpStream::connect((host.as_str(), opts.port)).await?;
@@ -176,7 +177,7 @@ impl Conn {
 
     /// Get a buffer from the pool or create a new one
     fn get_buffer(&mut self) -> Vec<u8> {
-        self.buffer_pool.pop().unwrap_or_else(Vec::new)
+        self.buffer_pool.pop().unwrap_or_default()
     }
 
     /// Return a buffer to the pool
@@ -196,16 +197,9 @@ impl Conn {
         let payload = self.write_buffer.as_slice();
 
         // Calculate number of chunks needed
-        let num_chunks = (payload.len() + 0xFFFFFF - 1) / 0xFFFFFF;
-        let needs_empty_packet = payload.len() % 0xFFFFFF == 0 && !payload.is_empty();
-        let total_headers = if needs_empty_packet {
-            num_chunks + 1
-        } else {
-            num_chunks
-        };
-
-        // Pre-calculate total size: headers (4 bytes each) + payload
-        let total_size = total_headers * 4 + payload.len();
+        let num_chunks = payload.len() / 0xFFFFFF + 1;
+        let needs_empty_packet = payload.len().is_multiple_of(0xFFFFFF) && !payload.is_empty();
+        let total_size = num_chunks * 4 + payload.len();
 
         // Reuse packet buffer, reserve capacity if needed
         self.packet_buf.clear();
@@ -221,8 +215,8 @@ impl Conn {
             let (chunk, rest) = remaining.split_at(chunk_size);
 
             // Write header
-            let header = write_packet_header_array(sequence_id, chunk_size);
-            self.packet_buf.extend_from_slice(&header);
+            let header = PacketHeader::encode(chunk_size, sequence_id);
+            self.packet_buf.extend_from_slice(header.as_bytes());
 
             // Write chunk
             self.packet_buf.extend_from_slice(chunk);
@@ -233,8 +227,8 @@ impl Conn {
 
         // Add empty packet if last chunk was exactly 0xFFFFFF bytes
         if needs_empty_packet {
-            let header = write_packet_header_array(sequence_id, 0);
-            self.packet_buf.extend_from_slice(&header);
+            let header = PacketHeader::encode(0, sequence_id);
+            self.packet_buf.extend_from_slice(header.as_bytes());
         }
 
         // Write all data - take ownership of packet_buf
@@ -338,7 +332,7 @@ impl Conn {
         self.write_payload(0).await?;
 
         // Create the state machine
-        let mut exec = Exec::new();
+        let mut exec = Exec::default();
 
         // Drive the state machine: read payloads and drive
         loop {
@@ -416,7 +410,7 @@ impl Conn {
         self.write_payload(0).await?;
 
         // Create the state machine
-        let mut exec = Exec::new();
+        let mut exec = Exec::default();
         let mut first_row_found = false;
 
         // Drive the state machine: read payloads and drive
@@ -493,7 +487,7 @@ impl Conn {
         self.write_payload(0).await?;
 
         // Create the state machine
-        let mut exec = Exec::new();
+        let mut exec = Exec::default();
 
         // Drive the state machine: read payloads and drive, but don't process results
         loop {
@@ -559,7 +553,7 @@ impl Conn {
         self.write_payload(0).await?;
 
         // Create the state machine
-        let mut query_fold = Query::new();
+        let mut query_fold = Query::default();
 
         // Drive the state machine: read payloads and drive
         loop {
@@ -625,7 +619,7 @@ impl Conn {
         self.write_payload(0).await?;
 
         // Create the state machine
-        let mut query = Query::new();
+        let mut query = Query::default();
 
         // Drive the state machine: read payloads and drive, but don't process results
         loop {
@@ -770,8 +764,8 @@ where
         let (chunk, rest) = remaining.split_at(chunk_size);
 
         // Write header
-        let header = write_packet_header_array(sequence_id, chunk_size);
-        packet_buf.extend_from_slice(&header);
+        let header = PacketHeader::encode(chunk_size, sequence_id);
+        packet_buf.extend_from_slice(header.as_bytes());
 
         // Write chunk
         packet_buf.extend_from_slice(chunk);
@@ -783,8 +777,8 @@ where
 
     // If the last chunk was exactly 0xFFFFFF bytes, add an empty packet to signal EOF
     if last_chunk_size == 0xFFFFFF {
-        let header = write_packet_header_array(sequence_id, 0);
-        packet_buf.extend_from_slice(&header);
+        let header = PacketHeader::encode(0, sequence_id);
+        packet_buf.extend_from_slice(header.as_bytes());
     }
 
     // Write all data

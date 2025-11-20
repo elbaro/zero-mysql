@@ -3,7 +3,6 @@ use std::time::Instant;
 use tokio::fs::OpenOptions;
 use tokio::io::{AsyncWrite, AsyncWriteExt};
 
-const MB_16: usize = 16 * 1024 * 1024;
 const PAYLOAD_SIZE: usize = 1024; // 1KB payload
 const NUM_ITERATIONS: usize = 100_000;
 
@@ -45,12 +44,16 @@ async fn write_payload_vectored<W: AsyncWrite + Unpin>(
     for header in headers_buffer.iter() {
         let chunk_size = u32::from_le_bytes([header[0], header[1], header[2], 0]) as usize;
 
-        ioslice_buffer.push(unsafe { std::mem::transmute(IoSlice::new(header)) });
+        ioslice_buffer.push(unsafe {
+            std::mem::transmute::<IoSlice<'_>, IoSlice<'static>>(IoSlice::new(header))
+        });
 
         if chunk_size > 0 {
             let chunk;
             (chunk, remaining) = remaining.split_at(chunk_size);
-            ioslice_buffer.push(unsafe { std::mem::transmute(IoSlice::new(chunk)) });
+            ioslice_buffer.push(unsafe {
+                std::mem::transmute::<IoSlice<'_>, IoSlice<'static>>(IoSlice::new(chunk))
+            });
         }
     }
 

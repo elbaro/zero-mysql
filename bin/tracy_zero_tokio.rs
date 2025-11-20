@@ -1,6 +1,6 @@
-use zero_mysql::col::ColumnDefinitionBytes;
 use zero_mysql::error::Result;
-use zero_mysql::row::TextRowPayload;
+use zero_mysql::protocol::TextRowPayload;
+use zero_mysql::protocol::connection::ColumnDefinitionBytes;
 use zero_mysql::tokio::Conn;
 
 // #[global_allocator]
@@ -82,7 +82,7 @@ async fn main() -> Result<()> {
     for iteration in 0..10 {
         let iteration_start = std::time::Instant::now();
 
-        for (row_id, (username, age, email, score, description)) in rows.iter().enumerate() {
+        for (username, age, email, score, description) in rows.iter() {
             // let _row_span = tracing::trace_span!("row", row_id).entered();
             conn.exec_drop(
                 insert_stmt,

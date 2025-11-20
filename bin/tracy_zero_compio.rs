@@ -1,7 +1,7 @@
-use zero_mysql::col::ColumnDefinitionBytes;
 use zero_mysql::compio::Conn;
 use zero_mysql::error::Result;
-use zero_mysql::row::TextRowPayload;
+use zero_mysql::protocol::TextRowPayload;
+use zero_mysql::protocol::connection::ColumnDefinitionBytes;
 
 // #[global_allocator]
 // static GLOBAL: tracy_client::ProfiledAllocator<std::alloc::System> =
@@ -88,7 +88,7 @@ async fn async_main() -> Result<()> {
     for iteration in 0..10 {
         let iteration_start = std::time::Instant::now();
 
-        for (row_id, (username, age, email, score, description)) in rows.iter().enumerate() {
+        for (username, age, email, score, description) in rows.iter() {
             // let _row_span = tracing::trace_span!("row", row_id).entered();
             conn.exec_drop(
                 insert_stmt,

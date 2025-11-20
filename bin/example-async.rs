@@ -1,5 +1,5 @@
-use zero_mysql::col::ColumnTypeAndFlags;
 use zero_mysql::error::Result;
+use zero_mysql::protocol::connection::ColumnTypeAndFlags;
 use zero_mysql::protocol::value::Value;
 use zero_mysql::tokio::Conn;
 
@@ -52,12 +52,15 @@ async fn main() -> Result<()> {
             Ok(())
         }
 
-        fn col(&mut self, col: zero_mysql::col::ColumnDefinitionBytes) -> Result<()> {
+        fn col(
+            &mut self,
+            col: zero_mysql::protocol::connection::ColumnDefinitionBytes,
+        ) -> Result<()> {
             self.cols.push(col.tail()?.type_and_flags()?);
             Ok(())
         }
 
-        fn row(&mut self, row: &zero_mysql::row::RowPayload) -> Result<()> {
+        fn row(&mut self, row: &zero_mysql::protocol::BinaryRowPayload) -> Result<()> {
             let mut values = vec![];
             let mut bytes = row.values();
             for i in 0..self.cols.len() {
@@ -87,7 +90,7 @@ async fn main() -> Result<()> {
 
     let mut decoder = Handler::new();
     let params = [2i32];
-    conn.exec(stmt_id, &params, &mut decoder).await?;
+    conn.exec(stmt_id, params, &mut decoder).await?;
 
     // Test INSERT
     println!("\n--- Testing INSERT ---");
@@ -127,7 +130,7 @@ async fn main() -> Result<()> {
             score,
             description.as_str(),
         );
-        conn.exec(insert_stmt, &insert_params, &mut insert_decoder)
+        conn.exec(insert_stmt, insert_params, &mut insert_decoder)
             .await?;
     }
     println!("Inserted 10 rows");
@@ -139,7 +142,7 @@ async fn main() -> Result<()> {
         .await?;
     let mut select_decoder = Handler::new();
     let select_params: [i32; 0] = [];
-    conn.exec(select_stmt, &select_params, &mut select_decoder)
+    conn.exec(select_stmt, select_params, &mut select_decoder)
         .await?;
 
     println!("\nExample completed successfully!");

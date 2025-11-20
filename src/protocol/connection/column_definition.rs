@@ -4,39 +4,32 @@ use crate::protocol::primitive::*;
 use zerocopy::byteorder::little_endian::{U16 as U16LE, U32 as U32LE};
 use zerocopy::{FromBytes, Immutable, KnownLayout};
 
-/// Column definition bytes from MySQL protocol
-///
-/// This is a zero-copy wrapper around the raw bytes of a column definition packet.
+/// Represents a payload part of a column definition packet
 #[derive(Debug, Clone, Copy)]
 pub struct ColumnDefinitionBytes<'a>(pub &'a [u8]);
 
 impl<'a> ColumnDefinitionBytes<'a> {
-    /// Create a new ColumnDefinitionBytes from raw packet bytes
-    pub fn new(bytes: &'a [u8]) -> Self {
-        Self(bytes)
-    }
-
     /// Get a reference to the fixed-size tail of the column definition
     ///
     /// The tail is always the last 12 bytes of the column definition packet
     pub fn tail(&self) -> Result<&'a ColumnDefinitionTail> {
         if self.0.len() < 12 {
-            return Err(Error::UnexpectedEof);
+            return Err(Error::InvalidPacket);
         }
         let tail_bytes = &self.0[self.0.len() - 12..];
         ColumnDefinitionTail::ref_from_bytes(tail_bytes).map_err(|_| Error::InvalidPacket)
     }
 }
 
-/// Column definition from MySQL protocol
+/// The column definition parsed from `ColumnDefinitionBytes`
 #[derive(Debug, Clone)]
 pub struct ColumnDefinition<'a> {
-    pub catalog: String,
-    pub schema: String,
-    pub table: String,
-    pub org_table: String,
-    pub name: String,
-    pub org_name: String,
+    pub catalog: &'a [u8],
+    pub schema: &'a [u8],
+    pub table: &'a [u8],
+    pub org_table: &'a [u8],
+    pub name: &'a [u8],
+    pub org_name: &'a [u8],
     pub tail: &'a ColumnDefinitionTail,
 }
 
@@ -44,44 +37,20 @@ impl<'a> TryFrom<ColumnDefinitionBytes<'a>> for ColumnDefinition<'a> {
     type Error = Error;
 
     fn try_from(bytes: ColumnDefinitionBytes<'a>) -> Result<Self> {
-        let mut data = bytes.0;
+        let data = bytes.0;
 
-        // catalog (length-encoded string)
-        let (catalog_bytes, rest) = read_string_lenenc(data)?;
-        let catalog = String::from_utf8_lossy(catalog_bytes).to_string();
-        data = rest;
+        // ─── Variable Length String Fields ───────────────────────────
+        let (catalog, data) = read_string_lenenc(data)?;
+        let (schema, data) = read_string_lenenc(data)?;
+        let (table, data) = read_string_lenenc(data)?;
+        let (org_table, data) = read_string_lenenc(data)?;
+        let (name, data) = read_string_lenenc(data)?;
+        let (org_name, data) = read_string_lenenc(data)?;
 
-        // schema (length-encoded string)
-        let (schema_bytes, rest) = read_string_lenenc(data)?;
-        let schema = String::from_utf8_lossy(schema_bytes).to_string();
-        data = rest;
-
-        // table (length-encoded string)
-        let (table_bytes, rest) = read_string_lenenc(data)?;
-        let table = String::from_utf8_lossy(table_bytes).to_string();
-        data = rest;
-
-        // org_table (length-encoded string)
-        let (org_table_bytes, rest) = read_string_lenenc(data)?;
-        let org_table = String::from_utf8_lossy(org_table_bytes).to_string();
-        data = rest;
-
-        // name (length-encoded string)
-        let (name_bytes, rest) = read_string_lenenc(data)?;
-        let name = String::from_utf8_lossy(name_bytes).to_string();
-        data = rest;
-
-        // org_name (length-encoded string)
-        let (org_name_bytes, rest) = read_string_lenenc(data)?;
-        let org_name = String::from_utf8_lossy(org_name_bytes).to_string();
-        data = rest;
-
-        // length of fixed-length fields (0x0c = 12) - we skip this
-        let (_fixed_len, _rest) = read_int_lenenc(data)?;
-
-        // Parse the tail using ColumnDefinitionBytes (zero-copy reference)
-        let tail = bytes.tail()?;
-
+        // ─── Columndefinitiontail ────────────────────────────────────
+        // length is always 0x0c
+        let (_length, data) = read_int_lenenc(data)?;
+        let tail = ColumnDefinitionTail::ref_from_bytes(data).map_err(|_| Error::InvalidPacket)?;
         Ok(Self {
             catalog,
             schema,
@@ -102,64 +71,36 @@ pub struct ColumnTypeAndFlags {
 }
 
 /// Fixed-size tail of Column Definition packet (12 bytes)
-///
-/// This structure represents the constant-size portion of the Column Definition packet
-/// that follows the variable-length string fields (catalog, schema, table, org_table, name, org_name).
-///
-/// Structure (after length-encoded 0x0C indicator):
-/// - Character set: 2 bytes (little-endian)
-/// - Column length: 4 bytes (little-endian)
-/// - Column type: 1 byte
-/// - Flags: 2 bytes (little-endian)
-/// - Decimals: 1 byte
-/// - Reserved: 2 bytes (unused, little-endian)
-///
-/// Reference: https://mariadb.com/docs/server/reference/clientserver-protocol/4-server-response-packets/result-set-packets#column-definition-packet
 #[repr(C, packed)]
 #[derive(Debug, Clone, Copy, FromBytes, KnownLayout, Immutable)]
 pub struct ColumnDefinitionTail {
-    /// Character set number (2 bytes LE)
     charset: U16LE,
-    /// Maximum column size (4 bytes LE)
     column_length: U32LE,
-    /// Column/field type (1 byte)
     column_type: u8,
-    /// Field detail flags (2 bytes LE)
     flags: U16LE,
-    /// Number of decimals (1 byte)
     decimals: u8,
-    /// Reserved/unused (2 bytes LE)
     reserved: U16LE,
 }
 
 impl ColumnDefinitionTail {
-    /// Get the character set as a native u16
     pub fn charset(&self) -> u16 {
         self.charset.get()
     }
 
-    /// Get the column length as a native u32
     pub fn column_length(&self) -> u32 {
         self.column_length.get()
     }
 
-    /// Get the flags as a ColumnFlags bitflags type
-    ///
-    /// Returns an error if the flags contain unknown bits
-    pub fn flags(&self) -> Result<ColumnFlags> {
-        ColumnFlags::from_bits(self.flags.get()).ok_or(Error::InvalidPacket)
-    }
-
-    /// Get the column type as a ColumnType enum
-    ///
     /// Returns an error if the column type is unknown
     pub fn column_type(&self) -> Result<ColumnType> {
         ColumnType::from_u8(self.column_type).ok_or(Error::InvalidPacket)
     }
 
-    /// Get both column type and flags together
-    ///
-    /// Returns an error if the column type or flags contain unknown values
+    pub fn flags(&self) -> Result<ColumnFlags> {
+        ColumnFlags::from_bits(self.flags.get()).ok_or(Error::InvalidPacket)
+    }
+
+    /// A handy function to get `ColumnTypeAndFlags` for decoding a value
     pub fn type_and_flags(&self) -> Result<ColumnTypeAndFlags> {
         Ok(ColumnTypeAndFlags {
             column_type: self.column_type()?,
@@ -203,6 +144,11 @@ mod tests {
 
         let col_type = tail.column_type().expect("Failed to parse column type");
         assert_eq!(col_type, ColumnType::MYSQL_TYPE_VAR_STRING);
+
+        // Test type_and_flags
+        let type_and_flags = tail.type_and_flags().expect("Failed to get type_and_flags");
+        assert_eq!(type_and_flags.column_type, ColumnType::MYSQL_TYPE_VAR_STRING);
+        assert!(type_and_flags.flags.is_empty());
     }
 
     #[test]
@@ -226,6 +172,12 @@ mod tests {
 
         let col_type = tail.column_type().expect("Failed to parse column type");
         assert_eq!(col_type, ColumnType::MYSQL_TYPE_TINY);
+
+        // Test type_and_flags
+        let type_and_flags = tail.type_and_flags().expect("Failed to get type_and_flags");
+        assert_eq!(type_and_flags.column_type, ColumnType::MYSQL_TYPE_TINY);
+        assert!(type_and_flags.flags.contains(ColumnFlags::NOT_NULL_FLAG));
+        assert!(type_and_flags.flags.contains(ColumnFlags::UNSIGNED_FLAG));
     }
 
     #[test]
@@ -260,6 +212,14 @@ mod tests {
         // Verify column type
         let col_type = tail.column_type().expect("Failed to parse column type");
         assert_eq!(col_type, ColumnType::MYSQL_TYPE_LONG);
+
+        // Test type_and_flags
+        let type_and_flags = tail.type_and_flags().expect("Failed to get type_and_flags");
+        assert_eq!(type_and_flags.column_type, ColumnType::MYSQL_TYPE_LONG);
+        assert!(type_and_flags.flags.contains(ColumnFlags::NOT_NULL_FLAG));
+        assert!(type_and_flags.flags.contains(ColumnFlags::PRI_KEY_FLAG));
+        assert!(type_and_flags.flags.contains(ColumnFlags::AUTO_INCREMENT_FLAG));
+        assert!(type_and_flags.flags.contains(ColumnFlags::PART_KEY_FLAG));
     }
 
     #[test]
@@ -285,7 +245,7 @@ mod tests {
     fn test_column_definition_bytes() {
         // Simulate a minimal column definition packet with just the tail
         // In reality, there would be variable-length strings before the tail
-        let data: [u8; 12] = [
+        let data: &[u8; 12] = &[
             0x21, 0x00, // charset = 33 (utf8)
             0xFF, 0x00, 0x00, 0x00, // column_length = 255
             0x01, // column_type = 1 (TINYINT)
@@ -294,7 +254,7 @@ mod tests {
             0x00, 0x00, // reserved = 0
         ];
 
-        let col_bytes = ColumnDefinitionBytes::new(&data);
+        let col_bytes = ColumnDefinitionBytes(data);
         let tail = col_bytes.tail().expect("Failed to parse tail");
 
         assert_eq!(tail.charset(), 33);
@@ -312,8 +272,8 @@ mod tests {
     #[test]
     fn test_column_definition_bytes_too_short() {
         // Test with data that's too short
-        let data: [u8; 8] = [0; 8];
-        let col_bytes = ColumnDefinitionBytes::new(&data);
+        let data: &[u8; 8] = &[0; 8];
+        let col_bytes = ColumnDefinitionBytes(data);
         let result = col_bytes.tail();
         assert!(result.is_err());
     }
@@ -361,16 +321,16 @@ mod tests {
         ]);
 
         // Parse using TryFrom
-        let col_bytes = ColumnDefinitionBytes::new(&packet);
+        let col_bytes = ColumnDefinitionBytes(&packet);
         let col_def = ColumnDefinition::try_from(col_bytes).expect("Failed to parse");
 
         // Verify string fields
-        assert_eq!(col_def.catalog, "def");
-        assert_eq!(col_def.schema, "test");
-        assert_eq!(col_def.table, "users");
-        assert_eq!(col_def.org_table, "users");
-        assert_eq!(col_def.name, "id");
-        assert_eq!(col_def.org_name, "id");
+        assert_eq!(col_def.catalog, b"def");
+        assert_eq!(col_def.schema, b"test");
+        assert_eq!(col_def.table, b"users");
+        assert_eq!(col_def.org_table, b"users");
+        assert_eq!(col_def.name, b"id");
+        assert_eq!(col_def.org_name, b"id");
 
         // Verify tail fields
         assert_eq!(col_def.tail.charset(), 33);
@@ -386,5 +346,11 @@ mod tests {
             .column_type()
             .expect("Failed to parse column type");
         assert_eq!(col_type, ColumnType::MYSQL_TYPE_LONG);
+
+        // Test type_and_flags
+        let type_and_flags = col_def.tail.type_and_flags().expect("Failed to get type_and_flags");
+        assert_eq!(type_and_flags.column_type, ColumnType::MYSQL_TYPE_LONG);
+        assert!(type_and_flags.flags.contains(ColumnFlags::NOT_NULL_FLAG));
+        assert!(type_and_flags.flags.contains(ColumnFlags::PRI_KEY_FLAG));
     }
 }

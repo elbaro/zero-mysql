@@ -26,8 +26,9 @@ Its test, benchmark and feature development is driven by the need of [pyro-mysql
 - SSL/TLS
 - Authentication plugins other than username/password
 - MariaDB-specific flags
+- CLIENT_SESSION_TRACK, CLIENT_CONNECT_ATTRS
 
 ### Not Supported
 - MySQL <= 5.7.5
-- Old protocol (ColumnDefinition320 or MySQL 5.x)
+- Old protocol (ColumnDefinition320)
 - Non-UTF8 Encoding

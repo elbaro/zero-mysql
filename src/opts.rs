@@ -1,36 +1,43 @@
-use crate::constant::{CapabilityFlags, CAPABILITIES_ALWAYS_ENABLED};
+use crate::constant::{CAPABILITIES_ALWAYS_ENABLED, CapabilityFlags};
 use crate::error::Error;
 
-/// Connection options for MySQL connections.
-/// This struct will be exposed as a PyClass for Python bindings.
+/// A configuration for connection
+///
+/// ```rs
+/// let mut opts1 = Opts::default();
+/// opts1.port = 5000;
+///
+/// let mut opts2 = Opts::try_from("mysql://root:password@localhost:3306");
+/// opts2.compress = true;
+/// ```
 #[derive(Debug, Clone)]
 pub struct Opts {
     /// Enable TCP_NODELAY socket option to disable Nagle's algorithm
     /// Unix socket is not affected
     pub tcp_nodelay: bool,
 
-    /// MySQL client capability flags
+    /// The client capabilities are `CAPABILITIES_ALWAYS_ENABLED | (opts.capabilities & CAPABILITIES_CONFIGURABLE)`.
+    /// The final negotiated capabilities are `SERVER_CAPABILITIES & CLIENT_CAPABILITIES`.
     pub capabilities: CapabilityFlags,
 
     /// Enable compression for the connection
     pub compress: bool,
 
-    /// Database name to connect to
+    /// Database name to use
     pub db: Option<String>,
 
-    /// Hostname or IP address of the MySQL server
+    /// Hostname or IP address
     pub host: Option<String>,
 
     /// Port number for the MySQL server
     pub port: u16,
 
-    /// Unix socket path for local connections
+    /// Unix socket path
     pub socket: Option<String>,
 
     /// Username for authentication (can be empty for anonymous connections)
     pub user: String,
 
-    /// Password for authentication
     pub password: Option<String>,
 }
 
@@ -53,25 +60,14 @@ impl Default for Opts {
 impl TryFrom<&str> for Opts {
     type Error = Error;
 
-    /// Parse a MySQL connection URL into Opts
-    ///
-    /// # URL Format
-    /// ```text
-    /// mysql://[username[:password]@]host[:port][/database]
-    /// ```
-    ///
-    /// # Examples
-    /// - `mysql://localhost`
-    /// - `mysql://root:password@localhost:3306`
-    /// - `mysql://user:pass@127.0.0.1:3306/mydb`
     fn try_from(url: &str) -> Result<Self, Self::Error> {
         // Parse URL
         let parsed = url::Url::parse(url)
-            .map_err(|e| Error::BadInputError(format!("Failed to parse MySQL URL: {}", e)))?;
+            .map_err(|e| Error::BadConfigError(format!("Failed to parse MySQL URL: {}", e)))?;
 
         // Verify scheme
         if parsed.scheme() != "mysql" {
-            return Err(Error::BadInputError(format!(
+            return Err(Error::BadConfigError(format!(
                 "Invalid URL scheme '{}', expected 'mysql'",
                 parsed.scheme()
             )));
@@ -79,8 +75,6 @@ impl TryFrom<&str> for Opts {
 
         // Extract host (can be None for socket connections)
         let host = parsed.host_str().map(ToString::to_string);
-
-        // Extract port (default 3306)
         let port = parsed.port().unwrap_or(3306);
 
         // Extract username (default empty)

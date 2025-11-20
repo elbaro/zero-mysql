@@ -1,7 +1,7 @@
 use crate::error::{Error, Result};
+use crate::protocol::BinaryRowPayload;
 use crate::protocol::primitive::*;
 use crate::protocol::value::NullBitmap;
-use crate::row::RowPayload;
 
 /// Result set metadata header
 #[derive(Debug, Clone)]
@@ -17,7 +17,7 @@ pub fn read_binary_resultset_header(payload: &[u8]) -> Result<ResultSetHeader> {
 
 /// Read binary protocol row or EOF
 /// Returns None if this is an EOF packet
-pub fn read_binary_row<'a>(payload: &'a [u8], num_columns: usize) -> Result<RowPayload<'a>> {
+pub fn read_binary_row<'a>(payload: &'a [u8], num_columns: usize) -> Result<BinaryRowPayload<'a>> {
     // Binary protocol row packet starts with 0x00
     let (header, mut data) = read_int_1(payload)?;
     if header != 0x00 {
@@ -31,7 +31,7 @@ pub fn read_binary_row<'a>(payload: &'a [u8], num_columns: usize) -> Result<RowP
     data = rest;
 
     // Remaining data is the values
-    Ok(RowPayload {
+    Ok(BinaryRowPayload {
         null_bitmap: NullBitmap::for_result_set(null_bitmap),
         values: data,
         num_columns,

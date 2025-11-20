@@ -79,7 +79,7 @@ impl<T: Param> Params for &[T] {
 
     fn write_null_bitmap(&self, out: &mut Vec<u8>) {
         // Calculate number of bytes needed for NULL bitmap
-        let num_bytes = (self.len() + 7) / 8;
+        let num_bytes = self.len().div_ceil(8);
         let start_len = out.len();
         out.resize(start_len + num_bytes, 0);
 
@@ -145,7 +145,7 @@ macro_rules! impl_params_for_tuple {
             }
 
             fn write_null_bitmap(&self, out: &mut Vec<u8>) {
-                let num_bytes = (self.len() + 7) / 8;
+                let num_bytes = self.len().div_ceil(8);
                 let start_len = out.len();
                 out.resize(start_len + num_bytes, 0);
 

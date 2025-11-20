@@ -46,7 +46,7 @@ async fn main() -> Result<()> {
     for iteration in 0..1 {
         let iteration_start = std::time::Instant::now();
 
-        for (row_id, (username, age, email, score, description)) in rows.iter().enumerate() {
+        for (username, age, email, score, description) in rows.iter() {
             // let _row_span = tracing::trace_span!("row", row_id).entered();
             conn.exec_drop(
                 r"INSERT INTO test_bench (name, age, email, score, description)

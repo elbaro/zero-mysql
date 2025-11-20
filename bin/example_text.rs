@@ -1,6 +1,6 @@
-use zero_mysql::col::ColumnDefinitionBytes;
 use zero_mysql::error::Result;
-use zero_mysql::row::TextRowPayload;
+use zero_mysql::protocol::TextRowPayload;
+use zero_mysql::protocol::connection::ColumnDefinitionBytes;
 use zero_mysql::sync::Conn;
 
 fn main() -> Result<()> {
@@ -46,17 +46,13 @@ fn main() -> Result<()> {
 
         fn col(&mut self, col: ColumnDefinitionBytes) -> Result<()> {
             // Parse the full column definition to get the name
-            let col_def: zero_mysql::col::ColumnDefinition = col.try_into()?;
-            println!("  Column: {}", col_def.name);
+            let col_def: zero_mysql::protocol::connection::ColumnDefinition = col.try_into()?;
+            println!("  Column: {:?}", str::from_utf8(col_def.name));
             Ok(())
         }
 
         fn row(&mut self, row: &TextRowPayload) -> Result<()> {
-            println!(
-                "Row data (raw bytes, {} columns): {} bytes",
-                row.num_columns(),
-                row.data().len()
-            );
+            println!("Row data (raw bytes): {} bytes", row.0.len());
             // Note: Text protocol row parsing would be done by an external library
             // For now we just show the raw data exists
             Ok(())

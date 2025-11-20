@@ -5,7 +5,7 @@ use zerocopy::byteorder::little_endian::{U16 as U16LE, U32 as U32LE, U64 as U64L
 /// Read 1-byte integer
 pub fn read_int_1(data: &[u8]) -> Result<(u8, &[u8])> {
     if data.is_empty() {
-        return Err(Error::UnexpectedEof);
+        return Err(Error::InvalidPacket);
     }
     Ok((data[0], &data[1..]))
 }
@@ -13,7 +13,7 @@ pub fn read_int_1(data: &[u8]) -> Result<(u8, &[u8])> {
 /// Read 2-byte little-endian integer
 pub fn read_int_2(data: &[u8]) -> Result<(u16, &[u8])> {
     if data.len() < 2 {
-        return Err(Error::UnexpectedEof);
+        return Err(Error::InvalidPacket);
     }
     let value = U16LE::ref_from_bytes(&data[..2])
         .map_err(|_| Error::InvalidPacket)?
@@ -24,7 +24,7 @@ pub fn read_int_2(data: &[u8]) -> Result<(u16, &[u8])> {
 /// Read 3-byte little-endian integer
 pub fn read_int_3(data: &[u8]) -> Result<(u32, &[u8])> {
     if data.len() < 3 {
-        return Err(Error::UnexpectedEof);
+        return Err(Error::InvalidPacket);
     }
     let value = u32::from_le_bytes([data[0], data[1], data[2], 0]);
     Ok((value, &data[3..]))
@@ -33,7 +33,7 @@ pub fn read_int_3(data: &[u8]) -> Result<(u32, &[u8])> {
 /// Read 4-byte little-endian integer
 pub fn read_int_4(data: &[u8]) -> Result<(u32, &[u8])> {
     if data.len() < 4 {
-        return Err(Error::UnexpectedEof);
+        return Err(Error::InvalidPacket);
     }
     let value = U32LE::ref_from_bytes(&data[..4])
         .map_err(|_| Error::InvalidPacket)?
@@ -44,7 +44,7 @@ pub fn read_int_4(data: &[u8]) -> Result<(u32, &[u8])> {
 /// Read 6-byte little-endian integer
 pub fn read_int_6(data: &[u8]) -> Result<(u64, &[u8])> {
     if data.len() < 6 {
-        return Err(Error::UnexpectedEof);
+        return Err(Error::InvalidPacket);
     }
     let value = u64::from_le_bytes([data[0], data[1], data[2], data[3], data[4], data[5], 0, 0]);
     Ok((value, &data[6..]))
@@ -53,7 +53,7 @@ pub fn read_int_6(data: &[u8]) -> Result<(u64, &[u8])> {
 /// Read 8-byte little-endian integer
 pub fn read_int_8(data: &[u8]) -> Result<(u64, &[u8])> {
     if data.len() < 8 {
-        return Err(Error::UnexpectedEof);
+        return Err(Error::InvalidPacket);
     }
     let value = U64LE::ref_from_bytes(&data[..8])
         .map_err(|_| Error::InvalidPacket)?
@@ -64,27 +64,23 @@ pub fn read_int_8(data: &[u8]) -> Result<(u64, &[u8])> {
 /// Read length-encoded integer
 pub fn read_int_lenenc(data: &[u8]) -> Result<(u64, &[u8])> {
     if data.is_empty() {
-        return Err(Error::UnexpectedEof);
+        return Err(Error::InvalidPacket);
     }
 
     match data[0] {
         0xFC => {
-            // 2-byte integer
             let (val, rest) = read_int_2(&data[1..])?;
             Ok((val as u64, rest))
         }
         0xFD => {
-            // 3-byte integer
             let (val, rest) = read_int_3(&data[1..])?;
             Ok((val as u64, rest))
         }
         0xFE => {
-            // 8-byte integer
             let (val, rest) = read_int_8(&data[1..])?;
             Ok((val, rest))
         }
         val => {
-            // 1-byte integer
             Ok((val as u64, &data[1..]))
         }
     }
@@ -93,7 +89,7 @@ pub fn read_int_lenenc(data: &[u8]) -> Result<(u64, &[u8])> {
 /// Read fixed-length string
 pub fn read_string_fix(data: &[u8], len: usize) -> Result<(&[u8], &[u8])> {
     if data.len() < len {
-        return Err(Error::UnexpectedEof);
+        return Err(Error::InvalidPacket);
     }
     Ok((&data[..len], &data[len..]))
 }
@@ -106,7 +102,7 @@ pub fn read_string_null(data: &[u8]) -> Result<(&[u8], &[u8])> {
             return Ok((&data[..i], &data[i + 1..]));
         }
     }
-    Err(Error::UnexpectedEof)
+    Err(Error::InvalidPacket)
 }
 
 /// Read length-encoded string

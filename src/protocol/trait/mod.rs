@@ -1,10 +1,10 @@
 pub mod param;
 pub mod params;
 
-use crate::col::ColumnDefinitionBytes;
 use crate::error::Result;
+use crate::protocol::connection::ColumnDefinitionBytes;
 use crate::protocol::packet::OkPayloadBytes;
-use crate::row::{RowPayload, TextRowPayload};
+use crate::protocol::{BinaryRowPayload, TextRowPayload};
 
 /// Trait for decoding a single row from raw bytes
 ///
@@ -21,7 +21,7 @@ pub trait RowDecoder<'a> {
     /// # Returns
     /// * `Ok(Self::Output)` - Successfully decoded row
     /// * `Err(Error)` - Decoding failed
-    fn decode_row(&mut self, row: RowPayload<'a>) -> Result<Self::Output>;
+    fn decode_row(&mut self, row: BinaryRowPayload<'a>) -> Result<Self::Output>;
 }
 
 /// Trait that defines event callbacks for binary protocol result sets
@@ -30,7 +30,7 @@ pub trait ResultSetHandler<'a> {
     // fn err(&mut self, err: &ErrPayload) -> Result<()>;
     fn resultset_start(&mut self, num_columns: usize) -> Result<()>;
     fn col(&mut self, col: ColumnDefinitionBytes) -> Result<()>;
-    fn row(&mut self, row: &RowPayload) -> Result<()>;
+    fn row(&mut self, row: &BinaryRowPayload) -> Result<()>;
     fn resultset_end(&mut self, eof: OkPayloadBytes) -> Result<()>;
 }
 

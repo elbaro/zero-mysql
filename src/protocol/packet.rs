@@ -1,6 +1,6 @@
 use bytes::{Buf, BytesMut};
 use tokio_util::codec::Decoder;
-use zerocopy::{FromBytes, Immutable, KnownLayout};
+use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout};
 
 use crate::error::{Error, Result};
 
@@ -10,22 +10,28 @@ use crate::error::{Error, Result};
 /// - length: 3 bytes (little-endian, payload length)
 /// - sequence_id: 1 byte
 #[repr(C, packed)]
-#[derive(Debug, Clone, Copy, FromBytes, KnownLayout, Immutable)]
+#[derive(Debug, Clone, Copy, FromBytes, KnownLayout, Immutable, IntoBytes)]
 pub struct PacketHeader {
     pub length: [u8; 3],
     pub sequence_id: u8,
 }
 
 impl PacketHeader {
-    /// Get payload length as usize
+    pub fn encode(length: usize, sequence_id: u8) -> Self {
+        let len = u32::to_le_bytes(length as u32);
+        Self {
+            length: [len[0], len[1], len[2]],
+            sequence_id,
+        }
+    }
+
     pub fn length(&self) -> usize {
         u32::from_le_bytes([self.length[0], self.length[1], self.length[2], 0]) as usize
     }
 
-    /// Read packet header from byte slice (zero-copy)
     pub fn from_bytes(data: &[u8]) -> Result<&Self> {
         if data.len() < 4 {
-            return Err(Error::UnexpectedEof);
+            return Err(Error::InvalidPacket);
         }
         Self::ref_from_bytes(&data[..4]).map_err(|_| Error::InvalidPacket)
     }
@@ -68,7 +74,6 @@ impl Decoder for PacketDecoder {
                         return Ok(None);
                     }
 
-                    // Read packet header (3 bytes length + 1 byte sequence_id)
                     let length = src.get_uint_le(3) as usize;
                     let sequence_id = src.get_u8();
 
@@ -85,10 +90,8 @@ impl Decoder for PacketDecoder {
                         return Ok(None);
                     }
 
-                    // Extract payload
                     let payload = src.split_to(length);
 
-                    // Reset state for next packet
                     self.state = DecoderState::ReadingHeader;
 
                     return Ok(Some((sequence_id, payload)));
@@ -101,23 +104,9 @@ impl Decoder for PacketDecoder {
 /// Helper function to write packet header
 #[inline]
 pub fn write_packet_header(out: &mut Vec<u8>, sequence_id: u8, payload_length: usize) {
-    // Write 3-byte length
     let bytes = (payload_length as u32).to_le_bytes();
     out.extend_from_slice(&bytes[..3]);
-    // Write 1-byte sequence ID
     out.push(sequence_id);
-}
-
-/// Helper function to write packet header to a fixed-size array
-#[inline]
-pub fn write_packet_header_array(sequence_id: u8, payload_length: usize) -> [u8; 4] {
-    let mut header = [0u8; 4];
-    let bytes = (payload_length as u32).to_le_bytes();
-    header[0] = bytes[0];
-    header[1] = bytes[1];
-    header[2] = bytes[2];
-    header[3] = sequence_id;
-    header
 }
 
 /// OK packet payload (minimal header only)
