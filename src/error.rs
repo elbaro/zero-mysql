@@ -38,4 +38,10 @@ impl<'a> From<ErrPayloadBytes<'a>> for Error {
     }
 }
 
+impl From<std::convert::Infallible> for Error {
+    fn from(err: std::convert::Infallible) -> Self {
+        match err {}
+    }
+}
+
 pub type Result<T> = std::result::Result<T, Error>;

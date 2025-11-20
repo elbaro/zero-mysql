@@ -73,10 +73,9 @@ impl Conn {
         }
 
         // Extract host
-        let host = opts
-            .host
-            .as_ref()
-            .ok_or_else(|| Error::BadInputError("Missing host in connection options".to_string()))?;
+        let host = opts.host.as_ref().ok_or_else(|| {
+            Error::BadInputError("Missing host in connection options".to_string())
+        })?;
 
         // Connect to server
         let addr = format!("{}:{}", host, opts.port);
@@ -606,6 +605,30 @@ impl Conn {
                 }
             }
         }
+    }
+
+    /// Send a ping to the server to check if the connection is alive
+    ///
+    /// This sends a COM_PING command to the MySQL server and waits for an OK response.
+    /// It's useful for checking connection health or preventing connection timeouts.
+    ///
+    /// # Returns
+    /// * `Ok(())` - Server responded successfully (connection is alive)
+    /// * `Err(Error)` - Ping failed (connection may be dead or network issue)
+    pub fn ping(&mut self) -> Result<()> {
+        use crate::protocol::command::utility::write_ping;
+
+        // Write COM_PING - reuse struct buffer to avoid heap allocations
+        self.write_buffer.clear();
+        write_ping(&mut self.write_buffer);
+
+        self.write_payload(0)?;
+
+        // Read OK packet response (MySQL always returns OK for COM_PING)
+        self.read_buffer.clear();
+        read_payload(&mut self.stream, &mut self.read_buffer)?;
+
+        Ok(())
     }
 }
 

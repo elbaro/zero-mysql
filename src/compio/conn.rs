@@ -668,6 +668,31 @@ impl Conn {
             }
         }
     }
+
+    /// Send a ping to the server to check if the connection is alive (async)
+    ///
+    /// This sends a COM_PING command to the MySQL server and waits for an OK response.
+    /// It's useful for checking connection health or preventing connection timeouts.
+    ///
+    /// # Returns
+    /// * `Ok(())` - Server responded successfully (connection is alive)
+    /// * `Err(Error)` - Ping failed (connection may be dead or network issue)
+    pub async fn ping(&mut self) -> Result<()> {
+        use crate::protocol::command::utility::write_ping;
+
+        // Write COM_PING
+        self.write_buffer.clear();
+        write_ping(&mut self.write_buffer);
+
+        self.write_payload(0).await?;
+
+        // Read OK packet response (MySQL always returns OK for COM_PING)
+        let buffer = self.get_buffer();
+        let (_, buffer) = read_payload(&mut self.stream, buffer).await?;
+        self.return_buffer(buffer);
+
+        Ok(())
+    }
 }
 
 /// Read a complete MySQL payload asynchronously, concatenating packets if they span multiple 16MB chunks.
