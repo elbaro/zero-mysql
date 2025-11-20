@@ -26,6 +26,8 @@ pub struct Conn {
     ioslice_buffer: Vec<std::io::IoSlice<'static>>,
     /// Reusable buffer for assembling complete packets with headers (reduces heap allocations)
     packet_buf: Vec<u8>,
+    /// Tracks whether a transaction is currently active
+    pub(crate) in_transaction: bool,
 }
 
 impl Conn {
@@ -112,6 +114,7 @@ impl Conn {
             write_headers_buffer: Vec::new(),
             ioslice_buffer: Vec::new(),
             packet_buf: Vec::new(),
+            in_transaction: false,
         })
     }
 
@@ -445,6 +448,59 @@ impl Conn {
         read_payload(&mut self.stream, &mut self.read_buffer).await?;
 
         Ok(())
+    }
+
+    /// Execute a closure within a transaction (async)
+    ///
+    /// This method starts a transaction with BEGIN, executes the provided closure,
+    /// and automatically rolls back if the transaction was not explicitly committed
+    /// or rolled back within the closure.
+    ///
+    /// # Example
+    /// ```
+    /// conn.run_transaction(|conn, tx| async move {
+    ///     conn.query_drop("INSERT INTO users (name) VALUES ('Alice')").await?;
+    ///     conn.query_drop("INSERT INTO users (name) VALUES ('Bob')").await?;
+    ///     tx.commit(conn).await?;
+    ///     Ok(())
+    /// }).await?;
+    /// ```
+    ///
+    /// # Panics
+    /// Panics if called while already in a transaction (nested transactions are not supported).
+    pub async fn run_transaction<F, Fut, R>(&mut self, f: F) -> Result<R>
+    where
+        F: FnOnce(&mut Conn, super::transaction::Transaction) -> Fut,
+        Fut: std::future::Future<Output = Result<R>>,
+    {
+        assert!(
+            !self.in_transaction,
+            "Cannot nest transactions - a transaction is already active"
+        );
+
+        self.in_transaction = true;
+
+        if let Err(e) = self.query_drop("BEGIN").await {
+            self.in_transaction = false;
+            return Err(e);
+        }
+
+        let tx = super::transaction::Transaction::new();
+        let result = f(self, tx).await;
+
+        // If the transaction was not explicitly committed or rolled back, roll it back
+        if self.in_transaction {
+            let rollback_result = self.query_drop("ROLLBACK").await;
+            self.in_transaction = false;
+
+            // Return the first error (either from closure or rollback)
+            if let Err(e) = result {
+                return Err(e);
+            }
+            rollback_result?;
+        }
+
+        result
     }
 }
 

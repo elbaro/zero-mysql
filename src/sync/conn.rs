@@ -28,6 +28,8 @@ pub struct Conn {
     write_headers_buffer: Vec<PacketHeader>,
     /// Reusable buffer for IoSlice when writing payloads (reduces heap allocations)
     ioslice_buffer: Vec<IoSlice<'static>>,
+    /// Tracks whether a transaction is currently active
+    pub(crate) in_transaction: bool,
 }
 
 impl Conn {
@@ -132,6 +134,7 @@ impl Conn {
             write_buffer: Vec::new(),
             write_headers_buffer: Vec::new(),
             ioslice_buffer: Vec::new(),
+            in_transaction: false,
         })
     }
 
@@ -468,6 +471,54 @@ impl Conn {
         read_payload(&mut self.stream, &mut self.read_buffer)?;
 
         Ok(())
+    }
+
+    /// Execute a closure within a transaction
+    ///
+    /// # Example
+    /// ```
+    /// conn.run_transaction(|conn, tx| {
+    ///     conn.query_drop("INSERT INTO users (name) VALUES ('Alice')")?;
+    ///     conn.query_drop("INSERT INTO users (name) VALUES ('Bob')")?;
+    ///     tx.commit(conn)?;
+    ///     Ok(())
+    /// })?;
+    /// ```
+    ///
+    /// # Panics
+    /// Panics if called while already in a transaction
+    pub fn run_transaction<F, R>(&mut self, f: F) -> Result<R>
+    where
+        F: FnOnce(&mut Conn, super::transaction::Transaction) -> Result<R>,
+    {
+        assert!(
+            !self.in_transaction,
+            "Cannot nest transactions - a transaction is already active"
+        );
+
+        self.in_transaction = true;
+
+        if let Err(e) = self.query_drop("BEGIN") {
+            self.in_transaction = false;
+            return Err(e);
+        }
+
+        let tx = super::transaction::Transaction::new();
+        let result = f(self, tx);
+
+        // If the transaction was not explicitly committed or rolled back, roll it back
+        if self.in_transaction {
+            let rollback_result = self.query_drop("ROLLBACK");
+            self.in_transaction = false;
+
+            // Return the first error (either from closure or rollback)
+            if let Err(e) = result {
+                return Err(e);
+            }
+            rollback_result?;
+        }
+
+        result
     }
 }
 
