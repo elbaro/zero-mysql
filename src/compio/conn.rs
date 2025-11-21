@@ -387,41 +387,35 @@ impl Conn {
 
         self.write_payload().await?;
 
-        let mut query_fold = Query::default();
+        let mut query_sm = Query::default();
 
         loop {
             let buffer = self.buffer_set.get_pooled_buffer();
 
             let (_, buffer) = read_payload(&mut self.stream, buffer).await?;
 
-            let result = query_fold.drive(&buffer[..])?;
+            let result = query_sm.drive(&buffer[..])?;
             match result {
-                QueryResult::NeedPayload => {
-                    self.buffer_set.return_pooled_buffer(buffer);
-                    continue;
-                }
+                QueryResult::NeedPayload => {}
                 QueryResult::NoResultSet(ok_bytes) => {
                     handler.no_result_set(ok_bytes)?;
-                    self.buffer_set.return_pooled_buffer(buffer);
-                    return Ok(());
                 }
                 QueryResult::ResultSetStart { num_columns } => {
                     handler.resultset_start(num_columns)?;
-                    self.buffer_set.return_pooled_buffer(buffer);
                 }
                 QueryResult::Column(col) => {
                     handler.col(col)?;
-                    self.buffer_set.return_pooled_buffer(buffer);
                 }
                 QueryResult::Row(row) => {
                     handler.row(&row)?;
-                    self.buffer_set.return_pooled_buffer(buffer);
                 }
                 QueryResult::Eof(eof_bytes) => {
                     handler.resultset_end(eof_bytes)?;
-                    self.buffer_set.return_pooled_buffer(buffer);
-                    return Ok(());
                 }
+            }
+            self.buffer_set.return_pooled_buffer(buffer);
+            if query_sm.is_finished() {
+                return Ok(());
             }
         }
     }
@@ -429,44 +423,22 @@ impl Conn {
     /// Execute a text protocol SQL query and discard all results (async)
     #[instrument(skip_all)]
     pub async fn query_drop(&mut self, sql: &str) -> Result<()> {
-        use crate::protocol::command::query::{Query, QueryResult, write_query};
+        use crate::protocol::command::query::{Query, write_query};
 
         self.buffer_set.write_buffer.clear();
         write_query(&mut self.buffer_set.write_buffer, sql);
 
         self.write_payload().await?;
 
-        let mut query = Query::default();
+        let mut query_sm = Query::default();
 
         loop {
-            let mut buffer = self.buffer_set.get_pooled_buffer();
-            buffer.clear();
-
+            let buffer = self.buffer_set.get_pooled_buffer();
             let (_, buffer) = read_payload(&mut self.stream, buffer).await?;
-
-            let result = query.drive(&buffer[..])?;
-            match result {
-                QueryResult::NeedPayload => {
-                    self.buffer_set.return_pooled_buffer(buffer);
-                    continue;
-                }
-                QueryResult::NoResultSet(_ok_bytes) => {
-                    self.buffer_set.return_pooled_buffer(buffer);
-                    return Ok(());
-                }
-                QueryResult::ResultSetStart { .. } => {
-                    self.buffer_set.return_pooled_buffer(buffer);
-                }
-                QueryResult::Column(_) => {
-                    self.buffer_set.return_pooled_buffer(buffer);
-                }
-                QueryResult::Row(_) => {
-                    self.buffer_set.return_pooled_buffer(buffer);
-                }
-                QueryResult::Eof(_eof_bytes) => {
-                    self.buffer_set.return_pooled_buffer(buffer);
-                    return Ok(());
-                }
+            query_sm.drive(&buffer[..])?;
+            self.buffer_set.return_pooled_buffer(buffer);
+            if query_sm.is_finished() {
+                return Ok(());
             }
         }
     }

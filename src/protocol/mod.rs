@@ -8,4 +8,4 @@ pub mod r#trait;
 pub mod value;
 
 pub use row::{BinaryRowPayload, TextRowPayload};
-pub use r#trait::{ResultSetHandler, RowDecoder};
+pub use r#trait::{BinaryResultSetHandler, RowDecoder};

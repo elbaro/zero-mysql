@@ -85,6 +85,13 @@ pub enum Query {
 }
 
 impl Query {
+    /// Returns true if all result sets have been processed
+    pub fn is_finished(&self) -> bool {
+        matches!(self, Self::Finished)
+    }
+}
+
+impl Query {
     /// Drive the state machine with the next payload
     ///
     /// # Arguments

@@ -35,7 +35,7 @@ async fn main() -> Result<()> {
         }
     }
 
-    impl<'a> zero_mysql::protocol::r#trait::ResultSetHandler<'a> for Handler {
+    impl<'a> zero_mysql::protocol::r#trait::BinaryResultSetHandler<'a> for Handler {
         fn no_result_set(&mut self, _ok: OkPayloadBytes) -> Result<()> {
             println!("Received no result set");
             Ok(())

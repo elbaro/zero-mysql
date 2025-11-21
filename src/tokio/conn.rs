@@ -10,7 +10,7 @@ use crate::protocol::command::prepared::{read_prepare_ok, write_execute, write_p
 use crate::protocol::connection::{Handshake, HandshakeResult, InitialHandshake};
 use crate::protocol::packet::PacketHeader;
 use crate::protocol::response::ErrPayloadBytes;
-use crate::protocol::r#trait::{ResultSetHandler, TextResultSetHandler, params::Params};
+use crate::protocol::r#trait::{BinaryResultSetHandler, TextResultSetHandler, params::Params};
 
 pub struct Conn {
     stream: BufReader<TcpStream>,
@@ -76,7 +76,10 @@ impl Conn {
             let mut last_sequence_id = read_payload(&mut conn_stream, buffer).await?;
 
             match handshake.drive(buffer)? {
-                HandshakeResult::InitialHandshake { handshake_response, initial_handshake: hs } => {
+                HandshakeResult::InitialHandshake {
+                    handshake_response,
+                    initial_handshake: hs,
+                } => {
                     initial_handshake = Some(hs);
                     if !handshake_response.is_empty() {
                         write_handshake_payload(
@@ -158,7 +161,9 @@ impl Conn {
 
             // Write header
             let header = PacketHeader::encode(chunk_size, sequence_id);
-            self.buffer_set.packet_buf.extend_from_slice(header.as_bytes());
+            self.buffer_set
+                .packet_buf
+                .extend_from_slice(header.as_bytes());
 
             // Write chunk
             self.buffer_set.packet_buf.extend_from_slice(chunk);
@@ -170,7 +175,9 @@ impl Conn {
         // Add empty packet if last chunk was exactly 0xFFFFFF bytes
         if needs_empty_packet {
             let header = PacketHeader::encode(0, sequence_id);
-            self.buffer_set.packet_buf.extend_from_slice(header.as_bytes());
+            self.buffer_set
+                .packet_buf
+                .extend_from_slice(header.as_bytes());
         }
 
         use tokio::io::AsyncWriteExt;
@@ -225,7 +232,7 @@ impl Conn {
     ) -> Result<()>
     where
         P: Params,
-        H: ResultSetHandler<'a>,
+        H: BinaryResultSetHandler<'a>,
     {
         use crate::protocol::command::prepared::{Exec, ExecResult};
 
@@ -281,7 +288,7 @@ impl Conn {
     ) -> Result<bool>
     where
         P: Params,
-        H: ResultSetHandler<'a>,
+        H: BinaryResultSetHandler<'a>,
     {
         use crate::protocol::command::prepared::{Exec, ExecResult};
 
@@ -376,20 +383,17 @@ impl Conn {
 
         self.write_payload().await?;
 
-        let mut query_fold = Query::default();
+        let mut query_sm = Query::default();
 
         loop {
             self.buffer_set.read_buffer.clear();
             let _ = read_payload(&mut self.stream, &mut self.buffer_set.read_buffer).await?;
 
-            let result = query_fold.drive(&self.buffer_set.read_buffer[..])?;
+            let result = query_sm.drive(&self.buffer_set.read_buffer[..])?;
             match result {
-                QueryResult::NeedPayload => {
-                    continue;
-                }
+                QueryResult::NeedPayload => {}
                 QueryResult::NoResultSet(ok_bytes) => {
                     handler.no_result_set(ok_bytes)?;
-                    return Ok(());
                 }
                 QueryResult::ResultSetStart { num_columns } => {
                     handler.resultset_start(num_columns)?;
@@ -402,8 +406,10 @@ impl Conn {
                 }
                 QueryResult::Eof(eof_bytes) => {
                     handler.resultset_end(eof_bytes)?;
-                    return Ok(());
                 }
+            }
+            if query_sm.is_finished() {
+                return Ok(());
             }
         }
     }
@@ -411,33 +417,21 @@ impl Conn {
     /// Execute a text protocol SQL query and discard all results (async)
     #[instrument(skip_all)]
     pub async fn query_drop(&mut self, sql: &str) -> Result<()> {
-        use crate::protocol::command::query::{Query, QueryResult, write_query};
+        use crate::protocol::command::query::{Query, write_query};
 
         self.buffer_set.write_buffer.clear();
         write_query(&mut self.buffer_set.write_buffer, sql);
 
         self.write_payload().await?;
 
-        let mut query = Query::default();
+        let mut query_sm = Query::default();
 
         loop {
             self.buffer_set.read_buffer.clear();
             let _ = read_payload(&mut self.stream, &mut self.buffer_set.read_buffer).await?;
-
-            let result = query.drive(&self.buffer_set.read_buffer[..])?;
-            match result {
-                QueryResult::NeedPayload => {
-                    continue;
-                }
-                QueryResult::NoResultSet(_ok_bytes) => {
-                    return Ok(());
-                }
-                QueryResult::ResultSetStart { .. } => {}
-                QueryResult::Column(_) => {}
-                QueryResult::Row(_) => {}
-                QueryResult::Eof(_eof_bytes) => {
-                    return Ok(());
-                }
+            query_sm.drive(&self.buffer_set.read_buffer[..])?;
+            if query_sm.is_finished() {
+                return Ok(());
             }
         }
     }
