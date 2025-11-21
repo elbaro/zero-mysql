@@ -1,11 +1,11 @@
-use crate::constant::StatusFlags;
+use crate::constant::ServerStatusFlags;
 use crate::error::{Error, Result};
 use crate::protocol::primitive::*;
 use zerocopy::byteorder::little_endian::U16 as U16LE;
 use zerocopy::{FromBytes, Immutable, KnownLayout};
 
 /// The payload part of OK packet
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct OkPayloadBytes<'a>(pub &'a [u8]);
 
 impl<'a> OkPayloadBytes<'a> {
@@ -27,7 +27,7 @@ impl<'a> OkPayloadBytes<'a> {
 pub struct OkPayload {
     pub affected_rows: u64,
     pub last_insert_id: u64,
-    pub status_flags: StatusFlags,
+    pub status_flags: ServerStatusFlags,
     pub warnings: u16,
     // pub info: String, // SERVER_SESSION_STATE_CHANGED
     // pub session_state_info: String, // SERVER_SESSION_STATE_CHANGED
@@ -52,7 +52,7 @@ impl TryFrom<OkPayloadBytes<'_>> for OkPayload {
         Ok(OkPayload {
             affected_rows,
             last_insert_id,
-            status_flags: StatusFlags::new(status_flags),
+            status_flags: ServerStatusFlags::from_bits_truncate(status_flags),
             warnings,
         })
     }
@@ -109,9 +109,9 @@ impl EofPacket {
     pub fn warnings(&self) -> u16 {
         self.warnings.get()
     }
-    /// Get status flags as StatusFlags wrapper
-    pub fn status_flags(&self) -> StatusFlags {
-        StatusFlags::new(self.status_flags.get())
+    /// Get status flags as ServerStatusFlags
+    pub fn status_flags(&self) -> ServerStatusFlags {
+        ServerStatusFlags::from_bits_truncate(self.status_flags.get())
     }
 }
 

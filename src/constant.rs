@@ -122,11 +122,11 @@ pub const CAPABILITIES_CONFIGURABLE: CapabilityFlags = CapabilityFlags::CLIENT_F
     .union(CapabilityFlags::CLIENT_LOCAL_FILES)
     .union(CapabilityFlags::CLIENT_IGNORE_SPACE)
     .union(CapabilityFlags::CLIENT_SSL)
-    .union(CapabilityFlags::CLIENT_CAN_HANDLE_EXPIRED_PASSWORDS)
-    .union(CapabilityFlags::CLIENT_CONNECT_WITH_DB);
+    .union(CapabilityFlags::CLIENT_CAN_HANDLE_EXPIRED_PASSWORDS);
 
 // Capabilities that are always disabled (deprecated, not implemented, or not applicable)
 pub const CAPABILITIES_ALWAYS_DISABLED: CapabilityFlags = CapabilityFlags::CLIENT_LONG_PASSWORD
+    .union(CapabilityFlags::CLIENT_CONNECT_WITH_DB) // This is automatically set if opts.db is provided
     .union(CapabilityFlags::CLIENT_OPTIONAL_RESULTSET_METADATA) // TODO
     .union(CapabilityFlags::CLIENT_NO_SCHEMA)
     .union(CapabilityFlags::CLIENT_ODBC)
@@ -142,32 +142,39 @@ pub const CAPABILITIES_ALWAYS_DISABLED: CapabilityFlags = CapabilityFlags::CLIEN
     .union(CapabilityFlags::CLIENT_CONNECT_ATTRS) // TODO
     .union(CapabilityFlags::CLIENT_SESSION_TRACK); // To support this flag, we need to update the parsing logic
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct StatusFlags(pub u16);
-
-/// 0x0004 does not exist
-impl StatusFlags {
-    pub const SERVER_STATUS_IN_TRANS: u16 = 0x0001;
-    pub const SERVER_STATUS_AUTOCOMMIT: u16 = 0x0002;
-    pub const SERVER_MORE_RESULTS_EXISTS: u16 = 0x0008;
-    pub const SERVER_STATUS_NO_GOOD_INDEX_USED: u16 = 0x0010;
-    pub const SERVER_STATUS_NO_INDEX_USED: u16 = 0x0020;
-    pub const SERVER_STATUS_CURSOR_EXISTS: u16 = 0x0040;
-    pub const SERVER_STATUS_LAST_ROW_SENT: u16 = 0x0080;
-    pub const SERVER_STATUS_DB_DROPPED: u16 = 0x0100;
-    pub const SERVER_STATUS_NO_BACKSLASH_ESCAPES: u16 = 0x0200;
-    pub const SERVER_STATUS_METADATA_CHANGED: u16 = 0x0400;
-    pub const SERVER_QUERY_WAS_SLOW: u16 = 0x0800;
-    pub const SERVER_PS_OUT_PARAMS: u16 = 0x1000;
-    pub const SERVER_STATUS_IN_TRANS_READONLY: u16 = 0x2000;
-    pub const SERVER_SESSION_STATE_CHANGED: u16 = 0x4000;
-
-    pub fn new(value: u16) -> Self {
-        Self(value)
-    }
-
-    pub fn has(&self, flag: u16) -> bool {
-        (self.0 & flag) != 0
+bitflags::bitflags! {
+    /// MySQL Server Status Flags
+    /// Note: 0x0004 does not exist in the protocol
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct ServerStatusFlags: u16 {
+        /// A transaction is active
+        const SERVER_STATUS_IN_TRANS = 0x0001;
+        /// Autocommit mode is enabled
+        const SERVER_STATUS_AUTOCOMMIT = 0x0002;
+        /// More results exist (for multi-statement or multi-resultset)
+        const SERVER_MORE_RESULTS_EXISTS = 0x0008;
+        /// Query did not use a good index
+        const SERVER_STATUS_NO_GOOD_INDEX_USED = 0x0010;
+        /// Query did not use any index
+        const SERVER_STATUS_NO_INDEX_USED = 0x0020;
+        /// Cursor exists (for prepared statements)
+        const SERVER_STATUS_CURSOR_EXISTS = 0x0040;
+        /// Last row was sent
+        const SERVER_STATUS_LAST_ROW_SENT = 0x0080;
+        /// Database was dropped
+        const SERVER_STATUS_DB_DROPPED = 0x0100;
+        /// No backslash escapes mode is enabled
+        const SERVER_STATUS_NO_BACKSLASH_ESCAPES = 0x0200;
+        /// Metadata changed (for prepared statements)
+        const SERVER_STATUS_METADATA_CHANGED = 0x0400;
+        /// Query was slow
+        const SERVER_QUERY_WAS_SLOW = 0x0800;
+        /// Prepared statement has output parameters
+        const SERVER_PS_OUT_PARAMS = 0x1000;
+        /// In a read-only transaction
+        const SERVER_STATUS_IN_TRANS_READONLY = 0x2000;
+        /// Session state has changed
+        const SERVER_SESSION_STATE_CHANGED = 0x4000;
     }
 }
 

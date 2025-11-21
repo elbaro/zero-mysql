@@ -15,7 +15,7 @@ fn main() -> Result<()> {
         }
     };
 
-    println!("Connected to MySQL {}", conn.server_version());
+    println!("Connected to MySQL {:?}", conn.server_version());
     println!("Capability flags: {:?}", conn.capability_flags());
 
     // Prepare a simple query

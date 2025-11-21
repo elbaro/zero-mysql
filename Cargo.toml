@@ -41,6 +41,10 @@ required-features = ["dev"]
 name = "bench-write-payload"
 path = "bin/bench_write_payload.rs"
 required-features = ["dev"]
+[[bin]]
+name = "test-multi-resultset"
+path = "bin/test-multi-resultset.rs"
+required-features = ["dev"]
 
 [dependencies]
 tracing = { version = "*", features = ["release_max_level_warn"] }

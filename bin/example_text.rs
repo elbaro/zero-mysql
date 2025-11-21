@@ -1,7 +1,7 @@
 use zero_mysql::error::Result;
-use zero_mysql::protocol::TextRowPayload;
 use zero_mysql::protocol::connection::ColumnDefinitionBytes;
 use zero_mysql::protocol::response::OkPayloadBytes;
+use zero_mysql::protocol::TextRowPayload;
 use zero_mysql::sync::Conn;
 
 fn main() -> Result<()> {
@@ -15,7 +15,7 @@ fn main() -> Result<()> {
         }
     };
 
-    println!("Connected to MySQL {}", conn.server_version());
+    println!("Connected to MySQL {:?}", conn.server_version());
     println!("Capability flags: {:?}", conn.capability_flags());
 
     // Create a simple handler using the new TextResultSetHandler trait

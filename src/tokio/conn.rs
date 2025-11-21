@@ -3,30 +3,20 @@ use tokio::net::TcpStream;
 use tracing::instrument;
 use zerocopy::{FromZeros, IntoBytes};
 
+use crate::buffer::BufferSet;
 use crate::constant::CapabilityFlags;
 use crate::error::{Error, Result};
 use crate::protocol::command::prepared::{read_prepare_ok, write_execute, write_prepare};
-use crate::protocol::connection::{Handshake, HandshakeResult};
+use crate::protocol::connection::{Handshake, HandshakeResult, InitialHandshake};
 use crate::protocol::packet::PacketHeader;
 use crate::protocol::response::ErrPayloadBytes;
 use crate::protocol::r#trait::{ResultSetHandler, TextResultSetHandler, params::Params};
 
-/// A MySQL connection
 pub struct Conn {
     stream: BufReader<TcpStream>,
-    server_version: String,
+    buffer_set: BufferSet,
+    initial_handshake: InitialHandshake,
     capability_flags: CapabilityFlags,
-    /// Reusable buffer for reading payloads (reduces heap allocations)
-    read_buffer: Vec<u8>,
-    /// Reusable buffer for building outgoing commands (reduces heap allocations)
-    write_buffer: Vec<u8>,
-    /// Reusable buffer for packet headers when writing payloads (reduces heap allocations)
-    write_headers_buffer: Vec<[u8; 4]>,
-    /// Reusable buffer for IoSlice when writing payloads (reduces heap allocations)
-    ioslice_buffer: Vec<std::io::IoSlice<'static>>,
-    /// Reusable buffer for assembling complete packets with headers (reduces heap allocations)
-    packet_buf: Vec<u8>,
-    /// Tracks whether a transaction is currently active
     pub(crate) in_transaction: bool,
 }
 
@@ -67,9 +57,8 @@ impl Conn {
         database: Option<&str>,
     ) -> Result<Self> {
         let mut conn_stream = BufReader::new(stream);
-        let mut buffer = Vec::new();
-        let mut headers_buffer = Vec::new();
-        let mut ioslice_buffer = Vec::new();
+        let mut buffer_set = BufferSet::new();
+        let mut initial_handshake = None;
 
         let mut handshake = Handshake::new(
             username.to_string(),
@@ -77,12 +66,31 @@ impl Conn {
             database.map(|s| s.to_string()),
         );
 
-        let (server_version, capability_flags) = loop {
+        let capability_flags = loop {
+            let buffer = if matches!(handshake, Handshake::Start { .. }) {
+                &mut buffer_set.initial_handshake
+            } else {
+                &mut buffer_set.read_buffer
+            };
             buffer.clear();
-            read_payload(&mut conn_stream, &mut buffer).await?;
+            read_payload(&mut conn_stream, buffer).await?;
             let mut seq: u8 = 0;
 
-            match handshake.drive(&buffer)? {
+            match handshake.drive(buffer)? {
+                HandshakeResult::InitialHandshake { handshake_response, initial_handshake: hs } => {
+                    initial_handshake = Some(hs);
+                    if !handshake_response.is_empty() {
+                        seq = seq.wrapping_add(1);
+                        write_handshake_payload(
+                            &mut conn_stream,
+                            seq,
+                            &handshake_response,
+                            &mut buffer_set.write_headers_buffer,
+                            &mut buffer_set.ioslice_buffer,
+                        )
+                        .await?;
+                    }
+                }
                 HandshakeResult::Write(packet_data) => {
                     if !packet_data.is_empty() {
                         seq = seq.wrapping_add(1);
@@ -90,36 +98,29 @@ impl Conn {
                             &mut conn_stream,
                             seq,
                             &packet_data,
-                            &mut headers_buffer,
-                            &mut ioslice_buffer,
+                            &mut buffer_set.write_headers_buffer,
+                            &mut buffer_set.ioslice_buffer,
                         )
                         .await?;
                     }
                 }
-                HandshakeResult::Connected {
-                    server_version,
-                    capability_flags,
-                } => {
-                    break (server_version, capability_flags);
+                HandshakeResult::Connected { capability_flags } => {
+                    break capability_flags;
                 }
             }
         };
 
         Ok(Self {
             stream: conn_stream,
-            server_version,
+            buffer_set,
+            initial_handshake: initial_handshake.unwrap(),
             capability_flags,
-            read_buffer: Vec::new(),
-            write_buffer: Vec::new(),
-            write_headers_buffer: Vec::new(),
-            ioslice_buffer: Vec::new(),
-            packet_buf: Vec::new(),
             in_transaction: false,
         })
     }
 
-    pub fn server_version(&self) -> &str {
-        &self.server_version
+    pub fn server_version(&self) -> &[u8] {
+        &self.buffer_set.initial_handshake[self.initial_handshake.server_version.clone()]
     }
 
     /// Get the negotiated capability flags
@@ -127,10 +128,20 @@ impl Conn {
         self.capability_flags
     }
 
+    /// Get the connection ID assigned by the server
+    pub fn connection_id(&self) -> u64 {
+        self.initial_handshake.connection_id as u64
+    }
+
+    /// Get the server status flags from the initial handshake
+    pub fn status_flags(&self) -> crate::constant::ServerStatusFlags {
+        self.initial_handshake.status_flags
+    }
+
     /// Write a MySQL packet from write_buffer asynchronously, splitting it into 16MB chunks if necessary
     #[instrument(skip_all)]
     async fn write_payload(&mut self, mut sequence_id: u8) -> Result<()> {
-        let payload = self.write_buffer.as_slice();
+        let payload = self.buffer_set.write_buffer.as_slice();
 
         // 0 byte -> 1 chunk, 1 byte -> 2 chunks, 0xFFFFFF bytes -> 2 chunks
         let num_chunks = payload.len() / 0xFFFFFF + 1;
@@ -138,8 +149,8 @@ impl Conn {
         let total_bytes = num_chunks * 4 + payload.len();
 
         // Reuse packet buffer, reserve capacity if needed
-        self.packet_buf.clear();
-        self.packet_buf.reserve(total_bytes);
+        self.buffer_set.packet_buf.clear();
+        self.buffer_set.packet_buf.reserve(total_bytes);
 
         // Build packet with headers and chunks
         let mut remaining = payload;
@@ -149,10 +160,10 @@ impl Conn {
 
             // Write header
             let header = PacketHeader::encode(chunk_size, sequence_id);
-            self.packet_buf.extend_from_slice(header.as_bytes());
+            self.buffer_set.packet_buf.extend_from_slice(header.as_bytes());
 
             // Write chunk
-            self.packet_buf.extend_from_slice(chunk);
+            self.buffer_set.packet_buf.extend_from_slice(chunk);
 
             remaining = rest;
             sequence_id = sequence_id.wrapping_add(1);
@@ -161,12 +172,12 @@ impl Conn {
         // Add empty packet if last chunk was exactly 0xFFFFFF bytes
         if needs_empty_packet {
             let header = PacketHeader::encode(0, sequence_id);
-            self.packet_buf.extend_from_slice(header.as_bytes());
+            self.buffer_set.packet_buf.extend_from_slice(header.as_bytes());
         }
 
         use tokio::io::AsyncWriteExt;
         self.stream
-            .write_all(&self.packet_buf)
+            .write_all(&self.buffer_set.packet_buf)
             .await
             .map_err(Error::IoError)?;
         self.stream.flush().await?;
@@ -178,30 +189,30 @@ impl Conn {
     ///
     /// Returns `Ok(statement_id)` on success.
     pub async fn prepare(&mut self, sql: &str) -> Result<u32> {
-        self.read_buffer.clear();
-        self.write_buffer.clear();
+        self.buffer_set.read_buffer.clear();
+        self.buffer_set.write_buffer.clear();
 
-        write_prepare(&mut self.write_buffer, sql);
+        write_prepare(&mut self.buffer_set.write_buffer, sql);
 
         self.write_payload(0).await?;
 
-        read_payload(&mut self.stream, &mut self.read_buffer).await?;
+        read_payload(&mut self.stream, &mut self.buffer_set.read_buffer).await?;
 
-        if !self.read_buffer.is_empty() && self.read_buffer[0] == 0xFF {
-            Err(ErrPayloadBytes(&self.read_buffer))?
+        if !self.buffer_set.read_buffer.is_empty() && self.buffer_set.read_buffer[0] == 0xFF {
+            Err(ErrPayloadBytes(&self.buffer_set.read_buffer))?
         }
 
-        let prepare_ok = read_prepare_ok(&self.read_buffer)?;
+        let prepare_ok = read_prepare_ok(&self.buffer_set.read_buffer)?;
         let statement_id = prepare_ok.statement_id();
         let num_params = prepare_ok.num_params();
         let num_columns = prepare_ok.num_columns();
 
         for _ in 0..num_params {
-            read_payload(&mut self.stream, &mut self.read_buffer).await?;
+            read_payload(&mut self.stream, &mut self.buffer_set.read_buffer).await?;
         }
 
         for _ in 0..num_columns {
-            read_payload(&mut self.stream, &mut self.read_buffer).await?;
+            read_payload(&mut self.stream, &mut self.buffer_set.read_buffer).await?;
         }
 
         Ok(statement_id)
@@ -220,18 +231,18 @@ impl Conn {
     {
         use crate::protocol::command::prepared::{Exec, ExecResult};
 
-        self.write_buffer.clear();
-        write_execute(&mut self.write_buffer, statement_id, params)?;
+        self.buffer_set.write_buffer.clear();
+        write_execute(&mut self.buffer_set.write_buffer, statement_id, params)?;
 
         self.write_payload(0).await?;
 
         let mut exec = Exec::default();
 
         loop {
-            self.read_buffer.clear();
-            read_payload(&mut self.stream, &mut self.read_buffer).await?;
+            self.buffer_set.read_buffer.clear();
+            read_payload(&mut self.stream, &mut self.buffer_set.read_buffer).await?;
 
-            let result = exec.drive(&self.read_buffer[..])?;
+            let result = exec.drive(&self.buffer_set.read_buffer[..])?;
             match result {
                 ExecResult::NeedPayload => {
                     continue;
@@ -276,8 +287,8 @@ impl Conn {
     {
         use crate::protocol::command::prepared::{Exec, ExecResult};
 
-        self.write_buffer.clear();
-        write_execute(&mut self.write_buffer, statement_id, params)?;
+        self.buffer_set.write_buffer.clear();
+        write_execute(&mut self.buffer_set.write_buffer, statement_id, params)?;
 
         self.write_payload(0).await?;
 
@@ -285,10 +296,10 @@ impl Conn {
         let mut first_row_found = false;
 
         loop {
-            self.read_buffer.clear();
-            read_payload(&mut self.stream, &mut self.read_buffer).await?;
+            self.buffer_set.read_buffer.clear();
+            read_payload(&mut self.stream, &mut self.buffer_set.read_buffer).await?;
 
-            let result = exec.drive(&self.read_buffer[..])?;
+            let result = exec.drive(&self.buffer_set.read_buffer[..])?;
             match result {
                 ExecResult::NeedPayload => {
                     continue;
@@ -326,18 +337,18 @@ impl Conn {
     {
         use crate::protocol::command::prepared::{Exec, ExecResult};
 
-        self.write_buffer.clear();
-        write_execute(&mut self.write_buffer, statement_id, params)?;
+        self.buffer_set.write_buffer.clear();
+        write_execute(&mut self.buffer_set.write_buffer, statement_id, params)?;
 
         self.write_payload(0).await?;
 
         let mut exec = Exec::default();
 
         loop {
-            self.read_buffer.clear();
-            read_payload(&mut self.stream, &mut self.read_buffer).await?;
+            self.buffer_set.read_buffer.clear();
+            read_payload(&mut self.stream, &mut self.buffer_set.read_buffer).await?;
 
-            let result = exec.drive(&self.read_buffer[..])?;
+            let result = exec.drive(&self.buffer_set.read_buffer[..])?;
             match result {
                 ExecResult::NeedPayload => {
                     continue;
@@ -362,18 +373,18 @@ impl Conn {
     {
         use crate::protocol::command::query::{Query, QueryResult, write_query};
 
-        self.write_buffer.clear();
-        write_query(&mut self.write_buffer, sql);
+        self.buffer_set.write_buffer.clear();
+        write_query(&mut self.buffer_set.write_buffer, sql);
 
         self.write_payload(0).await?;
 
         let mut query_fold = Query::default();
 
         loop {
-            self.read_buffer.clear();
-            read_payload(&mut self.stream, &mut self.read_buffer).await?;
+            self.buffer_set.read_buffer.clear();
+            read_payload(&mut self.stream, &mut self.buffer_set.read_buffer).await?;
 
-            let result = query_fold.drive(&self.read_buffer[..])?;
+            let result = query_fold.drive(&self.buffer_set.read_buffer[..])?;
             match result {
                 QueryResult::NeedPayload => {
                     continue;
@@ -404,18 +415,18 @@ impl Conn {
     pub async fn query_drop(&mut self, sql: &str) -> Result<()> {
         use crate::protocol::command::query::{Query, QueryResult, write_query};
 
-        self.write_buffer.clear();
-        write_query(&mut self.write_buffer, sql);
+        self.buffer_set.write_buffer.clear();
+        write_query(&mut self.buffer_set.write_buffer, sql);
 
         self.write_payload(0).await?;
 
         let mut query = Query::default();
 
         loop {
-            self.read_buffer.clear();
-            read_payload(&mut self.stream, &mut self.read_buffer).await?;
+            self.buffer_set.read_buffer.clear();
+            read_payload(&mut self.stream, &mut self.buffer_set.read_buffer).await?;
 
-            let result = query.drive(&self.read_buffer[..])?;
+            let result = query.drive(&self.buffer_set.read_buffer[..])?;
             match result {
                 QueryResult::NeedPayload => {
                     continue;
@@ -439,32 +450,35 @@ impl Conn {
     pub async fn ping(&mut self) -> Result<()> {
         use crate::protocol::command::utility::write_ping;
 
-        self.write_buffer.clear();
-        write_ping(&mut self.write_buffer);
+        self.buffer_set.write_buffer.clear();
+        write_ping(&mut self.buffer_set.write_buffer);
 
         self.write_payload(0).await?;
 
-        self.read_buffer.clear();
-        read_payload(&mut self.stream, &mut self.read_buffer).await?;
+        self.buffer_set.read_buffer.clear();
+        read_payload(&mut self.stream, &mut self.buffer_set.read_buffer).await?;
+
+        Ok(())
+    }
+
+    /// Reset the connection to its initial state (async)
+    pub async fn reset(&mut self) -> Result<()> {
+        use crate::protocol::command::utility::write_reset_connection;
+
+        self.buffer_set.write_buffer.clear();
+        write_reset_connection(&mut self.buffer_set.write_buffer);
+
+        self.write_payload(0).await?;
+
+        self.buffer_set.read_buffer.clear();
+        read_payload(&mut self.stream, &mut self.buffer_set.read_buffer).await?;
+
+        self.in_transaction = false;
 
         Ok(())
     }
 
     /// Execute a closure within a transaction (async)
-    ///
-    /// This method starts a transaction with BEGIN, executes the provided closure,
-    /// and automatically rolls back if the transaction was not explicitly committed
-    /// or rolled back within the closure.
-    ///
-    /// # Example
-    /// ```
-    /// conn.run_transaction(|conn, tx| async move {
-    ///     conn.query_drop("INSERT INTO users (name) VALUES ('Alice')").await?;
-    ///     conn.query_drop("INSERT INTO users (name) VALUES ('Bob')").await?;
-    ///     tx.commit(conn).await?;
-    ///     Ok(())
-    /// }).await?;
-    /// ```
     ///
     /// # Panics
     /// Panics if called while already in a transaction (nested transactions are not supported).
@@ -609,11 +623,6 @@ async fn write_handshake_payload<W: AsyncWrite + Unpin>(
     for header in headers_buffer.iter() {
         let chunk_size = header.length();
 
-        // Safety: We extend the lifetime of IoSlice to 'static for storage in the Vec.
-        // This is safe because:
-        // 1. The IoSlice references are only used in write_all_vectored_async() below
-        // 2. Both header and payload outlive this function call
-        // 3. ioslice_buffer is cleared at the start of each write_handshake_payload call
         ioslice_buffer.push(unsafe {
             std::mem::transmute::<IoSlice<'_>, IoSlice<'static>>(IoSlice::new(header.as_bytes()))
         });

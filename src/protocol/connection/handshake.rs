@@ -1,110 +1,78 @@
-use crate::constant::CapabilityFlags;
+use std::hint::cold_path;
+use zerocopy::{FromBytes, Immutable, KnownLayout};
+use zerocopy::byteorder::little_endian::{U16 as U16LE, U32 as U32LE};
+
+use crate::constant::{CAPABILITIES_ALWAYS_ENABLED, CapabilityFlags};
 use crate::error::{Error, Result};
 use crate::protocol::primitive::*;
 use crate::protocol::response::ErrPayloadBytes;
 
-// ============================================================================
-// Initial Handshake Packet (Server -> Client)
-// ============================================================================
+#[derive(Debug, Clone, Copy, FromBytes, KnownLayout, Immutable)]
+#[repr(C, packed)]
+struct HandshakeFixedFields {
+    connection_id: U32LE,
+    auth_data_part1: [u8; 8],
+    filler: u8,
+    capability_flags_lower: U16LE,
+    charset: u8,
+    status_flags: U16LE,
+    capability_flags_upper: U16LE,
+    auth_data_len: u8,
+}
 
-/// Initial handshake packet from server (Protocol::HandshakeV10)
-///
-/// This is the first packet sent by MySQL server after TCP connection.
-/// Server sends its capabilities, auth plugin name, and challenge data.
-///
-/// Packet format:
-/// ```text
-/// 1   [0a] protocol version (always 10)
-/// n   server version (null-terminated string)
-/// 4   connection id
-/// 8   auth-plugin-data-part-1 (first 8 bytes of challenge)
-/// 1   [00] filler
-/// 2   capability flags (lower 2 bytes)
-/// 1   character set
-/// 2   status flags
-/// 2   capability flags (upper 2 bytes)
-/// 1   auth plugin data length
-/// 10  reserved (all 0x00)
-/// n   auth-plugin-data-part-2 (remaining challenge bytes)
-/// n   auth plugin name (null-terminated)
-/// ```
 #[derive(Debug, Clone)]
-pub struct InitialHandshake<'a> {
+pub struct InitialHandshake {
     pub protocol_version: u8,
-    pub server_version: String,
+    pub server_version: std::ops::Range<usize>,
     pub connection_id: u32,
     pub auth_plugin_data: Vec<u8>,
     pub capability_flags: CapabilityFlags,
     pub charset: u8,
-    pub status_flags: u16,
-    pub auth_plugin_name: &'a [u8],
+    pub status_flags: crate::constant::ServerStatusFlags,
+    pub auth_plugin_name: std::ops::Range<usize>,
 }
 
 /// Read initial handshake packet from server
-pub fn read_initial_handshake(payload: &[u8]) -> Result<InitialHandshake<'_>> {
+pub fn read_initial_handshake(payload: &[u8]) -> Result<InitialHandshake> {
     let (protocol_version, mut data) = read_int_1(payload)?;
 
-    // If first byte from server is 0xFF, Packet is an ERR_Packet, socket has to be closed.
     if protocol_version == 0xFF {
+        cold_path();
         Err(ErrPayloadBytes(payload))?
     }
 
+    let server_version_start = payload.len() - data.len();
     let (server_version_bytes, rest) = read_string_null(data)?;
-    let server_version = String::from_utf8_lossy(server_version_bytes).to_string();
+    let server_version = server_version_start..server_version_start + server_version_bytes.len();
     data = rest;
 
-    let (connection_id, rest) = read_int_4(data)?;
-    data = rest;
+    let (fixed, rest) = HandshakeFixedFields::ref_from_prefix(data)
+        .map_err(|_| Error::InvalidPacket)?;
 
-    // auth-plugin-data-part-1 (8 bytes)
-    let (auth_data_1, rest) = read_string_fix(data, 8)?;
-    data = rest;
-
-    // filler (1 byte)
-    let (_filler, rest) = read_int_1(data)?;
-    data = rest;
-
-    // capability flags (lower 2 bytes)
-    let (cap_lower, rest) = read_int_2(data)?;
-    data = rest;
-
-    // charset (1 byte)
-    let (charset, rest) = read_int_1(data)?;
-    data = rest;
-
-    // status flags (2 bytes)
-    let (status_flags, rest) = read_int_2(data)?;
-    data = rest;
-
-    // capability flags (upper 2 bytes)
-    let (cap_upper, rest) = read_int_2(data)?;
-    data = rest;
-
-    let cap_bits = ((cap_upper as u32) << 16) | (cap_lower as u32);
+    let connection_id = fixed.connection_id.get();
+    let charset = fixed.charset;
+    let status_flags = fixed.status_flags.get();
+    let cap_bits = ((fixed.capability_flags_upper.get() as u32) << 16)
+                  | (fixed.capability_flags_lower.get() as u32);
     let capability_flags = CapabilityFlags::from_bits(cap_bits).ok_or(Error::InvalidPacket)?;
+    let auth_data_len = fixed.auth_data_len;
 
-    // auth plugin data length (1 byte)
-    let (auth_data_len, rest) = read_int_1(data)?;
+    let (_reserved, rest) = read_string_fix(rest, 10)?;
     data = rest;
 
-    // reserved (10 bytes)
-    let (_reserved, rest) = read_string_fix(data, 10)?;
-    data = rest;
-
-    // auth-plugin-data-part-2
     let auth_data_2_len = (auth_data_len as usize).saturating_sub(9).max(12);
     let (auth_data_2, rest) = read_string_fix(data, auth_data_2_len)?;
     data = rest;
     let (_reserved, rest) = read_int_1(data)?;
     data = rest;
 
-    // Combine auth plugin data
     let mut auth_plugin_data = Vec::new();
-    auth_plugin_data.extend_from_slice(auth_data_1);
+    auth_plugin_data.extend_from_slice(&fixed.auth_data_part1);
     auth_plugin_data.extend_from_slice(auth_data_2);
 
-    // auth plugin name (null-terminated)
-    let (auth_plugin_name, rest) = read_string_null(data)?;
+    let auth_plugin_name_start = payload.len() - data.len();
+    let (auth_plugin_name_bytes, rest) = read_string_null(data)?;
+    let auth_plugin_name = auth_plugin_name_start..auth_plugin_name_start + auth_plugin_name_bytes.len();
 
     if !rest.is_empty() {
         return Err(Error::InvalidPacket);
@@ -117,31 +85,12 @@ pub fn read_initial_handshake(payload: &[u8]) -> Result<InitialHandshake<'_>> {
         auth_plugin_data,
         capability_flags,
         charset,
-        status_flags,
+        status_flags: crate::constant::ServerStatusFlags::from_bits_truncate(status_flags),
         auth_plugin_name,
     })
 }
 
-// ============================================================================
-// Handshake Response Packet (Client -> Server)
-// ============================================================================
-
 /// Handshake response packet sent by client (HandshakeResponse41)
-///
-/// This is sent in response to the initial handshake from server.
-/// Contains client capabilities, username, and authentication response.
-///
-/// Packet format (without SSL):
-/// ```text
-/// 4   capability flags
-/// 4   max packet size
-/// 1   character set
-/// 23  reserved (all 0x00)
-/// n   username (null-terminated string)
-/// n   auth response length + data (length-encoded if CLIENT_PLUGIN_AUTH_LENENC_CLIENT_DATA)
-/// n   database name (null-terminated, if CLIENT_CONNECT_WITH_DB)
-/// n   auth plugin name (null-terminated, if CLIENT_PLUGIN_AUTH)
-/// ```
 #[derive(Debug, Clone)]
 pub struct HandshakeResponse41<'a> {
     pub capability_flags: CapabilityFlags,
@@ -154,9 +103,6 @@ pub struct HandshakeResponse41<'a> {
 }
 
 /// Write handshake response packet (HandshakeResponse41)
-///
-/// This writes the client's response to the initial handshake.
-/// The auth_response should be pre-computed using the appropriate auth plugin.
 pub fn write_handshake_response(out: &mut Vec<u8>, response: &HandshakeResponse41) {
     // capability flags (4 bytes)
     write_int_4(out, response.capability_flags.bits());
@@ -209,21 +155,7 @@ pub fn write_handshake_response(out: &mut Vec<u8>, response: &HandshakeResponse4
     // }
 }
 
-// ============================================================================
-// Auth Switch Request Packet (Server -> Client)
-// ============================================================================
-
 /// Auth switch request from server
-///
-/// Server sends this when it wants to use a different authentication method
-/// than was specified in the initial handshake.
-///
-/// Packet format:
-/// ```text
-/// 1   [fe] status (0xFE for auth switch)
-/// n   plugin name (null-terminated)
-/// n   plugin data (challenge data for the new plugin)
-/// ```
 #[derive(Debug, Clone)]
 pub struct AuthSwitchRequest<'a> {
     pub plugin_name: &'a [u8],
@@ -387,11 +319,15 @@ pub struct HandshakeConfig {
 
 /// Result of driving the handshake state machine
 pub enum HandshakeResult {
+    /// Initial handshake received - write response to server
+    InitialHandshake {
+        handshake_response: Vec<u8>,
+        initial_handshake: InitialHandshake,
+    },
     /// Write this packet to the server, then read next response
     Write(Vec<u8>),
     /// Handshake complete, connection established
     Connected {
-        server_version: String,
         capability_flags: CapabilityFlags,
     },
 }
@@ -407,12 +343,10 @@ pub enum Handshake {
         config: HandshakeConfig,
         initial_plugin: Vec<u8>,
         capability_flags: CapabilityFlags,
-        server_version: String,
     },
     /// Sent auth switch response, waiting for final auth result
     WaitingFinalAuthResult {
         capability_flags: CapabilityFlags,
-        server_version: String,
     },
     /// Connected (terminal state)
     Connected,
@@ -442,36 +376,20 @@ impl Handshake {
     pub fn drive(&mut self, payload: &[u8]) -> Result<HandshakeResult> {
         match self {
             Self::Start { config } => {
-                // Parse initial handshake from server
                 let handshake = read_initial_handshake(payload)?;
-
-                let server_version = handshake.server_version.clone();
                 let server_caps = handshake.capability_flags;
 
-                // Compute client capabilities
-                let mut client_caps = CapabilityFlags::CLIENT_LONG_FLAG
-                    | CapabilityFlags::CLIENT_PROTOCOL_41
-                    | CapabilityFlags::CLIENT_TRANSACTIONS
-                    | CapabilityFlags::CLIENT_MULTI_STATEMENTS
-                    | CapabilityFlags::CLIENT_MULTI_RESULTS
-                    | CapabilityFlags::CLIENT_PS_MULTI_RESULTS
-                    | CapabilityFlags::CLIENT_SECURE_CONNECTION
-                    | CapabilityFlags::CLIENT_PLUGIN_AUTH
-                    | CapabilityFlags::CLIENT_PLUGIN_AUTH_LENENC_CLIENT_DATA
-                    | CapabilityFlags::CLIENT_DEPRECATE_EOF;
-
-                // Add CLIENT_CONNECT_WITH_DB if database provided and server supports it
-                if config.database.is_some()
-                    && server_caps.contains(CapabilityFlags::CLIENT_CONNECT_WITH_DB)
-                {
+                let mut client_caps = CAPABILITIES_ALWAYS_ENABLED;
+                if config.database.is_some() {
                     client_caps |= CapabilityFlags::CLIENT_CONNECT_WITH_DB;
                 }
 
                 // Negotiate capabilities
                 let negotiated_caps = client_caps & server_caps;
 
-                // Compute auth response based on plugin
-                let auth_response = match handshake.auth_plugin_name {
+                let auth_plugin_name = &payload[handshake.auth_plugin_name.clone()];
+
+                let auth_response = match auth_plugin_name {
                     b"mysql_native_password" => {
                         auth_mysql_native_password(&config.password, &handshake.auth_plugin_data)
                             .to_vec()
@@ -487,24 +405,22 @@ impl Handshake {
                     }
                 };
 
-                // Build handshake response packet
                 let response = HandshakeResponse41 {
                     capability_flags: negotiated_caps,
-                    max_packet_size: 16777216, // 16MB
-                    charset: 45,               // utf8mb4_general_ci
+                    max_packet_size: 16777216,
+                    charset: 45,
                     username: &config.username,
                     auth_response: &auth_response,
                     database: config.database.as_deref(),
                     auth_plugin_name: Some(
-                        std::str::from_utf8(handshake.auth_plugin_name).unwrap(),
+                        std::str::from_utf8(auth_plugin_name).unwrap(),
                     ),
                 };
 
                 let mut packet_data = Vec::new();
                 write_handshake_response(&mut packet_data, &response);
 
-                // Transition to waiting for auth result
-                let initial_plugin = handshake.auth_plugin_name.to_vec();
+                let initial_plugin = auth_plugin_name.to_vec();
                 let config_owned = std::mem::replace(
                     config,
                     HandshakeConfig {
@@ -518,17 +434,18 @@ impl Handshake {
                     config: config_owned,
                     initial_plugin,
                     capability_flags: negotiated_caps,
-                    server_version,
                 };
 
-                Ok(HandshakeResult::Write(packet_data))
+                Ok(HandshakeResult::InitialHandshake {
+                    handshake_response: packet_data,
+                    initial_handshake: handshake,
+                })
             }
 
             Self::WaitingAuthResult {
                 config,
                 initial_plugin,
                 capability_flags,
-                server_version,
             } => {
                 if payload.is_empty() {
                     return Err(Error::InvalidPacket);
@@ -538,7 +455,6 @@ impl Handshake {
                     0x00 => {
                         // OK packet - authentication succeeded
                         let result = HandshakeResult::Connected {
-                            server_version: server_version.clone(),
                             capability_flags: *capability_flags,
                         };
                         *self = Self::Connected;
@@ -596,7 +512,6 @@ impl Handshake {
                             // Transition to waiting for final result
                             *self = Self::WaitingFinalAuthResult {
                                 capability_flags: *capability_flags,
-                                server_version: server_version.clone(),
                             };
 
                             Ok(HandshakeResult::Write(packet_data))
@@ -608,7 +523,6 @@ impl Handshake {
 
             Self::WaitingFinalAuthResult {
                 capability_flags,
-                server_version,
             } => {
                 if payload.is_empty() {
                     return Err(Error::InvalidPacket);
@@ -618,7 +532,6 @@ impl Handshake {
                     0x00 => {
                         // OK packet - authentication succeeded
                         let result = HandshakeResult::Connected {
-                            server_version: server_version.clone(),
                             capability_flags: *capability_flags,
                         };
                         *self = Self::Connected;
@@ -639,7 +552,3 @@ impl Handshake {
         }
     }
 }
-
-// ============================================================================
-// Helper Functions
-// ============================================================================

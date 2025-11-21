@@ -63,7 +63,7 @@ pub enum QueryResult<'a> {
     Column(ColumnDefinitionBytes<'a>),
     /// Row data received
     Row(TextRowPayload<'a>),
-    /// Result set finished with EOF
+    /// Result set finished with EOF (check status flags for more results)
     Eof(OkPayloadBytes<'a>),
 }
 
@@ -100,7 +100,24 @@ impl Query {
 
                 match response {
                     QueryResponse::Ok(ok_bytes) => {
-                        *self = Self::Finished;
+                        // Parse OK packet to check status flags
+                        use crate::constant::ServerStatusFlags;
+                        use crate::protocol::response::OkPayload;
+
+                        let ok_payload = OkPayload::try_from(ok_bytes)?;
+
+                        // Check if there are more results to come
+                        if ok_payload
+                            .status_flags
+                            .contains(ServerStatusFlags::SERVER_MORE_RESULTS_EXISTS)
+                        {
+                            // More resultsets coming, stay in Start state
+                            *self = Self::Start;
+                        } else {
+                            // No more results, we're done
+                            *self = Self::Finished;
+                        }
+
                         Ok(QueryResult::NoResultSet(ok_bytes))
                     }
                     QueryResponse::ResultSet { column_count } => {
@@ -132,7 +149,25 @@ impl Query {
                 match payload.first() {
                     Some(0xFF) => Err(ErrPayloadBytes(payload))?,
                     Some(0xFE) if payload.len() != MAX_PAYLOAD_LENGTH => {
-                        *self = Self::Finished;
+                        // Parse OK packet to check status flags
+                        use crate::constant::ServerStatusFlags;
+                        use crate::protocol::response::OkPayload;
+
+                        let ok_bytes = OkPayloadBytes(payload);
+                        let ok_payload = OkPayload::try_from(ok_bytes)?;
+
+                        // Check if there are more results to come
+                        if ok_payload
+                            .status_flags
+                            .contains(ServerStatusFlags::SERVER_MORE_RESULTS_EXISTS)
+                        {
+                            // More resultsets coming, go back to Start state
+                            *self = Self::Start;
+                        } else {
+                            // No more results, we're done
+                            *self = Self::Finished;
+                        }
+
                         Ok(QueryResult::Eof(OkPayloadBytes(payload)))
                     }
                     _ => Ok(QueryResult::Row(TextRowPayload(payload))),
