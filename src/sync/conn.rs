@@ -73,17 +73,18 @@ impl Conn {
                 &mut buffer_set.read_buffer
             };
             buffer.clear();
-            read_payload(&mut conn_stream, buffer)?;
-            let mut seq: u8 = 0;
+            let mut last_sequence_id = read_payload(&mut conn_stream, buffer)?;
 
             match handshake.drive(buffer)? {
-                HandshakeResult::InitialHandshake { handshake_response, initial_handshake: hs } => {
+                HandshakeResult::InitialHandshake {
+                    handshake_response,
+                    initial_handshake: hs,
+                } => {
                     initial_handshake = Some(hs);
                     if !handshake_response.is_empty() {
-                        seq = seq.wrapping_add(1);
                         write_handshake_payload(
                             conn_stream.get_mut(),
-                            seq,
+                            &mut last_sequence_id,
                             &handshake_response,
                             &mut buffer_set.write_headers_buffer,
                             &mut buffer_set.ioslice_buffer,
@@ -92,10 +93,9 @@ impl Conn {
                 }
                 HandshakeResult::Write(packet_data) => {
                     if !packet_data.is_empty() {
-                        seq = seq.wrapping_add(1);
                         write_handshake_payload(
                             conn_stream.get_mut(),
-                            seq,
+                            &mut last_sequence_id,
                             &packet_data,
                             &mut buffer_set.write_headers_buffer,
                             &mut buffer_set.ioslice_buffer,
@@ -137,7 +137,8 @@ impl Conn {
     }
 
     #[tracing::instrument(skip_all)]
-    fn write_payload(&mut self, mut sequence_id: u8) -> Result<()> {
+    fn write_payload(&mut self) -> Result<()> {
+        let mut sequence_id = 0;
         self.buffer_set.write_headers_buffer.clear();
         self.buffer_set.ioslice_buffer.clear();
 
@@ -195,10 +196,12 @@ impl Conn {
 
         write_prepare(&mut self.buffer_set.write_buffer, sql);
 
-        self.write_payload(0)?;
-        read_payload(&mut self.stream, &mut self.buffer_set.read_buffer)?;
+        self.write_payload()?;
+        let _ = read_payload(&mut self.stream, &mut self.buffer_set.read_buffer)?;
 
-        if unlikely(!self.buffer_set.read_buffer.is_empty() && self.buffer_set.read_buffer[0] == 0xFF) {
+        if unlikely(
+            !self.buffer_set.read_buffer.is_empty() && self.buffer_set.read_buffer[0] == 0xFF,
+        ) {
             Err(ErrPayloadBytes(&self.buffer_set.read_buffer))?
         }
 
@@ -209,13 +212,13 @@ impl Conn {
 
         if num_params > 0 {
             for _ in 0..num_params {
-                read_payload(&mut self.stream, &mut self.buffer_set.read_buffer)?;
+                let _ = read_payload(&mut self.stream, &mut self.buffer_set.read_buffer)?;
             }
         }
 
         if num_columns > 0 {
             for _ in 0..num_columns {
-                read_payload(&mut self.stream, &mut self.buffer_set.read_buffer)?;
+                let _ = read_payload(&mut self.stream, &mut self.buffer_set.read_buffer)?;
             }
         }
 
@@ -232,13 +235,13 @@ impl Conn {
         self.buffer_set.write_buffer.clear();
         write_execute(&mut self.buffer_set.write_buffer, statement_id, params)?;
 
-        self.write_payload(0)?;
+        self.write_payload()?;
 
         let mut exec = Exec::default();
 
         loop {
             self.buffer_set.read_buffer.clear();
-            read_payload(&mut self.stream, &mut self.buffer_set.read_buffer)?;
+            let _ = read_payload(&mut self.stream, &mut self.buffer_set.read_buffer)?;
 
             let result = exec.drive(&self.buffer_set.read_buffer[..])?;
             match result {
@@ -288,14 +291,14 @@ impl Conn {
         self.buffer_set.write_buffer.clear();
         write_execute(&mut self.buffer_set.write_buffer, statement_id, params)?;
 
-        self.write_payload(0)?;
+        self.write_payload()?;
 
         let mut exec = Exec::default();
         let mut first_row_found = false;
 
         loop {
             self.buffer_set.read_buffer.clear();
-            read_payload(&mut self.stream, &mut self.buffer_set.read_buffer)?;
+            let _ = read_payload(&mut self.stream, &mut self.buffer_set.read_buffer)?;
 
             let result = exec.drive(&self.buffer_set.read_buffer[..])?;
             match result {
@@ -338,13 +341,13 @@ impl Conn {
         self.buffer_set.write_buffer.clear();
         write_execute(&mut self.buffer_set.write_buffer, statement_id, params)?;
 
-        self.write_payload(0)?;
+        self.write_payload()?;
 
         let mut exec = Exec::default();
 
         loop {
             self.buffer_set.read_buffer.clear();
-            read_payload(&mut self.stream, &mut self.buffer_set.read_buffer)?;
+            let _ = read_payload(&mut self.stream, &mut self.buffer_set.read_buffer)?;
 
             let result = exec.drive(&self.buffer_set.read_buffer[..])?;
 
@@ -375,13 +378,13 @@ impl Conn {
         self.buffer_set.write_buffer.clear();
         write_query(&mut self.buffer_set.write_buffer, sql);
 
-        self.write_payload(0)?;
+        self.write_payload()?;
 
         let mut query_fold = Query::default();
 
         loop {
             self.buffer_set.read_buffer.clear();
-            read_payload(&mut self.stream, &mut self.buffer_set.read_buffer)?;
+            let _ = read_payload(&mut self.stream, &mut self.buffer_set.read_buffer)?;
 
             let result = query_fold.drive(&self.buffer_set.read_buffer[..])?;
             match result {
@@ -416,13 +419,13 @@ impl Conn {
         self.buffer_set.write_buffer.clear();
         write_query(&mut self.buffer_set.write_buffer, sql);
 
-        self.write_payload(0)?;
+        self.write_payload()?;
 
         let mut query = Query::default();
 
         loop {
             self.buffer_set.read_buffer.clear();
-            read_payload(&mut self.stream, &mut self.buffer_set.read_buffer)?;
+            let _ = read_payload(&mut self.stream, &mut self.buffer_set.read_buffer)?;
 
             let result = query.drive(&self.buffer_set.read_buffer[..])?;
             match result {
@@ -451,10 +454,10 @@ impl Conn {
         self.buffer_set.write_buffer.clear();
         write_ping(&mut self.buffer_set.write_buffer);
 
-        self.write_payload(0)?;
+        self.write_payload()?;
 
         self.buffer_set.read_buffer.clear();
-        read_payload(&mut self.stream, &mut self.buffer_set.read_buffer)?;
+        let _ = read_payload(&mut self.stream, &mut self.buffer_set.read_buffer)?;
 
         Ok(())
     }
@@ -466,10 +469,10 @@ impl Conn {
         self.buffer_set.write_buffer.clear();
         write_reset_connection(&mut self.buffer_set.write_buffer);
 
-        self.write_payload(0)?;
+        self.write_payload()?;
 
         self.buffer_set.read_buffer.clear();
-        read_payload(&mut self.stream, &mut self.buffer_set.read_buffer)?;
+        let _ = read_payload(&mut self.stream, &mut self.buffer_set.read_buffer)?;
 
         self.in_transaction = false;
 
@@ -516,14 +519,18 @@ impl Conn {
 }
 
 /// Read a complete MySQL payload, concatenating packets if they span multiple 16MB chunks
+/// Returns the sequence_id of the last packet read.
 #[tracing::instrument(skip_all)]
-pub fn read_payload<R: BufRead>(reader: &mut R, buffer: &mut Vec<u8>) -> Result<()> {
+pub fn read_payload<R: BufRead>(reader: &mut R, buffer: &mut Vec<u8>) -> Result<u8> {
+    use zerocopy::FromZeros;
+
     buffer.clear();
 
-    let mut header = [0u8; 4];
-    reader.read_exact(&mut header)?;
+    let mut header = PacketHeader::new_zeroed();
+    reader.read_exact(header.as_mut_bytes())?;
 
-    let length = u32::from_le_bytes([header[0], header[1], header[2], 0]) as usize;
+    let length = header.length();
+    let mut sequence_id = header.sequence_id;
 
     if buffer.capacity() < length {
         buffer.reserve(length - buffer.capacity());
@@ -535,24 +542,23 @@ pub fn read_payload<R: BufRead>(reader: &mut R, buffer: &mut Vec<u8>) -> Result<
 
     let mut current_length = length;
     while current_length == 0xFFFFFF {
-        let mut next_header = [0u8; 4];
-        reader.read_exact(&mut next_header)?;
+        reader.read_exact(header.as_mut_bytes())?;
 
-        current_length =
-            u32::from_le_bytes([next_header[0], next_header[1], next_header[2], 0]) as usize;
+        current_length = header.length();
+        sequence_id = header.sequence_id;
 
         let prev_len = buffer.len();
         buffer.resize(prev_len + current_length, 0);
         reader.read_exact(&mut buffer[prev_len..])?;
     }
 
-    Ok(())
+    Ok(sequence_id)
 }
 
 /// Write a MySQL packet during handshake, splitting it into 16MB chunks if necessary
 fn write_handshake_payload<W: Write>(
     stream: &mut W,
-    mut sequence_id: u8,
+    last_sequence_id: &mut u8,
     payload: &[u8],
     headers_buffer: &mut Vec<PacketHeader>,
     ioslice_buffer: &mut Vec<IoSlice<'static>>,
@@ -568,14 +574,14 @@ fn write_handshake_payload<W: Write>(
         let (_chunk, rest) = remaining.split_at(chunk_size);
         remaining = rest;
 
-        let header = PacketHeader::encode(chunk_size, sequence_id);
+        *last_sequence_id = last_sequence_id.wrapping_add(1);
+        let header = PacketHeader::encode(chunk_size, *last_sequence_id);
         headers_buffer.push(header);
-
-        sequence_id = sequence_id.wrapping_add(1);
     }
 
     if chunk_size == 0xFFFFFF {
-        let header = PacketHeader::encode(0, sequence_id);
+        *last_sequence_id = last_sequence_id.wrapping_add(1);
+        let header = PacketHeader::encode(0, *last_sequence_id);
         headers_buffer.push(header);
     }
 
