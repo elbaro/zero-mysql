@@ -18,6 +18,9 @@ pub enum Error {
 
     #[error("Unsupported authentication plugin: {0}")]
     UnsupportedAuthPlugin(String),
+
+    #[error("Connection mismatch: transaction started on connection {expected}, but commit/rollback called on connection {actual}")]
+    ConnectionMismatch { expected: u64, actual: u64 },
 }
 
 impl<'a> From<ErrPayloadBytes<'a>> for Error {

@@ -491,7 +491,7 @@ impl Conn {
             return Err(e);
         }
 
-        let tx = super::transaction::Transaction::new();
+        let tx = super::transaction::Transaction::new(self.connection_id());
         let result = f(self, tx).await;
 
         // If the transaction was not explicitly committed or rolled back, roll it back
