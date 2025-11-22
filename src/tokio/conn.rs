@@ -40,30 +40,23 @@ impl Conn {
         let stream = TcpStream::connect(&addr).await?;
         stream.set_nodelay(opts.tcp_nodelay)?;
 
-        Self::new_with_stream(
-            stream,
-            &opts.user,
-            opts.password.as_deref().unwrap_or(""),
-            opts.db.as_deref(),
-        )
-        .await
+        Self::new_with_stream(stream, &opts).await
     }
 
     /// Create a new MySQL connection with an existing TCP stream (async)
     pub async fn new_with_stream(
         stream: TcpStream,
-        username: &str,
-        password: &str,
-        database: Option<&str>,
+        opts: &crate::opts::Opts,
     ) -> Result<Self> {
         let mut conn_stream = BufReader::new(stream);
         let mut buffer_set = BufferSet::new();
         let mut initial_handshake = None;
 
         let mut handshake = Handshake::new(
-            username.to_string(),
-            password.to_string(),
-            database.map(|s| s.to_string()),
+            opts.user.clone(),
+            opts.password.clone().unwrap_or_default(),
+            opts.db.clone(),
+            opts.capabilities,
         );
 
         let capability_flags = loop {
@@ -249,9 +242,6 @@ impl Conn {
 
             let result = exec.drive(&self.buffer_set.read_buffer[..])?;
             match result {
-                ExecResult::NeedPayload => {
-                    continue;
-                }
                 ExecResult::NoResultSet(ok_bytes) => {
                     handler.no_result_set(ok_bytes)?;
                     return Ok(());
@@ -306,9 +296,6 @@ impl Conn {
 
             let result = exec.drive(&self.buffer_set.read_buffer[..])?;
             match result {
-                ExecResult::NeedPayload => {
-                    continue;
-                }
                 ExecResult::NoResultSet(ok_bytes) => {
                     handler.no_result_set(ok_bytes)?;
                     return Ok(false);
@@ -355,9 +342,6 @@ impl Conn {
 
             let result = exec.drive(&self.buffer_set.read_buffer[..])?;
             match result {
-                ExecResult::NeedPayload => {
-                    continue;
-                }
                 ExecResult::NoResultSet(_ok_bytes) => {
                     return Ok(());
                 }

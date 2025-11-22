@@ -1,10 +1,10 @@
 use crate::constant::CommandByte;
 use crate::error::{Error, Result};
-use crate::protocol::BinaryRowPayload;
 use crate::protocol::connection::ColumnDefinitionBytes;
 use crate::protocol::primitive::*;
-use crate::protocol::response::{ErrPayloadBytes, OkPayloadBytes};
 use crate::protocol::r#trait::params::Params;
+use crate::protocol::response::{ErrPayloadBytes, OkPayloadBytes};
+use crate::protocol::BinaryRowPayload;
 use zerocopy::byteorder::little_endian::{U16 as U16LE, U32 as U32LE};
 use zerocopy::{FromBytes, Immutable, KnownLayout};
 
@@ -135,8 +135,6 @@ pub fn write_reset_statement(out: &mut Vec<u8>, statement_id: u32) {
 /// Returns events that the caller should handle
 #[derive(Debug)]
 pub enum ExecResult<'a> {
-    /// Need more payload data
-    NeedPayload,
     /// Execute returned OK (no result set)
     NoResultSet(OkPayloadBytes<'a>),
     ResultSetStart {
@@ -196,7 +194,7 @@ impl Exec {
                             num_columns,
                             remaining: num_columns,
                         };
-                        Ok(ExecResult::NeedPayload)
+                        Ok(ExecResult::ResultSetStart { num_columns })
                     }
                 }
             }

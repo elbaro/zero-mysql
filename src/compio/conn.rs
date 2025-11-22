@@ -41,30 +41,23 @@ impl Conn {
 
         let stream = TcpStream::connect((host.as_str(), opts.port)).await?;
 
-        Self::new_with_stream(
-            stream,
-            &opts.user,
-            opts.password.as_deref().unwrap_or(""),
-            opts.db.as_deref(),
-        )
-        .await
+        Self::new_with_stream(stream, &opts).await
     }
 
     /// Create a new MySQL connection with an existing TCP stream (async)
     pub async fn new_with_stream(
         mut stream: TcpStream,
-        username: &str,
-        password: &str,
-        database: Option<&str>,
+        opts: &crate::opts::Opts,
     ) -> Result<Self> {
         let mut buffer_set = BufferSet::new();
         buffer_set.buffer_pool.push(Vec::new());
         let mut initial_handshake = None;
 
         let mut handshake = Handshake::new(
-            username.to_string(),
-            password.to_string(),
-            database.map(|s| s.to_string()),
+            opts.user.clone(),
+            opts.password.clone().unwrap_or_default(),
+            opts.db.clone(),
+            opts.capabilities,
         );
 
         let capability_flags = loop {
@@ -234,10 +227,6 @@ impl Conn {
 
             let result = exec.drive(&buffer[..])?;
             match result {
-                ExecResult::NeedPayload => {
-                    self.buffer_set.return_pooled_buffer(buffer);
-                    continue;
-                }
                 ExecResult::NoResultSet(ok_bytes) => {
                     handler.no_result_set(ok_bytes)?;
                     self.buffer_set.return_pooled_buffer(buffer);
@@ -293,10 +282,6 @@ impl Conn {
 
             let result = exec.drive(&buffer[..])?;
             match result {
-                ExecResult::NeedPayload => {
-                    self.buffer_set.return_pooled_buffer(buffer);
-                    continue;
-                }
                 ExecResult::NoResultSet(ok_bytes) => {
                     handler.no_result_set(ok_bytes)?;
                     self.buffer_set.return_pooled_buffer(buffer);
@@ -350,10 +335,6 @@ impl Conn {
 
             let result = exec.drive(&buffer[..])?;
             match result {
-                ExecResult::NeedPayload => {
-                    self.buffer_set.return_pooled_buffer(buffer);
-                    continue;
-                }
                 ExecResult::NoResultSet(_ok_bytes) => {
                     self.buffer_set.return_pooled_buffer(buffer);
                     return Ok(());

@@ -3,6 +3,7 @@ mod handshake;
 
 pub use column_definition::ColumnDefinition;
 pub use column_definition::ColumnDefinitionBytes;
+pub use column_definition::ColumnDefinitionTail;
 pub use column_definition::ColumnTypeAndFlags;
 
 pub use handshake::AuthSwitchRequest;

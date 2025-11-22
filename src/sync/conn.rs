@@ -7,8 +7,8 @@ use crate::protocol::command::prepared::write_execute;
 use crate::protocol::command::prepared::{read_prepare_ok, write_prepare};
 use crate::protocol::connection::{Handshake, HandshakeResult, InitialHandshake};
 use crate::protocol::packet::PacketHeader;
+use crate::protocol::r#trait::{params::Params, BinaryResultSetHandler, TextResultSetHandler};
 use crate::protocol::response::ErrPayloadBytes;
-use crate::protocol::r#trait::{BinaryResultSetHandler, TextResultSetHandler, params::Params};
 use std::hint::unlikely;
 use std::io::{BufRead, BufReader, IoSlice, Write};
 use std::net::TcpStream;
@@ -41,29 +41,23 @@ impl Conn {
         let stream = TcpStream::connect(&addr)?;
         stream.set_nodelay(opts.tcp_nodelay)?;
 
-        Self::new_with_stream(
-            stream,
-            &opts.user,
-            opts.password.as_deref().unwrap_or(""),
-            opts.db.as_deref(),
-        )
+        Self::new_with_stream(stream, &opts)
     }
 
     /// Create a new MySQL connection with an existing TCP stream
     pub fn new_with_stream(
         stream: TcpStream,
-        username: &str,
-        password: &str,
-        database: Option<&str>,
+        opts: &crate::opts::Opts,
     ) -> Result<Self> {
         let mut conn_stream = BufReader::new(stream);
         let mut buffer_set = BufferSet::new();
         let mut initial_handshake = None;
 
         let mut handshake = Handshake::new(
-            username.to_string(),
-            password.to_string(),
-            database.map(|s| s.to_string()),
+            opts.user.clone(),
+            opts.password.clone().unwrap_or_default(),
+            opts.db.clone(),
+            opts.capabilities,
         );
 
         let capability_flags = loop {
@@ -245,14 +239,10 @@ impl Conn {
 
             let result = exec.drive(&self.buffer_set.read_buffer[..])?;
             match result {
-                ExecResult::NeedPayload => {
-                    continue;
-                }
                 ExecResult::NoResultSet(ok_bytes) => {
                     handler.no_result_set(ok_bytes)?;
                     return Ok(());
                 }
-
                 ExecResult::ResultSetStart { num_columns } => {
                     handler.resultset_start(num_columns)?;
                 }
@@ -302,9 +292,6 @@ impl Conn {
 
             let result = exec.drive(&self.buffer_set.read_buffer[..])?;
             match result {
-                ExecResult::NeedPayload => {
-                    continue;
-                }
                 ExecResult::NoResultSet(ok_bytes) => {
                     handler.no_result_set(ok_bytes)?;
                     return Ok(false);
@@ -352,9 +339,6 @@ impl Conn {
             let result = exec.drive(&self.buffer_set.read_buffer[..])?;
 
             match result {
-                ExecResult::NeedPayload => {
-                    continue;
-                }
                 ExecResult::NoResultSet(_ok_bytes) => {
                     return Ok(());
                 }
@@ -373,7 +357,7 @@ impl Conn {
     where
         H: TextResultSetHandler<'a>,
     {
-        use crate::protocol::command::query::{Query, QueryResult, write_query};
+        use crate::protocol::command::query::{write_query, Query, QueryResult};
 
         self.buffer_set.write_buffer.clear();
         write_query(&mut self.buffer_set.write_buffer, sql);
@@ -413,7 +397,7 @@ impl Conn {
 
     /// Execute a text protocol SQL query and discard the result
     pub fn query_drop(&mut self, sql: &str) -> Result<()> {
-        use crate::protocol::command::query::{Query, write_query};
+        use crate::protocol::command::query::{write_query, Query};
 
         self.buffer_set.write_buffer.clear();
         write_query(&mut self.buffer_set.write_buffer, sql);

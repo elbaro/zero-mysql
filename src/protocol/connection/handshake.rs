@@ -2,7 +2,7 @@ use std::hint::cold_path;
 use zerocopy::{FromBytes, Immutable, KnownLayout};
 use zerocopy::byteorder::little_endian::{U16 as U16LE, U32 as U32LE};
 
-use crate::constant::{CAPABILITIES_ALWAYS_ENABLED, CapabilityFlags};
+use crate::constant::{CAPABILITIES_ALWAYS_ENABLED, CAPABILITIES_CONFIGURABLE, CapabilityFlags};
 use crate::error::{Error, Result};
 use crate::protocol::primitive::*;
 use crate::protocol::response::ErrPayloadBytes;
@@ -315,6 +315,7 @@ pub struct HandshakeConfig {
     pub username: String,
     pub password: String,
     pub database: Option<String>,
+    pub capabilities: CapabilityFlags,
 }
 
 /// Result of driving the handshake state machine
@@ -354,12 +355,13 @@ pub enum Handshake {
 
 impl Handshake {
     /// Create a new handshake state machine
-    pub fn new(username: String, password: String, database: Option<String>) -> Self {
+    pub fn new(username: String, password: String, database: Option<String>, capabilities: CapabilityFlags) -> Self {
         Self::Start {
             config: HandshakeConfig {
                 username,
                 password,
                 database,
+                capabilities,
             },
         }
     }
@@ -379,7 +381,7 @@ impl Handshake {
                 let handshake = read_initial_handshake(payload)?;
                 let server_caps = handshake.capability_flags;
 
-                let mut client_caps = CAPABILITIES_ALWAYS_ENABLED;
+                let mut client_caps = CAPABILITIES_ALWAYS_ENABLED | (config.capabilities & CAPABILITIES_CONFIGURABLE);
                 if config.database.is_some() {
                     client_caps |= CapabilityFlags::CLIENT_CONNECT_WITH_DB;
                 }
@@ -427,6 +429,7 @@ impl Handshake {
                         username: String::new(),
                         password: String::new(),
                         database: None,
+                        capabilities: CapabilityFlags::empty(),
                     },
                 );
 
