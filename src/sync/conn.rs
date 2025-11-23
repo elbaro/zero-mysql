@@ -45,10 +45,7 @@ impl Conn {
     }
 
     /// Create a new MySQL connection with an existing TCP stream
-    pub fn new_with_stream(
-        stream: TcpStream,
-        opts: &crate::opts::Opts,
-    ) -> Result<Self> {
+    pub fn new_with_stream(stream: TcpStream, opts: &crate::opts::Opts) -> Result<Self> {
         let mut conn_stream = BufReader::new(stream);
         let mut buffer_set = BufferSet::new();
         let mut initial_handshake = None;
@@ -372,7 +369,6 @@ impl Conn {
 
             let result = query_sm.drive(&self.buffer_set.read_buffer[..])?;
             match result {
-                QueryResult::NeedPayload => {}
                 QueryResult::NoResultSet(ok_bytes) => {
                     handler.no_result_set(ok_bytes)?;
                 }

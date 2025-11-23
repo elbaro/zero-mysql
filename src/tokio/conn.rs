@@ -375,7 +375,6 @@ impl Conn {
 
             let result = query_sm.drive(&self.buffer_set.read_buffer[..])?;
             match result {
-                QueryResult::NeedPayload => {}
                 QueryResult::NoResultSet(ok_bytes) => {
                     handler.no_result_set(ok_bytes)?;
                 }

@@ -1,9 +1,9 @@
 use crate::constant::CommandByte;
 use crate::error::{Error, Result};
-use crate::protocol::TextRowPayload;
 use crate::protocol::connection::ColumnDefinitionBytes;
 use crate::protocol::primitive::*;
 use crate::protocol::response::{ErrPayloadBytes, OkPayloadBytes};
+use crate::protocol::TextRowPayload;
 
 const MAX_PAYLOAD_LENGTH: usize = (1 << 24) - 4;
 
@@ -53,8 +53,6 @@ pub enum QueryResponse<'a> {
 /// Returns events that the caller should handle
 #[derive(Debug)]
 pub enum QueryResult<'a> {
-    /// Need more payload data
-    NeedPayload,
     /// Query returned OK (no result set)
     NoResultSet(OkPayloadBytes<'a>),
     /// Result set started with column count
@@ -132,7 +130,7 @@ impl Query {
                         *self = Self::ReadingColumns {
                             remaining: num_columns,
                         };
-                        Ok(QueryResult::NeedPayload)
+                        Ok(QueryResult::ResultSetStart { num_columns })
                     }
                 }
             }
