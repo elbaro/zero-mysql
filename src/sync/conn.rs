@@ -10,11 +10,13 @@ use crate::protocol::packet::PacketHeader;
 use crate::protocol::r#trait::{params::Params, BinaryResultSetHandler, TextResultSetHandler};
 use crate::protocol::response::ErrPayloadBytes;
 use std::hint::unlikely;
-use std::io::{BufRead, BufReader, IoSlice, Write};
+use std::io::IoSlice;
 use std::net::TcpStream;
 
+use super::stream::Stream;
+
 pub struct Conn {
-    stream: BufReader<TcpStream>,
+    stream: Stream,
     buffer_set: BufferSet,
     initial_handshake: InitialHandshake,
     capability_flags: CapabilityFlags,
@@ -46,15 +48,19 @@ impl Conn {
 
     /// Create a new MySQL connection with an existing TCP stream
     pub fn new_with_stream(stream: TcpStream, opts: &crate::opts::Opts) -> Result<Self> {
-        let mut conn_stream = BufReader::new(stream);
+        let mut conn_stream = Stream::tcp(stream);
         let mut buffer_set = BufferSet::new();
         let mut initial_handshake = None;
+
+        #[cfg(feature = "tls")]
+        let host = opts.host.clone().unwrap_or_default();
 
         let mut handshake = Handshake::new(
             opts.user.clone(),
             opts.password.clone().unwrap_or_default(),
             opts.db.clone(),
             opts.capabilities,
+            opts.tls,
         );
 
         let capability_flags = loop {
@@ -74,7 +80,7 @@ impl Conn {
                     initial_handshake = Some(hs);
                     if !handshake_response.is_empty() {
                         write_handshake_payload(
-                            conn_stream.get_mut(),
+                            &mut conn_stream,
                             &mut last_sequence_id,
                             &handshake_response,
                             &mut buffer_set.write_headers_buffer,
@@ -82,10 +88,45 @@ impl Conn {
                         )?;
                     }
                 }
+                #[cfg(feature = "tls")]
+                HandshakeResult::SslRequest {
+                    ssl_request,
+                    initial_handshake: hs,
+                } => {
+                    initial_handshake = Some(hs);
+                    write_handshake_payload(
+                        &mut conn_stream,
+                        &mut last_sequence_id,
+                        &ssl_request,
+                        &mut buffer_set.write_headers_buffer,
+                        &mut buffer_set.ioslice_buffer,
+                    )?;
+
+                    // Upgrade to TLS
+                    conn_stream = conn_stream.upgrade_to_tls(&host)?;
+
+                    // Continue handshake after TLS upgrade
+                    let HandshakeResult::Write(handshake_response) = handshake.drive_after_tls()? else {
+                        return Err(Error::InvalidPacket);
+                    };
+                    write_handshake_payload(
+                        &mut conn_stream,
+                        &mut last_sequence_id,
+                        &handshake_response,
+                        &mut buffer_set.write_headers_buffer,
+                        &mut buffer_set.ioslice_buffer,
+                    )?;
+                }
+                #[cfg(not(feature = "tls"))]
+                HandshakeResult::SslRequest { .. } => {
+                    return Err(Error::BadConfigError(
+                        "TLS requested but tls feature is not enabled".to_string(),
+                    ));
+                }
                 HandshakeResult::Write(packet_data) => {
                     if !packet_data.is_empty() {
                         write_handshake_payload(
-                            conn_stream.get_mut(),
+                            &mut conn_stream,
                             &mut last_sequence_id,
                             &packet_data,
                             &mut buffer_set.write_headers_buffer,
@@ -172,10 +213,9 @@ impl Conn {
         }
 
         self.stream
-            .get_mut()
             .write_all_vectored(&mut self.buffer_set.ioslice_buffer)?;
 
-        self.stream.get_mut().flush()?;
+        self.stream.flush()?;
 
         Ok(())
     }
@@ -488,7 +528,7 @@ impl Conn {
 /// Read a complete MySQL payload, concatenating packets if they span multiple 16MB chunks
 /// Returns the sequence_id of the last packet read.
 #[tracing::instrument(skip_all)]
-pub fn read_payload<R: BufRead>(reader: &mut R, buffer: &mut Vec<u8>) -> Result<u8> {
+fn read_payload(reader: &mut Stream, buffer: &mut Vec<u8>) -> Result<u8> {
     use zerocopy::FromZeros;
 
     buffer.clear();
@@ -523,8 +563,8 @@ pub fn read_payload<R: BufRead>(reader: &mut R, buffer: &mut Vec<u8>) -> Result<
 }
 
 /// Write a MySQL packet during handshake, splitting it into 16MB chunks if necessary
-fn write_handshake_payload<W: Write>(
-    stream: &mut W,
+fn write_handshake_payload(
+    stream: &mut Stream,
     last_sequence_id: &mut u8,
     payload: &[u8],
     headers_buffer: &mut Vec<PacketHeader>,

@@ -39,6 +39,8 @@ pub struct Opts {
     pub user: String,
 
     pub password: Option<String>,
+
+    pub tls: bool,
 }
 
 impl Default for Opts {
@@ -53,6 +55,7 @@ impl Default for Opts {
             socket: None,
             user: String::new(),
             password: None,
+            tls: false,
         }
     }
 }
@@ -100,6 +103,7 @@ impl TryFrom<&str> for Opts {
             socket: None,
             user,
             password,
+            tls: false,
         })
     }
 }

@@ -316,6 +316,24 @@ pub struct HandshakeConfig {
     pub password: String,
     pub database: Option<String>,
     pub capabilities: CapabilityFlags,
+    pub tls: bool,
+}
+
+/// Write SSL request packet (sent before HandshakeResponse when TLS is enabled)
+pub fn write_ssl_request(out: &mut Vec<u8>, capability_flags: CapabilityFlags, charset: u8) {
+    use crate::protocol::primitive::*;
+
+    // capability flags (4 bytes)
+    write_int_4(out, capability_flags.bits());
+
+    // max packet size (4 bytes)
+    write_int_4(out, 16777216);
+
+    // charset (1 byte)
+    write_int_1(out, charset);
+
+    // reserved (23 bytes of 0x00)
+    out.extend_from_slice(&[0u8; 23]);
 }
 
 /// Result of driving the handshake state machine
@@ -323,6 +341,11 @@ pub enum HandshakeResult {
     /// Initial handshake received - write response to server
     InitialHandshake {
         handshake_response: Vec<u8>,
+        initial_handshake: InitialHandshake,
+    },
+    /// SSL request sent - upgrade connection to TLS, then call drive_after_tls()
+    SslRequest {
+        ssl_request: Vec<u8>,
         initial_handshake: InitialHandshake,
     },
     /// Write this packet to the server, then read next response
@@ -339,6 +362,13 @@ pub enum HandshakeResult {
 pub enum Handshake {
     /// Waiting for initial handshake from server
     Start { config: HandshakeConfig },
+    /// Sent SSL request, waiting for TLS upgrade to complete before sending handshake response
+    WaitingTlsUpgrade {
+        config: HandshakeConfig,
+        auth_plugin_name: Vec<u8>,
+        auth_plugin_data: Vec<u8>,
+        capability_flags: CapabilityFlags,
+    },
     /// Sent handshake response, waiting for auth result
     WaitingAuthResult {
         config: HandshakeConfig,
@@ -355,13 +385,14 @@ pub enum Handshake {
 
 impl Handshake {
     /// Create a new handshake state machine
-    pub fn new(username: String, password: String, database: Option<String>, capabilities: CapabilityFlags) -> Self {
+    pub fn new(username: String, password: String, database: Option<String>, capabilities: CapabilityFlags, tls: bool) -> Self {
         Self::Start {
             config: HandshakeConfig {
                 username,
                 password,
                 database,
                 capabilities,
+                tls,
             },
         }
     }
@@ -385,11 +416,43 @@ impl Handshake {
                 if config.database.is_some() {
                     client_caps |= CapabilityFlags::CLIENT_CONNECT_WITH_DB;
                 }
+                if config.tls {
+                    client_caps |= CapabilityFlags::CLIENT_SSL;
+                }
 
                 // Negotiate capabilities
                 let negotiated_caps = client_caps & server_caps;
 
                 let auth_plugin_name = &payload[handshake.auth_plugin_name.clone()];
+
+                // If TLS is requested and server supports it, send SSL request first
+                if config.tls && negotiated_caps.contains(CapabilityFlags::CLIENT_SSL) {
+                    let mut ssl_request_data = Vec::new();
+                    write_ssl_request(&mut ssl_request_data, negotiated_caps, handshake.charset);
+
+                    let config_owned = std::mem::replace(
+                        config,
+                        HandshakeConfig {
+                            username: String::new(),
+                            password: String::new(),
+                            database: None,
+                            capabilities: CapabilityFlags::empty(),
+                            tls: false,
+                        },
+                    );
+
+                    *self = Self::WaitingTlsUpgrade {
+                        config: config_owned,
+                        auth_plugin_name: auth_plugin_name.to_vec(),
+                        auth_plugin_data: handshake.auth_plugin_data.clone(),
+                        capability_flags: negotiated_caps,
+                    };
+
+                    return Ok(HandshakeResult::SslRequest {
+                        ssl_request: ssl_request_data,
+                        initial_handshake: handshake,
+                    });
+                }
 
                 let auth_response = match auth_plugin_name {
                     b"mysql_native_password" => {
@@ -430,6 +493,7 @@ impl Handshake {
                         password: String::new(),
                         database: None,
                         capabilities: CapabilityFlags::empty(),
+                        tls: false,
                     },
                 );
 
@@ -548,8 +612,65 @@ impl Handshake {
                 }
             }
 
+            Self::WaitingTlsUpgrade { .. } => {
+                // Should not call drive() in this state - use drive_after_tls() instead
+                Err(Error::InvalidPacket)
+            }
+
             Self::Connected => {
                 // Should not receive more data after connected
+                Err(Error::InvalidPacket)
+            }
+        }
+    }
+
+    /// Continue handshake after TLS upgrade is complete.
+    /// Call this after receiving SslRequest result and upgrading the connection to TLS.
+    pub fn drive_after_tls(&mut self) -> Result<HandshakeResult> {
+        match std::mem::replace(self, Self::Connected) {
+            Self::WaitingTlsUpgrade {
+                config,
+                auth_plugin_name,
+                auth_plugin_data,
+                capability_flags,
+            } => {
+                let auth_response = match auth_plugin_name.as_slice() {
+                    b"mysql_native_password" => {
+                        auth_mysql_native_password(&config.password, &auth_plugin_data).to_vec()
+                    }
+                    b"caching_sha2_password" => {
+                        auth_caching_sha2_password(&config.password, &auth_plugin_data).to_vec()
+                    }
+                    plugin => {
+                        return Err(Error::UnsupportedAuthPlugin(
+                            String::from_utf8_lossy(plugin).to_string(),
+                        ));
+                    }
+                };
+
+                let response = HandshakeResponse41 {
+                    capability_flags,
+                    max_packet_size: 16777216,
+                    charset: 45,
+                    username: &config.username,
+                    auth_response: &auth_response,
+                    database: config.database.as_deref(),
+                    auth_plugin_name: Some(std::str::from_utf8(&auth_plugin_name).unwrap()),
+                };
+
+                let mut packet_data = Vec::new();
+                write_handshake_response(&mut packet_data, &response);
+
+                *self = Self::WaitingAuthResult {
+                    config,
+                    initial_plugin: auth_plugin_name,
+                    capability_flags,
+                };
+
+                Ok(HandshakeResult::Write(packet_data))
+            }
+            other => {
+                *self = other;
                 Err(Error::InvalidPacket)
             }
         }

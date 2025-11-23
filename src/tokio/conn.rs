@@ -1,4 +1,3 @@
-use tokio::io::{AsyncBufRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::net::TcpStream;
 use tracing::instrument;
 use zerocopy::{FromZeros, IntoBytes};
@@ -12,8 +11,10 @@ use crate::protocol::packet::PacketHeader;
 use crate::protocol::response::ErrPayloadBytes;
 use crate::protocol::r#trait::{BinaryResultSetHandler, TextResultSetHandler, params::Params};
 
+use super::stream::Stream;
+
 pub struct Conn {
-    stream: BufReader<TcpStream>,
+    stream: Stream,
     buffer_set: BufferSet,
     initial_handshake: InitialHandshake,
     capability_flags: CapabilityFlags,
@@ -48,15 +49,19 @@ impl Conn {
         stream: TcpStream,
         opts: &crate::opts::Opts,
     ) -> Result<Self> {
-        let mut conn_stream = BufReader::new(stream);
+        let mut conn_stream = Stream::tcp(stream);
         let mut buffer_set = BufferSet::new();
         let mut initial_handshake = None;
+
+        #[cfg(feature = "tls")]
+        let host = opts.host.clone().unwrap_or_default();
 
         let mut handshake = Handshake::new(
             opts.user.clone(),
             opts.password.clone().unwrap_or_default(),
             opts.db.clone(),
             opts.capabilities,
+            opts.tls,
         );
 
         let capability_flags = loop {
@@ -79,11 +84,42 @@ impl Conn {
                             &mut conn_stream,
                             &mut last_sequence_id,
                             &handshake_response,
-                            &mut buffer_set.write_headers_buffer,
-                            &mut buffer_set.ioslice_buffer,
                         )
                         .await?;
                     }
+                }
+                #[cfg(feature = "tls")]
+                HandshakeResult::SslRequest {
+                    ssl_request,
+                    initial_handshake: hs,
+                } => {
+                    initial_handshake = Some(hs);
+                    write_handshake_payload(
+                        &mut conn_stream,
+                        &mut last_sequence_id,
+                        &ssl_request,
+                    )
+                    .await?;
+
+                    // Upgrade to TLS
+                    conn_stream = conn_stream.upgrade_to_tls(&host).await?;
+
+                    // Continue handshake after TLS upgrade
+                    let HandshakeResult::Write(handshake_response) = handshake.drive_after_tls()? else {
+                        return Err(Error::InvalidPacket);
+                    };
+                    write_handshake_payload(
+                        &mut conn_stream,
+                        &mut last_sequence_id,
+                        &handshake_response,
+                    )
+                    .await?;
+                }
+                #[cfg(not(feature = "tls"))]
+                HandshakeResult::SslRequest { .. } => {
+                    return Err(Error::BadConfigError(
+                        "TLS requested but tls feature is not enabled".to_string(),
+                    ));
                 }
                 HandshakeResult::Write(packet_data) => {
                     if !packet_data.is_empty() {
@@ -91,8 +127,6 @@ impl Conn {
                             &mut conn_stream,
                             &mut last_sequence_id,
                             &packet_data,
-                            &mut buffer_set.write_headers_buffer,
-                            &mut buffer_set.ioslice_buffer,
                         )
                         .await?;
                     }
@@ -173,11 +207,9 @@ impl Conn {
                 .extend_from_slice(header.as_bytes());
         }
 
-        use tokio::io::AsyncWriteExt;
         self.stream
             .write_all(&self.buffer_set.packet_buf)
-            .await
-            .map_err(Error::IoError)?;
+            .await?;
         self.stream.flush().await?;
 
         Ok(())
@@ -493,49 +525,10 @@ impl Conn {
     }
 }
 
-/// Write all data from IoSlice buffers, handling partial writes
-async fn write_all_vectored_async<W: AsyncWrite + Unpin>(
-    writer: &mut W,
-    bufs: &mut [std::io::IoSlice<'_>],
-) -> Result<()> {
-    let mut bufs_idx = 0;
-
-    while bufs_idx < bufs.len() {
-        match writer.write_vectored(&bufs[bufs_idx..]).await {
-            Ok(0) => {
-                return Err(Error::IoError(std::io::Error::new(
-                    std::io::ErrorKind::WriteZero,
-                    "failed to write whole buffer",
-                )));
-            }
-            Ok(mut n) => {
-                // Advance through buffers based on bytes written
-                while n > 0 && bufs_idx < bufs.len() {
-                    let buf_len = bufs[bufs_idx].len();
-                    if n >= buf_len {
-                        // Fully consumed this buffer
-                        n -= buf_len;
-                        bufs_idx += 1;
-                    } else {
-                        // Partially consumed this buffer - advance it
-                        bufs[bufs_idx].advance(n);
-                        n = 0;
-                    }
-                }
-            }
-            Err(e) => return Err(Error::IoError(e)),
-        }
-    }
-    Ok(())
-}
-
 /// Read a complete MySQL payload asynchronously, concatenating packets if they span multiple 16MB chunks
 /// Returns the sequence_id of the last packet read.
 #[instrument(skip_all)]
-pub async fn read_payload<R: AsyncBufRead + Unpin>(
-    reader: &mut R,
-    buffer: &mut Vec<u8>,
-) -> Result<u8> {
+async fn read_payload(reader: &mut Stream, buffer: &mut Vec<u8>) -> Result<u8> {
     let mut packet_header = PacketHeader::new_zeroed();
 
     buffer.clear();
@@ -566,55 +559,34 @@ pub async fn read_payload<R: AsyncBufRead + Unpin>(
 }
 
 /// Write a MySQL packet during handshake asynchronously, splitting it into 16MB chunks if necessary
-async fn write_handshake_payload<W: AsyncWrite + Unpin>(
-    stream: &mut W,
+async fn write_handshake_payload(
+    stream: &mut Stream,
     last_sequence_id: &mut u8,
     payload: &[u8],
-    headers_buffer: &mut Vec<PacketHeader>,
-    ioslice_buffer: &mut Vec<std::io::IoSlice<'static>>,
 ) -> Result<()> {
-    use std::io::IoSlice;
-
-    headers_buffer.clear();
-    ioslice_buffer.clear();
+    let mut packet_buf = Vec::new();
 
     let mut remaining = payload;
     let mut chunk_size = 0;
 
     while !remaining.is_empty() {
         chunk_size = remaining.len().min(0xFFFFFF);
-        let (_chunk, rest) = remaining.split_at(chunk_size);
+        let (chunk, rest) = remaining.split_at(chunk_size);
         remaining = rest;
 
         *last_sequence_id = last_sequence_id.wrapping_add(1);
         let header = PacketHeader::encode(chunk_size, *last_sequence_id);
-        headers_buffer.push(header);
+        packet_buf.extend_from_slice(header.as_bytes());
+        packet_buf.extend_from_slice(chunk);
     }
 
     if chunk_size == 0xFFFFFF {
         *last_sequence_id = last_sequence_id.wrapping_add(1);
         let header = PacketHeader::encode(0, *last_sequence_id);
-        headers_buffer.push(header);
+        packet_buf.extend_from_slice(header.as_bytes());
     }
 
-    remaining = payload;
-    for header in headers_buffer.iter() {
-        let chunk_size = header.length();
-
-        ioslice_buffer.push(unsafe {
-            std::mem::transmute::<IoSlice<'_>, IoSlice<'static>>(IoSlice::new(header.as_bytes()))
-        });
-
-        if chunk_size > 0 {
-            let chunk;
-            (chunk, remaining) = remaining.split_at(chunk_size);
-            ioslice_buffer.push(unsafe {
-                std::mem::transmute::<IoSlice<'_>, IoSlice<'static>>(IoSlice::new(chunk))
-            });
-        }
-    }
-
-    write_all_vectored_async(stream, ioslice_buffer).await?;
+    stream.write_all(&packet_buf).await?;
     stream.flush().await?;
 
     Ok(())

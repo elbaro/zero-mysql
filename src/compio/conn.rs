@@ -3,7 +3,6 @@ use crate::protocol::packet::PacketHeader;
 use compio::buf::BufResult;
 use compio::buf::IntoInner;
 use compio::buf::IoBuf;
-use compio::io::{AsyncReadExt, AsyncWriteExt};
 use compio::net::TcpStream;
 use tracing::instrument;
 
@@ -12,12 +11,13 @@ use crate::error::{Error, Result};
 use crate::protocol::command::prepared::{read_prepare_ok, write_execute, write_prepare};
 use crate::protocol::connection::{Handshake, HandshakeResult, InitialHandshake};
 use crate::protocol::response::ErrPayloadBytes;
-use crate::protocol::r#trait::{ResultSetHandler, TextResultSetHandler, params::Params};
+use crate::protocol::r#trait::{BinaryResultSetHandler, TextResultSetHandler, params::Params};
 
+use super::stream::Stream;
 use zerocopy::IntoBytes;
 
 pub struct Conn {
-    stream: TcpStream,
+    stream: Stream,
     buffer_set: BufferSet,
     initial_handshake: InitialHandshake,
     capability_flags: CapabilityFlags,
@@ -35,6 +35,12 @@ impl Conn {
             todo!("Unix socket connections not yet implemented");
         }
 
+        if opts.tls {
+            return Err(Error::BadConfigError(
+                "TLS not yet supported for compio".to_string(),
+            ));
+        }
+
         let host = opts.host.as_ref().ok_or_else(|| {
             Error::BadConfigError("Missing host in connection options".to_string())
         })?;
@@ -46,9 +52,10 @@ impl Conn {
 
     /// Create a new MySQL connection with an existing TCP stream (async)
     pub async fn new_with_stream(
-        mut stream: TcpStream,
+        stream: TcpStream,
         opts: &crate::opts::Opts,
     ) -> Result<Self> {
+        let mut conn_stream = Stream::tcp(stream);
         let mut buffer_set = BufferSet::new();
         buffer_set.buffer_pool.push(Vec::new());
         let mut initial_handshake = None;
@@ -58,6 +65,7 @@ impl Conn {
             opts.password.clone().unwrap_or_default(),
             opts.db.clone(),
             opts.capabilities,
+            opts.tls,
         );
 
         let capability_flags = loop {
@@ -68,19 +76,24 @@ impl Conn {
                 buffer_set.get_pooled_buffer()
             };
 
-            let (mut last_sequence_id, buffer) = read_payload(&mut stream, buffer).await?;
+            let (mut last_sequence_id, buffer) = read_payload(&mut conn_stream, buffer).await?;
 
             match handshake.drive(&buffer)? {
                 HandshakeResult::InitialHandshake { handshake_response, initial_handshake: hs } => {
                     initial_handshake = Some(hs);
                     buffer_set.initial_handshake = buffer;
                     if !handshake_response.is_empty() {
-                        write_handshake_payload(&mut stream, &mut last_sequence_id, &handshake_response).await?;
+                        write_handshake_payload(&mut conn_stream, &mut last_sequence_id, &handshake_response).await?;
                     }
+                }
+                HandshakeResult::SslRequest { .. } => {
+                    return Err(Error::BadConfigError(
+                        "TLS not yet supported for compio".to_string(),
+                    ));
                 }
                 HandshakeResult::Write(packet_data) => {
                     if !packet_data.is_empty() {
-                        write_handshake_payload(&mut stream, &mut last_sequence_id, &packet_data).await?;
+                        write_handshake_payload(&mut conn_stream, &mut last_sequence_id, &packet_data).await?;
                     }
                     buffer_set.return_pooled_buffer(buffer);
                 }
@@ -92,7 +105,7 @@ impl Conn {
         };
 
         Ok(Self {
-            stream,
+            stream: conn_stream,
             buffer_set,
             initial_handshake: initial_handshake.unwrap(),
             capability_flags,
@@ -209,7 +222,7 @@ impl Conn {
     ) -> Result<()>
     where
         P: Params,
-        H: ResultSetHandler<'a>,
+        H: BinaryResultSetHandler<'a>,
     {
         use crate::protocol::command::prepared::{Exec, ExecResult};
 
@@ -263,7 +276,7 @@ impl Conn {
     ) -> Result<bool>
     where
         P: Params,
-        H: ResultSetHandler<'a>,
+        H: BinaryResultSetHandler<'a>,
     {
         use crate::protocol::command::prepared::{Exec, ExecResult};
 
@@ -458,10 +471,7 @@ impl Conn {
 
 /// Read a complete MySQL payload asynchronously, concatenating packets if they span multiple 16MB chunks.
 #[instrument(skip_all)]
-pub async fn read_payload<R>(reader: &mut R, mut buffer: Vec<u8>) -> Result<(u8, Vec<u8>)>
-where
-    R: AsyncReadExt + Unpin,
-{
+async fn read_payload(reader: &mut Stream, mut buffer: Vec<u8>) -> Result<(u8, Vec<u8>)> {
     let header = [0u8; 4];
     let BufResult(result, header) = reader.read_exact(header).await;
     result.map_err(Error::IoError)?;
@@ -493,14 +503,11 @@ where
 }
 
 /// Write a MySQL packet during handshake asynchronously
-async fn write_handshake_payload<W>(
-    stream: &mut W,
+async fn write_handshake_payload(
+    stream: &mut Stream,
     last_sequence_id: &mut u8,
     payload: &[u8],
-) -> Result<()>
-where
-    W: AsyncWriteExt + Unpin,
-{
+) -> Result<()> {
     let mut packet_buf = Vec::new();
 
     let mut remaining = payload;
