@@ -1,5 +1,6 @@
 use std::io::{BufReader, Read, Write};
 use std::net::TcpStream;
+use std::os::unix::net::UnixStream;
 
 #[cfg(feature = "tls")]
 use native_tls::TlsStream;
@@ -8,12 +9,16 @@ pub enum Stream {
     Tcp(BufReader<TcpStream>),
     #[cfg(feature = "tls")]
     Tls(BufReader<TlsStream<TcpStream>>),
-    // Unix(BufReader<UnixStream>),
+    Unix(BufReader<UnixStream>),
 }
 
 impl Stream {
     pub fn tcp(stream: TcpStream) -> Self {
         Self::Tcp(BufReader::new(stream))
+    }
+
+    pub fn unix(stream: UnixStream) -> Self {
+        Self::Unix(BufReader::new(stream))
     }
 
     #[cfg(feature = "tls")]
@@ -24,6 +29,10 @@ impl Stream {
             Self::Tls(_) => return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
                 "Already using TLS",
+            )),
+            Self::Unix(_) => return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "TLS not supported for Unix sockets",
             )),
         };
 
@@ -40,6 +49,7 @@ impl Stream {
             Self::Tcp(r) => r.read_exact(buf),
             #[cfg(feature = "tls")]
             Self::Tls(r) => r.read_exact(buf),
+            Self::Unix(r) => r.read_exact(buf),
         }
     }
 
@@ -48,6 +58,7 @@ impl Stream {
             Self::Tcp(r) => r.get_mut().write_all(buf),
             #[cfg(feature = "tls")]
             Self::Tls(r) => r.get_mut().write_all(buf),
+            Self::Unix(r) => r.get_mut().write_all(buf),
         }
     }
 
@@ -56,6 +67,7 @@ impl Stream {
             Self::Tcp(r) => r.get_mut().write_all_vectored(bufs),
             #[cfg(feature = "tls")]
             Self::Tls(r) => r.get_mut().write_all_vectored(bufs),
+            Self::Unix(r) => r.get_mut().write_all_vectored(bufs),
         }
     }
 
@@ -64,6 +76,7 @@ impl Stream {
             Self::Tcp(r) => r.get_mut().flush(),
             #[cfg(feature = "tls")]
             Self::Tls(r) => r.get_mut().flush(),
+            Self::Unix(r) => r.get_mut().flush(),
         }
     }
 }

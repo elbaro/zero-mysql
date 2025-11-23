@@ -1,5 +1,5 @@
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader};
-use tokio::net::TcpStream;
+use tokio::net::{TcpStream, UnixStream};
 
 #[cfg(feature = "tls")]
 use tokio_native_tls::TlsStream;
@@ -8,12 +8,16 @@ pub enum Stream {
     Tcp(BufReader<TcpStream>),
     #[cfg(feature = "tls")]
     Tls(BufReader<TlsStream<TcpStream>>),
-    // Unix(BufReader<UnixStream>),
+    Unix(BufReader<UnixStream>),
 }
 
 impl Stream {
     pub fn tcp(stream: TcpStream) -> Self {
         Self::Tcp(BufReader::new(stream))
+    }
+
+    pub fn unix(stream: UnixStream) -> Self {
+        Self::Unix(BufReader::new(stream))
     }
 
     #[cfg(feature = "tls")]
@@ -24,6 +28,10 @@ impl Stream {
             Self::Tls(_) => return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
                 "Already using TLS",
+            )),
+            Self::Unix(_) => return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "TLS not supported for Unix sockets",
             )),
         };
 
@@ -41,6 +49,7 @@ impl Stream {
             Self::Tcp(r) => r.read_exact(buf).await.map(|_| ()),
             #[cfg(feature = "tls")]
             Self::Tls(r) => r.read_exact(buf).await.map(|_| ()),
+            Self::Unix(r) => r.read_exact(buf).await.map(|_| ()),
         }
     }
 
@@ -49,6 +58,7 @@ impl Stream {
             Self::Tcp(r) => r.get_mut().write_all(buf).await,
             #[cfg(feature = "tls")]
             Self::Tls(r) => r.get_mut().write_all(buf).await,
+            Self::Unix(r) => r.get_mut().write_all(buf).await,
         }
     }
 
@@ -57,6 +67,7 @@ impl Stream {
             Self::Tcp(r) => r.get_mut().flush().await,
             #[cfg(feature = "tls")]
             Self::Tls(r) => r.get_mut().flush().await,
+            Self::Unix(r) => r.get_mut().flush().await,
         }
     }
 }

@@ -1,4 +1,4 @@
-use tokio::net::TcpStream;
+use tokio::net::{TcpStream, UnixStream};
 use tracing::instrument;
 use zerocopy::{FromZeros, IntoBytes};
 
@@ -29,27 +29,29 @@ impl Conn {
     {
         let opts: crate::opts::Opts = opts.try_into()?;
 
-        if let Some(_socket) = &opts.socket {
-            todo!("Unix socket connections not yet implemented");
-        }
+        let stream = if let Some(socket_path) = &opts.socket {
+            let stream = UnixStream::connect(socket_path).await?;
+            Stream::unix(stream)
+        } else {
+            let host = opts.host.as_ref().ok_or_else(|| {
+                Error::BadConfigError("Missing host in connection options".to_string())
+            })?;
 
-        let host = opts.host.as_ref().ok_or_else(|| {
-            Error::BadConfigError("Missing host in connection options".to_string())
-        })?;
-
-        let addr = format!("{}:{}", host, opts.port);
-        let stream = TcpStream::connect(&addr).await?;
-        stream.set_nodelay(opts.tcp_nodelay)?;
+            let addr = format!("{}:{}", host, opts.port);
+            let stream = TcpStream::connect(&addr).await?;
+            stream.set_nodelay(opts.tcp_nodelay)?;
+            Stream::tcp(stream)
+        };
 
         Self::new_with_stream(stream, &opts).await
     }
 
-    /// Create a new MySQL connection with an existing TCP stream (async)
+    /// Create a new MySQL connection with an existing stream (async)
     pub async fn new_with_stream(
-        stream: TcpStream,
+        stream: Stream,
         opts: &crate::opts::Opts,
     ) -> Result<Self> {
-        let mut conn_stream = Stream::tcp(stream);
+        let mut conn_stream = stream;
         let mut buffer_set = BufferSet::new();
         let mut initial_handshake = None;
 

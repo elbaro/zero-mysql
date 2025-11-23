@@ -12,6 +12,7 @@ use crate::protocol::response::ErrPayloadBytes;
 use std::hint::unlikely;
 use std::io::IoSlice;
 use std::net::TcpStream;
+use std::os::unix::net::UnixStream;
 
 use super::stream::Stream;
 
@@ -31,24 +32,26 @@ impl Conn {
     {
         let opts: crate::opts::Opts = opts.try_into()?;
 
-        if let Some(_socket) = &opts.socket {
-            todo!("Unix socket connections not yet implemented");
-        }
+        let stream = if let Some(socket_path) = &opts.socket {
+            let stream = UnixStream::connect(socket_path)?;
+            Stream::unix(stream)
+        } else {
+            let host = opts.host.as_ref().ok_or_else(|| {
+                Error::BadConfigError("Missing host in connection options".to_string())
+            })?;
 
-        let host = opts.host.as_ref().ok_or_else(|| {
-            Error::BadConfigError("Missing host in connection options".to_string())
-        })?;
-
-        let addr = format!("{}:{}", host, opts.port);
-        let stream = TcpStream::connect(&addr)?;
-        stream.set_nodelay(opts.tcp_nodelay)?;
+            let addr = format!("{}:{}", host, opts.port);
+            let stream = TcpStream::connect(&addr)?;
+            stream.set_nodelay(opts.tcp_nodelay)?;
+            Stream::tcp(stream)
+        };
 
         Self::new_with_stream(stream, &opts)
     }
 
-    /// Create a new MySQL connection with an existing TCP stream
-    pub fn new_with_stream(stream: TcpStream, opts: &crate::opts::Opts) -> Result<Self> {
-        let mut conn_stream = Stream::tcp(stream);
+    /// Create a new MySQL connection with an existing stream
+    pub fn new_with_stream(stream: Stream, opts: &crate::opts::Opts) -> Result<Self> {
+        let mut conn_stream = stream;
         let mut buffer_set = BufferSet::new();
         let mut initial_handshake = None;
 

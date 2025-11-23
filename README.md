@@ -21,9 +21,7 @@ Its test, benchmark and feature development is driven by the need of [pyro-mysql
 
 ### Not Implemented (Yet)
 - Custom max_allowed_packet
-- Unix Socket
 - Sequence ID verification
-- SSL/TLS
 - Authentication plugins other than username/password
 - MariaDB-specific flags
 - CLIENT_SESSION_TRACK, CLIENT_CONNECT_ATTRS, CLIENT_OPTIONAL_RESULTSET_METADATA

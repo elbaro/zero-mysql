@@ -3,7 +3,7 @@ use crate::protocol::packet::PacketHeader;
 use compio::buf::BufResult;
 use compio::buf::IntoInner;
 use compio::buf::IoBuf;
-use compio::net::TcpStream;
+use compio::net::{TcpStream, UnixStream};
 use tracing::instrument;
 
 use crate::constant::CapabilityFlags;
@@ -31,31 +31,33 @@ impl Conn {
     {
         let opts: crate::opts::Opts = opts.try_into()?;
 
-        if let Some(_socket) = &opts.socket {
-            todo!("Unix socket connections not yet implemented");
-        }
-
         if opts.tls {
             return Err(Error::BadConfigError(
                 "TLS not yet supported for compio".to_string(),
             ));
         }
 
-        let host = opts.host.as_ref().ok_or_else(|| {
-            Error::BadConfigError("Missing host in connection options".to_string())
-        })?;
+        let stream = if let Some(socket_path) = &opts.socket {
+            let stream = UnixStream::connect(socket_path).await?;
+            Stream::unix(stream)
+        } else {
+            let host = opts.host.as_ref().ok_or_else(|| {
+                Error::BadConfigError("Missing host in connection options".to_string())
+            })?;
 
-        let stream = TcpStream::connect((host.as_str(), opts.port)).await?;
+            let stream = TcpStream::connect((host.as_str(), opts.port)).await?;
+            Stream::tcp(stream)
+        };
 
         Self::new_with_stream(stream, &opts).await
     }
 
-    /// Create a new MySQL connection with an existing TCP stream (async)
+    /// Create a new MySQL connection with an existing stream (async)
     pub async fn new_with_stream(
-        stream: TcpStream,
+        stream: Stream,
         opts: &crate::opts::Opts,
     ) -> Result<Self> {
-        let mut conn_stream = Stream::tcp(stream);
+        let mut conn_stream = stream;
         let mut buffer_set = BufferSet::new();
         buffer_set.buffer_pool.push(Vec::new());
         let mut initial_handshake = None;
