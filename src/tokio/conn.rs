@@ -1,6 +1,6 @@
 use tokio::net::{TcpStream, UnixStream};
 use tracing::instrument;
-use zerocopy::{FromZeros, IntoBytes};
+use zerocopy::{FromBytes, FromZeros, IntoBytes};
 
 use crate::buffer::BufferSet;
 use crate::constant::CapabilityFlags;
@@ -47,10 +47,7 @@ impl Conn {
     }
 
     /// Create a new MySQL connection with an existing stream (async)
-    pub async fn new_with_stream(
-        stream: Stream,
-        opts: &crate::opts::Opts,
-    ) -> Result<Self> {
+    pub async fn new_with_stream(stream: Stream, opts: &crate::opts::Opts) -> Result<Self> {
         let mut conn_stream = stream;
         let mut buffer_set = BufferSet::new();
         let mut initial_handshake = None;
@@ -66,6 +63,7 @@ impl Conn {
             opts.tls,
         );
 
+        let mut last_sequence_id;
         let capability_flags = loop {
             let buffer = if matches!(handshake, Handshake::Start { .. }) {
                 &mut buffer_set.initial_handshake
@@ -73,33 +71,29 @@ impl Conn {
                 &mut buffer_set.read_buffer
             };
             buffer.clear();
-            let mut last_sequence_id = read_payload(&mut conn_stream, buffer).await?;
+            last_sequence_id = read_payload(&mut conn_stream, buffer).await?;
 
-            match handshake.drive(buffer)? {
+            match handshake.drive(&mut buffer_set)? {
                 HandshakeResult::InitialHandshake {
-                    handshake_response,
-                    initial_handshake: hs,
-                } => {
-                    initial_handshake = Some(hs);
-                    if !handshake_response.is_empty() {
-                        write_handshake_payload(
-                            &mut conn_stream,
-                            &mut last_sequence_id,
-                            &handshake_response,
-                        )
-                        .await?;
-                    }
-                }
-                #[cfg(feature = "tls")]
-                HandshakeResult::SslRequest {
-                    ssl_request,
                     initial_handshake: hs,
                 } => {
                     initial_handshake = Some(hs);
                     write_handshake_payload(
                         &mut conn_stream,
+                        &mut buffer_set,
                         &mut last_sequence_id,
-                        &ssl_request,
+                    )
+                    .await?;
+                }
+                #[cfg(feature = "tls")]
+                HandshakeResult::SslRequest {
+                    initial_handshake: hs,
+                } => {
+                    initial_handshake = Some(hs);
+                    write_handshake_payload(
+                        &mut conn_stream,
+                        &mut buffer_set,
+                        &mut last_sequence_id,
                     )
                     .await?;
 
@@ -107,13 +101,13 @@ impl Conn {
                     conn_stream = conn_stream.upgrade_to_tls(&host).await?;
 
                     // Continue handshake after TLS upgrade
-                    let HandshakeResult::Write(handshake_response) = handshake.drive_after_tls()? else {
+                    let HandshakeResult::Write = handshake.drive_after_tls(&mut buffer_set)? else {
                         return Err(Error::InvalidPacket);
                     };
                     write_handshake_payload(
                         &mut conn_stream,
+                        &mut buffer_set,
                         &mut last_sequence_id,
-                        &handshake_response,
                     )
                     .await?;
                 }
@@ -123,15 +117,16 @@ impl Conn {
                         "TLS requested but tls feature is not enabled".to_string(),
                     ));
                 }
-                HandshakeResult::Write(packet_data) => {
-                    if !packet_data.is_empty() {
-                        write_handshake_payload(
-                            &mut conn_stream,
-                            &mut last_sequence_id,
-                            &packet_data,
-                        )
-                        .await?;
-                    }
+                HandshakeResult::Write => {
+                    write_handshake_payload(
+                        &mut conn_stream,
+                        &mut buffer_set,
+                        &mut last_sequence_id,
+                    )
+                    .await?;
+                }
+                HandshakeResult::Read => {
+                    // Nothing to write, just continue to read next packet
                 }
                 HandshakeResult::Connected { capability_flags } => {
                     break capability_flags;
@@ -171,49 +166,23 @@ impl Conn {
     #[instrument(skip_all)]
     async fn write_payload(&mut self) -> Result<()> {
         let mut sequence_id = 0u8;
-        let payload = self.buffer_set.write_buffer.as_slice();
+        let mut buffer = self.buffer_set.write_buffer_mut().as_mut_slice();
 
-        // 0 byte -> 1 chunk, 1 byte -> 2 chunks, 0xFFFFFF bytes -> 2 chunks
-        let num_chunks = payload.len() / 0xFFFFFF + 1;
-        let needs_empty_packet = payload.len().is_multiple_of(0xFFFFFF) && !payload.is_empty();
-        let total_bytes = num_chunks * 4 + payload.len();
+        loop {
+            let chunk_size = buffer[4..].len().min(0xFFFFFF);
+            PacketHeader::mut_from_bytes(&mut buffer[0..4])
+                .unwrap()
+                .encode_in_place(chunk_size, sequence_id);
+            self.stream.write_all(&buffer[..4 + chunk_size]).await?;
 
-        // Reuse packet buffer, reserve capacity if needed
-        self.buffer_set.packet_buf.clear();
-        self.buffer_set.packet_buf.reserve(total_bytes);
+            if chunk_size < 0xFFFFFF {
+                break;
+            }
 
-        // Build packet with headers and chunks
-        let mut remaining = payload;
-        while !remaining.is_empty() {
-            let chunk_size = remaining.len().min(0xFFFFFF);
-            let (chunk, rest) = remaining.split_at(chunk_size);
-
-            // Write header
-            let header = PacketHeader::encode(chunk_size, sequence_id);
-            self.buffer_set
-                .packet_buf
-                .extend_from_slice(header.as_bytes());
-
-            // Write chunk
-            self.buffer_set.packet_buf.extend_from_slice(chunk);
-
-            remaining = rest;
             sequence_id = sequence_id.wrapping_add(1);
+            buffer = &mut buffer[0xFFFFFF..];
         }
-
-        // Add empty packet if last chunk was exactly 0xFFFFFF bytes
-        if needs_empty_packet {
-            let header = PacketHeader::encode(0, sequence_id);
-            self.buffer_set
-                .packet_buf
-                .extend_from_slice(header.as_bytes());
-        }
-
-        self.stream
-            .write_all(&self.buffer_set.packet_buf)
-            .await?;
         self.stream.flush().await?;
-
         Ok(())
     }
 
@@ -222,9 +191,8 @@ impl Conn {
     /// Returns `Ok(statement_id)` on success.
     pub async fn prepare(&mut self, sql: &str) -> Result<u32> {
         self.buffer_set.read_buffer.clear();
-        self.buffer_set.write_buffer.clear();
 
-        write_prepare(&mut self.buffer_set.write_buffer, sql);
+        write_prepare(self.buffer_set.new_write_buffer(), sql);
 
         self.write_payload().await?;
 
@@ -263,8 +231,7 @@ impl Conn {
     {
         use crate::protocol::command::prepared::{Exec, ExecResult};
 
-        self.buffer_set.write_buffer.clear();
-        write_execute(&mut self.buffer_set.write_buffer, statement_id, params)?;
+        write_execute(self.buffer_set.new_write_buffer(), statement_id, params)?;
 
         self.write_payload().await?;
 
@@ -274,7 +241,7 @@ impl Conn {
             self.buffer_set.read_buffer.clear();
             let _ = read_payload(&mut self.stream, &mut self.buffer_set.read_buffer).await?;
 
-            let result = exec.drive(&self.buffer_set.read_buffer[..])?;
+            let result = exec.drive(&mut self.buffer_set)?;
             match result {
                 ExecResult::NoResultSet(ok_bytes) => {
                     handler.no_result_set(ok_bytes)?;
@@ -316,8 +283,7 @@ impl Conn {
     {
         use crate::protocol::command::prepared::{Exec, ExecResult};
 
-        self.buffer_set.write_buffer.clear();
-        write_execute(&mut self.buffer_set.write_buffer, statement_id, params)?;
+        write_execute(self.buffer_set.new_write_buffer(), statement_id, params)?;
 
         self.write_payload().await?;
 
@@ -328,7 +294,7 @@ impl Conn {
             self.buffer_set.read_buffer.clear();
             let _ = read_payload(&mut self.stream, &mut self.buffer_set.read_buffer).await?;
 
-            let result = exec.drive(&self.buffer_set.read_buffer[..])?;
+            let result = exec.drive(&mut self.buffer_set)?;
             match result {
                 ExecResult::NoResultSet(ok_bytes) => {
                     handler.no_result_set(ok_bytes)?;
@@ -363,8 +329,7 @@ impl Conn {
     {
         use crate::protocol::command::prepared::{Exec, ExecResult};
 
-        self.buffer_set.write_buffer.clear();
-        write_execute(&mut self.buffer_set.write_buffer, statement_id, params)?;
+        write_execute(self.buffer_set.new_write_buffer(), statement_id, params)?;
 
         self.write_payload().await?;
 
@@ -374,7 +339,7 @@ impl Conn {
             self.buffer_set.read_buffer.clear();
             let _ = read_payload(&mut self.stream, &mut self.buffer_set.read_buffer).await?;
 
-            let result = exec.drive(&self.buffer_set.read_buffer[..])?;
+            let result = exec.drive(&mut self.buffer_set)?;
             match result {
                 ExecResult::NoResultSet(_ok_bytes) => {
                     return Ok(());
@@ -396,8 +361,7 @@ impl Conn {
     {
         use crate::protocol::command::query::{Query, QueryResult, write_query};
 
-        self.buffer_set.write_buffer.clear();
-        write_query(&mut self.buffer_set.write_buffer, sql);
+        write_query(self.buffer_set.new_write_buffer(), sql);
 
         self.write_payload().await?;
 
@@ -407,7 +371,7 @@ impl Conn {
             self.buffer_set.read_buffer.clear();
             let _ = read_payload(&mut self.stream, &mut self.buffer_set.read_buffer).await?;
 
-            let result = query_sm.drive(&self.buffer_set.read_buffer[..])?;
+            let result = query_sm.drive(&mut self.buffer_set)?;
             match result {
                 QueryResult::NoResultSet(ok_bytes) => {
                     handler.no_result_set(ok_bytes)?;
@@ -436,8 +400,7 @@ impl Conn {
     pub async fn query_drop(&mut self, sql: &str) -> Result<()> {
         use crate::protocol::command::query::{Query, write_query};
 
-        self.buffer_set.write_buffer.clear();
-        write_query(&mut self.buffer_set.write_buffer, sql);
+        write_query(self.buffer_set.new_write_buffer(), sql);
 
         self.write_payload().await?;
 
@@ -446,7 +409,7 @@ impl Conn {
         loop {
             self.buffer_set.read_buffer.clear();
             let _ = read_payload(&mut self.stream, &mut self.buffer_set.read_buffer).await?;
-            query_sm.drive(&self.buffer_set.read_buffer[..])?;
+            query_sm.drive(&mut self.buffer_set)?;
             if query_sm.is_finished() {
                 return Ok(());
             }
@@ -459,8 +422,7 @@ impl Conn {
     pub async fn ping(&mut self) -> Result<()> {
         use crate::protocol::command::utility::write_ping;
 
-        self.buffer_set.write_buffer.clear();
-        write_ping(&mut self.buffer_set.write_buffer);
+        write_ping(self.buffer_set.new_write_buffer());
 
         self.write_payload().await?;
 
@@ -474,8 +436,7 @@ impl Conn {
     pub async fn reset(&mut self) -> Result<()> {
         use crate::protocol::command::utility::write_reset_connection;
 
-        self.buffer_set.write_buffer.clear();
-        write_reset_connection(&mut self.buffer_set.write_buffer);
+        write_reset_connection(self.buffer_set.new_write_buffer());
 
         self.write_payload().await?;
 
@@ -560,36 +521,27 @@ async fn read_payload(reader: &mut Stream, buffer: &mut Vec<u8>) -> Result<u8> {
     Ok(sequence_id)
 }
 
-/// Write a MySQL packet during handshake asynchronously, splitting it into 16MB chunks if necessary
 async fn write_handshake_payload(
     stream: &mut Stream,
+    buffer_set: &mut BufferSet,
     last_sequence_id: &mut u8,
-    payload: &[u8],
 ) -> Result<()> {
-    let mut packet_buf = Vec::new();
+    let mut buffer = buffer_set.write_buffer_mut().as_mut_slice();
 
-    let mut remaining = payload;
-    let mut chunk_size = 0;
-
-    while !remaining.is_empty() {
-        chunk_size = remaining.len().min(0xFFFFFF);
-        let (chunk, rest) = remaining.split_at(chunk_size);
-        remaining = rest;
-
+    loop {
+        let chunk_size = buffer[4..].len().min(0xFFFFFF);
         *last_sequence_id = last_sequence_id.wrapping_add(1);
-        let header = PacketHeader::encode(chunk_size, *last_sequence_id);
-        packet_buf.extend_from_slice(header.as_bytes());
-        packet_buf.extend_from_slice(chunk);
-    }
+        PacketHeader::mut_from_bytes(&mut buffer[0..4])
+            .unwrap()
+            .encode_in_place(chunk_size, *last_sequence_id);
+        stream.write_all(&buffer[..4 + chunk_size]).await?;
 
-    if chunk_size == 0xFFFFFF {
-        *last_sequence_id = last_sequence_id.wrapping_add(1);
-        let header = PacketHeader::encode(0, *last_sequence_id);
-        packet_buf.extend_from_slice(header.as_bytes());
-    }
+        if chunk_size < 0xFFFFFF {
+            break;
+        }
 
-    stream.write_all(&packet_buf).await?;
+        buffer = &mut buffer[0xFFFFFF..];
+    }
     stream.flush().await?;
-
     Ok(())
 }

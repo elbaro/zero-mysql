@@ -62,15 +62,6 @@ impl Stream {
         }
     }
 
-    pub fn write_all_vectored(&mut self, bufs: &mut [std::io::IoSlice<'_>]) -> std::io::Result<()> {
-        match self {
-            Self::Tcp(r) => r.get_mut().write_all_vectored(bufs),
-            #[cfg(feature = "tls")]
-            Self::Tls(r) => r.get_mut().write_all_vectored(bufs),
-            Self::Unix(r) => r.get_mut().write_all_vectored(bufs),
-        }
-    }
-
     pub fn flush(&mut self) -> std::io::Result<()> {
         match self {
             Self::Tcp(r) => r.get_mut().flush(),

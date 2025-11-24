@@ -1,4 +1,4 @@
-use zerocopy::IntoBytes;
+use zerocopy::{FromBytes, IntoBytes};
 
 use crate::buffer::BufferSet;
 use crate::constant::CapabilityFlags;
@@ -7,10 +7,9 @@ use crate::protocol::command::prepared::write_execute;
 use crate::protocol::command::prepared::{read_prepare_ok, write_prepare};
 use crate::protocol::connection::{Handshake, HandshakeResult, InitialHandshake};
 use crate::protocol::packet::PacketHeader;
-use crate::protocol::r#trait::{params::Params, BinaryResultSetHandler, TextResultSetHandler};
 use crate::protocol::response::ErrPayloadBytes;
+use crate::protocol::r#trait::{BinaryResultSetHandler, TextResultSetHandler, params::Params};
 use std::hint::unlikely;
-use std::io::IoSlice;
 use std::net::TcpStream;
 use std::os::unix::net::UnixStream;
 
@@ -66,6 +65,7 @@ impl Conn {
             opts.tls,
         );
 
+        let mut last_sequence_id;
         let capability_flags = loop {
             let buffer = if matches!(handshake, Handshake::Start { .. }) {
                 &mut buffer_set.initial_handshake
@@ -73,51 +73,41 @@ impl Conn {
                 &mut buffer_set.read_buffer
             };
             buffer.clear();
-            let mut last_sequence_id = read_payload(&mut conn_stream, buffer)?;
+            last_sequence_id = read_payload(&mut conn_stream, buffer)?;
 
-            match handshake.drive(buffer)? {
+            match handshake.drive(&mut buffer_set)? {
                 HandshakeResult::InitialHandshake {
-                    handshake_response,
-                    initial_handshake: hs,
-                } => {
-                    initial_handshake = Some(hs);
-                    if !handshake_response.is_empty() {
-                        write_handshake_payload(
-                            &mut conn_stream,
-                            &mut last_sequence_id,
-                            &handshake_response,
-                            &mut buffer_set.write_headers_buffer,
-                            &mut buffer_set.ioslice_buffer,
-                        )?;
-                    }
-                }
-                #[cfg(feature = "tls")]
-                HandshakeResult::SslRequest {
-                    ssl_request,
                     initial_handshake: hs,
                 } => {
                     initial_handshake = Some(hs);
                     write_handshake_payload(
                         &mut conn_stream,
+                        &mut buffer_set,
                         &mut last_sequence_id,
-                        &ssl_request,
-                        &mut buffer_set.write_headers_buffer,
-                        &mut buffer_set.ioslice_buffer,
+                    )?;
+                }
+                #[cfg(feature = "tls")]
+                HandshakeResult::SslRequest {
+                    initial_handshake: hs,
+                } => {
+                    initial_handshake = Some(hs);
+                    write_handshake_payload(
+                        &mut conn_stream,
+                        &mut buffer_set,
+                        &mut last_sequence_id,
                     )?;
 
                     // Upgrade to TLS
                     conn_stream = conn_stream.upgrade_to_tls(&host)?;
 
                     // Continue handshake after TLS upgrade
-                    let HandshakeResult::Write(handshake_response) = handshake.drive_after_tls()? else {
+                    let HandshakeResult::Write = handshake.drive_after_tls(&mut buffer_set)? else {
                         return Err(Error::InvalidPacket);
                     };
                     write_handshake_payload(
                         &mut conn_stream,
+                        &mut buffer_set,
                         &mut last_sequence_id,
-                        &handshake_response,
-                        &mut buffer_set.write_headers_buffer,
-                        &mut buffer_set.ioslice_buffer,
                     )?;
                 }
                 #[cfg(not(feature = "tls"))]
@@ -126,16 +116,15 @@ impl Conn {
                         "TLS requested but tls feature is not enabled".to_string(),
                     ));
                 }
-                HandshakeResult::Write(packet_data) => {
-                    if !packet_data.is_empty() {
-                        write_handshake_payload(
-                            &mut conn_stream,
-                            &mut last_sequence_id,
-                            &packet_data,
-                            &mut buffer_set.write_headers_buffer,
-                            &mut buffer_set.ioslice_buffer,
-                        )?;
-                    }
+                HandshakeResult::Write => {
+                    write_handshake_payload(
+                        &mut conn_stream,
+                        &mut buffer_set,
+                        &mut last_sequence_id,
+                    )?;
+                }
+                HandshakeResult::Read => {
+                    // Nothing to write, just continue to read next packet
                 }
                 HandshakeResult::Connected { capability_flags } => {
                     break capability_flags;
@@ -173,62 +162,32 @@ impl Conn {
 
     #[tracing::instrument(skip_all)]
     fn write_payload(&mut self) -> Result<()> {
-        let mut sequence_id = 0;
-        self.buffer_set.write_headers_buffer.clear();
-        self.buffer_set.ioslice_buffer.clear();
+        let mut sequence_id = 0u8;
+        let mut buffer = self.buffer_set.write_buffer_mut().as_mut_slice();
 
-        let payload = self.buffer_set.write_buffer.as_slice();
-        let mut remaining = payload;
-        let mut chunk_size = 0;
+        loop {
+            let chunk_size = buffer[4..].len().min(0xFFFFFF);
+            PacketHeader::mut_from_bytes(&mut buffer[0..4])
+                .unwrap()
+                .encode_in_place(chunk_size, sequence_id);
+            self.stream.write_all(&buffer[..4 + chunk_size])?;
 
-        while !remaining.is_empty() {
-            chunk_size = remaining.len().min(0xFFFFFF);
-            let (_chunk, rest) = remaining.split_at(chunk_size);
-            remaining = rest;
-
-            let header = PacketHeader::encode(chunk_size, sequence_id);
-            self.buffer_set.write_headers_buffer.push(header);
+            if chunk_size < 0xFFFFFF {
+                break;
+            }
 
             sequence_id = sequence_id.wrapping_add(1);
+            buffer = &mut buffer[0xFFFFFF..];
         }
-
-        if chunk_size == 0xFFFFFF {
-            let header = PacketHeader::encode(0, sequence_id);
-            self.buffer_set.write_headers_buffer.push(header);
-        }
-
-        remaining = payload;
-        for header in self.buffer_set.write_headers_buffer.iter() {
-            let chunk_size = header.length();
-            self.buffer_set.ioslice_buffer.push(unsafe {
-                std::mem::transmute::<IoSlice<'_>, IoSlice<'static>>(IoSlice::new(
-                    header.as_bytes(),
-                ))
-            });
-
-            if chunk_size > 0 {
-                let chunk;
-                (chunk, remaining) = remaining.split_at(chunk_size);
-                self.buffer_set.ioslice_buffer.push(unsafe {
-                    std::mem::transmute::<IoSlice<'_>, IoSlice<'static>>(IoSlice::new(chunk))
-                });
-            }
-        }
-
-        self.stream
-            .write_all_vectored(&mut self.buffer_set.ioslice_buffer)?;
-
         self.stream.flush()?;
-
         Ok(())
     }
 
     /// Returns `Ok(statement_id) on success
     pub fn prepare(&mut self, sql: &str) -> Result<u32> {
         self.buffer_set.read_buffer.clear();
-        self.buffer_set.write_buffer.clear();
 
-        write_prepare(&mut self.buffer_set.write_buffer, sql);
+        write_prepare(self.buffer_set.new_write_buffer(), sql);
 
         self.write_payload()?;
         let _ = read_payload(&mut self.stream, &mut self.buffer_set.read_buffer)?;
@@ -266,8 +225,7 @@ impl Conn {
     {
         use crate::protocol::command::prepared::{Exec, ExecResult};
 
-        self.buffer_set.write_buffer.clear();
-        write_execute(&mut self.buffer_set.write_buffer, statement_id, params)?;
+        write_execute(self.buffer_set.new_write_buffer(), statement_id, params)?;
 
         self.write_payload()?;
 
@@ -277,7 +235,7 @@ impl Conn {
             self.buffer_set.read_buffer.clear();
             let _ = read_payload(&mut self.stream, &mut self.buffer_set.read_buffer)?;
 
-            let result = exec.drive(&self.buffer_set.read_buffer[..])?;
+            let result = exec.drive(&mut self.buffer_set)?;
             match result {
                 ExecResult::NoResultSet(ok_bytes) => {
                     handler.no_result_set(ok_bytes)?;
@@ -318,8 +276,7 @@ impl Conn {
     {
         use crate::protocol::command::prepared::{Exec, ExecResult};
 
-        self.buffer_set.write_buffer.clear();
-        write_execute(&mut self.buffer_set.write_buffer, statement_id, params)?;
+        write_execute(self.buffer_set.new_write_buffer(), statement_id, params)?;
 
         self.write_payload()?;
 
@@ -330,7 +287,7 @@ impl Conn {
             self.buffer_set.read_buffer.clear();
             let _ = read_payload(&mut self.stream, &mut self.buffer_set.read_buffer)?;
 
-            let result = exec.drive(&self.buffer_set.read_buffer[..])?;
+            let result = exec.drive(&mut self.buffer_set)?;
             match result {
                 ExecResult::NoResultSet(ok_bytes) => {
                     handler.no_result_set(ok_bytes)?;
@@ -365,8 +322,7 @@ impl Conn {
     {
         use crate::protocol::command::prepared::{Exec, ExecResult};
 
-        self.buffer_set.write_buffer.clear();
-        write_execute(&mut self.buffer_set.write_buffer, statement_id, params)?;
+        write_execute(self.buffer_set.new_write_buffer(), statement_id, params)?;
 
         self.write_payload()?;
 
@@ -376,7 +332,7 @@ impl Conn {
             self.buffer_set.read_buffer.clear();
             let _ = read_payload(&mut self.stream, &mut self.buffer_set.read_buffer)?;
 
-            let result = exec.drive(&self.buffer_set.read_buffer[..])?;
+            let result = exec.drive(&mut self.buffer_set)?;
 
             match result {
                 ExecResult::NoResultSet(_ok_bytes) => {
@@ -397,10 +353,9 @@ impl Conn {
     where
         H: TextResultSetHandler<'a>,
     {
-        use crate::protocol::command::query::{write_query, Query, QueryResult};
+        use crate::protocol::command::query::{Query, QueryResult, write_query};
 
-        self.buffer_set.write_buffer.clear();
-        write_query(&mut self.buffer_set.write_buffer, sql);
+        write_query(self.buffer_set.new_write_buffer(), sql);
 
         self.write_payload()?;
 
@@ -410,7 +365,7 @@ impl Conn {
             self.buffer_set.read_buffer.clear();
             let _ = read_payload(&mut self.stream, &mut self.buffer_set.read_buffer)?;
 
-            let result = query_sm.drive(&self.buffer_set.read_buffer[..])?;
+            let result = query_sm.drive(&mut self.buffer_set)?;
             match result {
                 QueryResult::NoResultSet(ok_bytes) => {
                     handler.no_result_set(ok_bytes)?;
@@ -436,10 +391,9 @@ impl Conn {
 
     /// Execute a text protocol SQL query and discard the result
     pub fn query_drop(&mut self, sql: &str) -> Result<()> {
-        use crate::protocol::command::query::{write_query, Query};
+        use crate::protocol::command::query::{Query, write_query};
 
-        self.buffer_set.write_buffer.clear();
-        write_query(&mut self.buffer_set.write_buffer, sql);
+        write_query(self.buffer_set.new_write_buffer(), sql);
 
         self.write_payload()?;
 
@@ -448,7 +402,7 @@ impl Conn {
         loop {
             self.buffer_set.read_buffer.clear();
             let _ = read_payload(&mut self.stream, &mut self.buffer_set.read_buffer)?;
-            query_sm.drive(&self.buffer_set.read_buffer[..])?;
+            query_sm.drive(&mut self.buffer_set)?;
             if query_sm.is_finished() {
                 return Ok(());
             }
@@ -461,8 +415,7 @@ impl Conn {
     pub fn ping(&mut self) -> Result<()> {
         use crate::protocol::command::utility::write_ping;
 
-        self.buffer_set.write_buffer.clear();
-        write_ping(&mut self.buffer_set.write_buffer);
+        write_ping(self.buffer_set.new_write_buffer());
 
         self.write_payload()?;
 
@@ -476,8 +429,7 @@ impl Conn {
     pub fn reset(&mut self) -> Result<()> {
         use crate::protocol::command::utility::write_reset_connection;
 
-        self.buffer_set.write_buffer.clear();
-        write_reset_connection(&mut self.buffer_set.write_buffer);
+        write_reset_connection(self.buffer_set.new_write_buffer());
 
         self.write_payload()?;
 
@@ -565,55 +517,27 @@ fn read_payload(reader: &mut Stream, buffer: &mut Vec<u8>) -> Result<u8> {
     Ok(sequence_id)
 }
 
-/// Write a MySQL packet during handshake, splitting it into 16MB chunks if necessary
 fn write_handshake_payload(
     stream: &mut Stream,
+    buffer_set: &mut BufferSet,
     last_sequence_id: &mut u8,
-    payload: &[u8],
-    headers_buffer: &mut Vec<PacketHeader>,
-    ioslice_buffer: &mut Vec<IoSlice<'static>>,
 ) -> Result<()> {
-    headers_buffer.clear();
-    ioslice_buffer.clear();
+    let mut buffer = buffer_set.write_buffer_mut().as_mut_slice();
 
-    let mut remaining = payload;
-    let mut chunk_size = 0;
-
-    while !remaining.is_empty() {
-        chunk_size = remaining.len().min(0xFFFFFF);
-        let (_chunk, rest) = remaining.split_at(chunk_size);
-        remaining = rest;
-
+    loop {
+        let chunk_size = buffer[4..].len().min(0xFFFFFF);
         *last_sequence_id = last_sequence_id.wrapping_add(1);
-        let header = PacketHeader::encode(chunk_size, *last_sequence_id);
-        headers_buffer.push(header);
-    }
+        PacketHeader::mut_from_bytes(&mut buffer[0..4])
+            .unwrap()
+            .encode_in_place(chunk_size, *last_sequence_id);
+        stream.write_all(&buffer[..4 + chunk_size])?;
 
-    if chunk_size == 0xFFFFFF {
-        *last_sequence_id = last_sequence_id.wrapping_add(1);
-        let header = PacketHeader::encode(0, *last_sequence_id);
-        headers_buffer.push(header);
-    }
-
-    remaining = payload;
-    for header in headers_buffer.iter() {
-        let chunk_size = header.length();
-
-        ioslice_buffer.push(unsafe {
-            std::mem::transmute::<IoSlice<'_>, IoSlice<'static>>(IoSlice::new(header.as_bytes()))
-        });
-
-        if chunk_size > 0 {
-            let chunk;
-            (chunk, remaining) = remaining.split_at(chunk_size);
-            ioslice_buffer.push(unsafe {
-                std::mem::transmute::<IoSlice<'_>, IoSlice<'static>>(IoSlice::new(chunk))
-            });
+        if chunk_size < 0xFFFFFF {
+            break;
         }
+
+        buffer = &mut buffer[0xFFFFFF..];
     }
-
-    stream.write_all_vectored(ioslice_buffer)?;
     stream.flush()?;
-
     Ok(())
 }

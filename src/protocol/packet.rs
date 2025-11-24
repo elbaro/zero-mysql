@@ -17,6 +17,12 @@ impl PacketHeader {
         }
     }
 
+    pub fn encode_in_place(&mut self, length: usize, sequence_id: u8) {
+        let len = u32::to_le_bytes(length as u32);
+        self.length = [len[0], len[1], len[2]];
+        self.sequence_id = sequence_id;
+    }
+
     pub fn length(&self) -> usize {
         u32::from_le_bytes([self.length[0], self.length[1], self.length[2], 0]) as usize
     }

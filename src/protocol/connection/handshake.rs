@@ -2,6 +2,7 @@ use std::hint::cold_path;
 use zerocopy::{FromBytes, Immutable, KnownLayout};
 use zerocopy::byteorder::little_endian::{U16 as U16LE, U32 as U32LE};
 
+use crate::buffer::BufferSet;
 use crate::constant::{CAPABILITIES_ALWAYS_ENABLED, CAPABILITIES_CONFIGURABLE, CapabilityFlags};
 use crate::error::{Error, Result};
 use crate::protocol::primitive::*;
@@ -338,18 +339,18 @@ pub fn write_ssl_request(out: &mut Vec<u8>, capability_flags: CapabilityFlags, c
 
 /// Result of driving the handshake state machine
 pub enum HandshakeResult {
-    /// Initial handshake received - write response to server
+    /// Initial handshake received - response written to buffer_set.write_buffer
     InitialHandshake {
-        handshake_response: Vec<u8>,
         initial_handshake: InitialHandshake,
     },
-    /// SSL request sent - upgrade connection to TLS, then call drive_after_tls()
+    /// SSL request written to buffer_set.write_buffer - upgrade connection to TLS, then call drive_after_tls()
     SslRequest {
-        ssl_request: Vec<u8>,
         initial_handshake: InitialHandshake,
     },
-    /// Write this packet to the server, then read next response
-    Write(Vec<u8>),
+    /// Packet written to buffer_set.write_buffer - send it to the server, then read next response
+    Write,
+    /// Nothing to write, just read next response
+    Read,
     /// Handshake complete, connection established
     Connected {
         capability_flags: CapabilityFlags,
@@ -400,16 +401,18 @@ impl Handshake {
     /// Drive the state machine with the next payload
     ///
     /// # Arguments
-    /// * `payload` - The next packet payload to process
+    /// * `buffer_set` - The buffer set containing the payload to process.
+    ///   Output is written to `buffer_set.write_buffer` when needed.
     ///
     /// # Returns
-    /// * `Ok(HandshakeResult::Write)` - Write this packet, then read response
+    /// * `Ok(HandshakeResult::Write)` - Send write_buffer, then read response
+    /// * `Ok(HandshakeResult::Read)` - Just read next response (nothing to write)
     /// * `Ok(HandshakeResult::Connected)` - Handshake complete
     /// * `Err(Error)` - An error occurred
-    pub fn drive(&mut self, payload: &[u8]) -> Result<HandshakeResult> {
+    pub fn drive(&mut self, buffer_set: &mut BufferSet) -> Result<HandshakeResult> {
         match self {
             Self::Start { config } => {
-                let handshake = read_initial_handshake(payload)?;
+                let handshake = read_initial_handshake(&buffer_set.initial_handshake)?;
                 let server_caps = handshake.capability_flags;
 
                 let mut client_caps = CAPABILITIES_ALWAYS_ENABLED | (config.capabilities & CAPABILITIES_CONFIGURABLE);
@@ -423,12 +426,12 @@ impl Handshake {
                 // Negotiate capabilities
                 let negotiated_caps = client_caps & server_caps;
 
-                let auth_plugin_name = &payload[handshake.auth_plugin_name.clone()];
+                // Clone auth_plugin_name early to avoid borrow conflicts
+                let auth_plugin_name = buffer_set.initial_handshake[handshake.auth_plugin_name.clone()].to_vec();
 
                 // If TLS is requested and server supports it, send SSL request first
                 if config.tls && negotiated_caps.contains(CapabilityFlags::CLIENT_SSL) {
-                    let mut ssl_request_data = Vec::new();
-                    write_ssl_request(&mut ssl_request_data, negotiated_caps, handshake.charset);
+                    write_ssl_request(buffer_set.new_write_buffer(), negotiated_caps, handshake.charset);
 
                     let config_owned = std::mem::replace(
                         config,
@@ -443,18 +446,17 @@ impl Handshake {
 
                     *self = Self::WaitingTlsUpgrade {
                         config: config_owned,
-                        auth_plugin_name: auth_plugin_name.to_vec(),
+                        auth_plugin_name,
                         auth_plugin_data: handshake.auth_plugin_data.clone(),
                         capability_flags: negotiated_caps,
                     };
 
                     return Ok(HandshakeResult::SslRequest {
-                        ssl_request: ssl_request_data,
                         initial_handshake: handshake,
                     });
                 }
 
-                let auth_response = match auth_plugin_name {
+                let auth_response = match auth_plugin_name.as_slice() {
                     b"mysql_native_password" => {
                         auth_mysql_native_password(&config.password, &handshake.auth_plugin_data)
                             .to_vec()
@@ -478,14 +480,13 @@ impl Handshake {
                     auth_response: &auth_response,
                     database: config.database.as_deref(),
                     auth_plugin_name: Some(
-                        std::str::from_utf8(auth_plugin_name).unwrap(),
+                        std::str::from_utf8(&auth_plugin_name).unwrap(),
                     ),
                 };
 
-                let mut packet_data = Vec::new();
-                write_handshake_response(&mut packet_data, &response);
+                write_handshake_response(buffer_set.new_write_buffer(), &response);
 
-                let initial_plugin = auth_plugin_name.to_vec();
+                let initial_plugin = auth_plugin_name;
                 let config_owned = std::mem::replace(
                     config,
                     HandshakeConfig {
@@ -504,7 +505,6 @@ impl Handshake {
                 };
 
                 Ok(HandshakeResult::InitialHandshake {
-                    handshake_response: packet_data,
                     initial_handshake: handshake,
                 })
             }
@@ -514,6 +514,7 @@ impl Handshake {
                 initial_plugin,
                 capability_flags,
             } => {
+                let payload = &buffer_set.read_buffer[..];
                 if payload.is_empty() {
                     return Err(Error::InvalidPacket);
                 }
@@ -540,7 +541,7 @@ impl Handshake {
                                 CachingSha2PasswordFastAuthResult::Success => {
                                     // Need to read final OK packet
                                     // Stay in same state but expect OK next
-                                    Ok(HandshakeResult::Write(Vec::new()))
+                                    Ok(HandshakeResult::Read)
                                 }
                                 CachingSha2PasswordFastAuthResult::FullAuthRequired => {
                                     Err(Error::UnsupportedAuthPlugin(
@@ -573,15 +574,14 @@ impl Handshake {
                             };
 
                             // Build auth switch response
-                            let mut packet_data = Vec::new();
-                            write_auth_switch_response(&mut packet_data, &auth_response);
+                            write_auth_switch_response(buffer_set.new_write_buffer(), &auth_response);
 
                             // Transition to waiting for final result
                             *self = Self::WaitingFinalAuthResult {
                                 capability_flags: *capability_flags,
                             };
 
-                            Ok(HandshakeResult::Write(packet_data))
+                            Ok(HandshakeResult::Write)
                         }
                     }
                     _ => Err(Error::InvalidPacket),
@@ -591,6 +591,7 @@ impl Handshake {
             Self::WaitingFinalAuthResult {
                 capability_flags,
             } => {
+                let payload = &buffer_set.read_buffer[..];
                 if payload.is_empty() {
                     return Err(Error::InvalidPacket);
                 }
@@ -626,7 +627,8 @@ impl Handshake {
 
     /// Continue handshake after TLS upgrade is complete.
     /// Call this after receiving SslRequest result and upgrading the connection to TLS.
-    pub fn drive_after_tls(&mut self) -> Result<HandshakeResult> {
+    /// Writes the handshake response to `buffer_set.write_buffer`.
+    pub fn drive_after_tls(&mut self, buffer_set: &mut BufferSet) -> Result<HandshakeResult> {
         match std::mem::replace(self, Self::Connected) {
             Self::WaitingTlsUpgrade {
                 config,
@@ -658,8 +660,7 @@ impl Handshake {
                     auth_plugin_name: Some(std::str::from_utf8(&auth_plugin_name).unwrap()),
                 };
 
-                let mut packet_data = Vec::new();
-                write_handshake_response(&mut packet_data, &response);
+                write_handshake_response(buffer_set.new_write_buffer(), &response);
 
                 *self = Self::WaitingAuthResult {
                     config,
@@ -667,7 +668,7 @@ impl Handshake {
                     capability_flags,
                 };
 
-                Ok(HandshakeResult::Write(packet_data))
+                Ok(HandshakeResult::Write)
             }
             other => {
                 *self = other;

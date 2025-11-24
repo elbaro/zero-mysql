@@ -1,3 +1,4 @@
+use crate::buffer::BufferSet;
 use crate::constant::CommandByte;
 use crate::error::{Error, Result};
 use crate::protocol::connection::ColumnDefinitionBytes;
@@ -173,12 +174,13 @@ impl Exec {
     /// Drive the state machine with the next payload
     ///
     /// # Arguments
-    /// * `payload` - The next packet payload to process
+    /// * `buffer_set` - The buffer set containing the payload to process
     ///
     /// # Returns
     /// * `Ok(ExecFoldResult)` - Event to handle
     /// * `Err(Error)` - An error occurred
-    pub fn drive<'a>(&mut self, payload: &'a [u8]) -> Result<ExecResult<'a>> {
+    pub fn drive<'a>(&mut self, buffer_set: &'a mut BufferSet) -> Result<ExecResult<'a>> {
+        let payload = &buffer_set.read_buffer[..];
         match self {
             Self::Start => {
                 let response = read_execute_response(payload)?;
