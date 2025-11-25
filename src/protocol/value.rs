@@ -1,7 +1,7 @@
 /// MySQL Binary Protocol Value Types
 use crate::constant::{ColumnFlags, ColumnType};
 use crate::error::{Error, Result};
-use crate::protocol::connection::ColumnTypeAndFlags;
+use crate::protocol::command::ColumnTypeAndFlags;
 use crate::protocol::primitive::*;
 use zerocopy::byteorder::little_endian::{U16 as U16LE, U32 as U32LE};
 use zerocopy::{FromBytes, Immutable, KnownLayout};

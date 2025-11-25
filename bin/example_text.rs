@@ -1,5 +1,5 @@
 use zero_mysql::error::Result;
-use zero_mysql::protocol::connection::ColumnDefinitionBytes;
+use zero_mysql::protocol::command::ColumnDefinitionBytes;
 use zero_mysql::protocol::response::OkPayloadBytes;
 use zero_mysql::protocol::TextRowPayload;
 use zero_mysql::sync::Conn;
@@ -29,7 +29,7 @@ fn main() -> Result<()> {
         }
     }
 
-    impl<'a> zero_mysql::protocol::r#trait::TextResultSetHandler<'a> for TextHandler {
+    impl zero_mysql::protocol::r#trait::TextResultSetHandler for TextHandler {
         fn no_result_set(&mut self, ok: OkPayloadBytes) -> Result<()> {
             let ok_payload = zero_mysql::protocol::response::OkPayload::try_from(ok)?;
             println!("Query OK, {} rows affected", ok_payload.affected_rows);
@@ -42,9 +42,9 @@ fn main() -> Result<()> {
             Ok(())
         }
 
-        fn col(&mut self, col: ColumnDefinitionBytes) -> Result<()> {
+        fn col<'buffers>(&mut self, col: ColumnDefinitionBytes<'buffers>) -> Result<()> {
             // Parse the full column definition to get the name
-            let col_def: zero_mysql::protocol::connection::ColumnDefinition = col.try_into()?;
+            let col_def: zero_mysql::protocol::command::ColumnDefinition = col.try_into()?;
             println!("  Column: {:?}", str::from_utf8(col_def.name));
             Ok(())
         }

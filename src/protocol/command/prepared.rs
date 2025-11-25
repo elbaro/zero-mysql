@@ -1,7 +1,7 @@
 use crate::buffer::BufferSet;
 use crate::constant::CommandByte;
 use crate::error::{Error, Result};
-use crate::protocol::connection::ColumnDefinitionBytes;
+use crate::protocol::command::ColumnDefinitionBytes;
 use crate::protocol::primitive::*;
 use crate::protocol::r#trait::params::Params;
 use crate::protocol::response::{ErrPayloadBytes, OkPayloadBytes};
@@ -131,34 +131,14 @@ pub fn write_reset_statement(out: &mut Vec<u8>, statement_id: u32) {
 // State Machine API for exec_fold
 // ============================================================================
 
-/// Result of driving the exec_fold state machine
-///
-/// Returns events that the caller should handle
-#[derive(Debug)]
-pub enum ExecResult<'a> {
-    /// Execute returned OK (no result set)
-    NoResultSet(OkPayloadBytes<'a>),
-    ResultSetStart {
-        num_columns: usize,
-    },
-    /// Result set started with column definition packets (raw bytes)
-    /// Caller should parse these into ColumnDefinition using read_column_definition
-    Column(ColumnDefinitionBytes<'a>),
-    /// Row data received
-    Row(BinaryRowPayload<'a>),
-    /// Result set finished with EOF
-    Eof(OkPayloadBytes<'a>),
-}
+use crate::protocol::r#trait::BinaryResultSetHandler;
 
-/// State machine for exec_fold
-///
-/// Pure parsing state machine without handler dependencies.
-/// Each call to `drive()` can accept a payload with its own independent lifetime.
-#[derive(Default)]
-pub enum Exec {
-    /// Waiting for initial execute response
-    #[default]
+/// Internal state of the Exec state machine
+enum ExecState {
+    /// Initial state - need to read first packet
     Start,
+    /// Reading the first response packet
+    ReadingFirstPacket,
     /// Reading column definitions
     ReadingColumns {
         num_columns: usize,
@@ -170,66 +150,138 @@ pub enum Exec {
     Finished,
 }
 
-impl Exec {
-    /// Drive the state machine with the next payload
+/// State machine for executing prepared statements (binary protocol) with integrated handler
+///
+/// The handler is provided at construction and called directly by the state machine.
+/// The `drive()` method returns actions indicating what I/O operation is needed next.
+pub struct Exec<'h, H> {
+    state: ExecState,
+    handler: &'h mut H,
+}
+
+impl<'h, H: BinaryResultSetHandler> Exec<'h, H> {
+    /// Create a new Exec state machine with the given handler
+    pub fn new(handler: &'h mut H) -> Self {
+        Self {
+            state: ExecState::Start,
+            handler,
+        }
+    }
+
+    /// Drive the state machine forward
     ///
     /// # Arguments
-    /// * `buffer_set` - The buffer set containing the payload to process
+    /// * `buffer_set` - The buffer set containing buffers to read from/write to
     ///
     /// # Returns
-    /// * `Ok(ExecFoldResult)` - Event to handle
-    /// * `Err(Error)` - An error occurred
-    pub fn drive<'a>(&mut self, buffer_set: &'a mut BufferSet) -> Result<ExecResult<'a>> {
-        let payload = &buffer_set.read_buffer[..];
-        match self {
-            Self::Start => {
+    /// * `Action::NeedPacket(&mut Vec<u8>)` - Needs more data in the specified buffer
+    /// * `Action::Finished` - Processing complete
+    pub fn drive<'buf>(&mut self, buffer_set: &'buf mut BufferSet) -> Result<crate::protocol::command::Action<'buf>> {
+        use crate::protocol::command::Action;
+        match &mut self.state {
+            ExecState::Start => {
+                // Request the first packet
+                self.state = ExecState::ReadingFirstPacket;
+                Ok(Action::NeedPacket(&mut buffer_set.read_buffer))
+            }
+
+            ExecState::ReadingFirstPacket => {
+                let payload = &buffer_set.read_buffer[..];
                 let response = read_execute_response(payload)?;
 
                 match response {
                     ExecuteResponse::Ok(ok_bytes) => {
-                        *self = Self::Finished;
-                        Ok(ExecResult::NoResultSet(ok_bytes))
+                        // Parse OK packet to check status flags
+                        use crate::constant::ServerStatusFlags;
+                        use crate::protocol::response::OkPayload;
+
+                        let ok_payload = OkPayload::try_from(ok_bytes)?;
+                        self.handler.no_result_set(ok_bytes)?;
+
+                        // Check if there are more results to come
+                        if ok_payload
+                            .status_flags
+                            .contains(ServerStatusFlags::SERVER_MORE_RESULTS_EXISTS)
+                        {
+                            // More resultsets coming, go to ReadingFirstPacket to process next result
+                            self.state = ExecState::ReadingFirstPacket;
+                            Ok(Action::NeedPacket(&mut buffer_set.read_buffer))
+                        } else {
+                            // No more results, we're done
+                            self.state = ExecState::Finished;
+                            Ok(Action::Finished)
+                        }
                     }
                     ExecuteResponse::ResultSet { column_count } => {
                         let num_columns = column_count as usize;
-                        *self = Self::ReadingColumns {
+                        self.handler.resultset_start(num_columns)?;
+                        self.state = ExecState::ReadingColumns {
                             num_columns,
                             remaining: num_columns,
                         };
-                        Ok(ExecResult::ResultSetStart { num_columns })
+                        Ok(Action::NeedPacket(&mut buffer_set.column_definition_buffer))
                     }
                 }
             }
 
-            Self::ReadingColumns {
+            ExecState::ReadingColumns {
                 num_columns,
                 remaining,
             } => {
+                // Read from column_definition_buffer (no copy needed!)
+                let payload = &buffer_set.column_definition_buffer[..];
+                let col = ColumnDefinitionBytes(payload);
+                self.handler.col(col)?;
+
                 *remaining -= 1;
 
                 if *remaining == 0 {
-                    *self = Self::ReadingRows {
+                    self.state = ExecState::ReadingRows {
                         num_columns: *num_columns,
                     };
+                    Ok(Action::NeedPacket(&mut buffer_set.read_buffer))
+                } else {
+                    Ok(Action::NeedPacket(&mut buffer_set.column_definition_buffer))
                 }
-                Ok(ExecResult::Column(ColumnDefinitionBytes(payload)))
             }
 
-            Self::ReadingRows { num_columns } => match payload[0] {
-                0x00 => {
-                    let row = read_binary_row(payload, *num_columns)?;
-                    Ok(ExecResult::Row(row))
-                }
-                0xFE => {
-                    let eof_bytes = OkPayloadBytes(payload);
-                    eof_bytes.assert_eof()?;
-                    *self = Self::Finished;
-                    Ok(ExecResult::Eof(eof_bytes))
-                }
-                _ => Err(Error::InvalidPacket),
-            },
+            ExecState::ReadingRows { num_columns } => {
+                let payload = &buffer_set.read_buffer[..];
+                match payload[0] {
+                    0x00 => {
+                        let row = read_binary_row(payload, *num_columns)?;
+                        self.handler.row(&row)?;
+                        Ok(Action::NeedPacket(&mut buffer_set.read_buffer))
+                    }
+                    0xFE => {
+                        // Parse OK packet to check status flags
+                        use crate::constant::ServerStatusFlags;
+                        use crate::protocol::response::OkPayload;
 
-            Self::Finished => Err(Error::InvalidPacket),
+                        let eof_bytes = OkPayloadBytes(payload);
+                        eof_bytes.assert_eof()?;
+                        let ok_payload = OkPayload::try_from(eof_bytes)?;
+                        self.handler.resultset_end(eof_bytes)?;
+
+                        // Check if there are more results to come
+                        if ok_payload
+                            .status_flags
+                            .contains(ServerStatusFlags::SERVER_MORE_RESULTS_EXISTS)
+                        {
+                            // More resultsets coming, go to ReadingFirstPacket to process next result
+                            self.state = ExecState::ReadingFirstPacket;
+                            Ok(Action::NeedPacket(&mut buffer_set.read_buffer))
+                        } else {
+                            // No more results, we're done
+                            self.state = ExecState::Finished;
+                            Ok(Action::Finished)
+                        }
+                    }
+                    _ => Err(Error::InvalidPacket),
+                }
+            }
+
+            ExecState::Finished => Err(Error::InvalidPacket),
         }
     }
 }

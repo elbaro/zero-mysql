@@ -1,6 +1,6 @@
 use zero_mysql::error::Result;
 use zero_mysql::protocol::TextRowPayload;
-use zero_mysql::protocol::connection::ColumnDefinitionBytes;
+use zero_mysql::protocol::command::ColumnDefinitionBytes;
 use zero_mysql::protocol::response::OkPayloadBytes;
 use zero_mysql::tokio::Conn;
 
@@ -35,7 +35,7 @@ async fn main() -> Result<()> {
         }
     }
 
-    impl<'a> zero_mysql::protocol::r#trait::TextResultSetHandler<'a> for MultiResultSetHandler {
+    impl zero_mysql::protocol::r#trait::TextResultSetHandler for MultiResultSetHandler {
         fn no_result_set(&mut self, ok: OkPayloadBytes) -> Result<()> {
             let ok_payload = zero_mysql::protocol::response::OkPayload::try_from(ok)?;
             println!(
@@ -57,8 +57,8 @@ async fn main() -> Result<()> {
             Ok(())
         }
 
-        fn col(&mut self, col: ColumnDefinitionBytes) -> Result<()> {
-            let col_def: zero_mysql::protocol::connection::ColumnDefinition = col.try_into()?;
+        fn col<'buffers>(&mut self, col: ColumnDefinitionBytes<'buffers>) -> Result<()> {
+            let col_def: zero_mysql::protocol::command::ColumnDefinition = col.try_into()?;
             println!("    Column: {:?}", col_def.name);
             Ok(())
         }

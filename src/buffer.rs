@@ -19,6 +19,12 @@ pub struct BufferSet {
     /// Use `payload_mut()` to write payload starting at offset 4.
     /// Use `packet()` to get the full packet for sending.
     write_buffer: Vec<u8>,
+
+    /// Buffer for storing column definition payloads
+    ///
+    /// This buffer stores column definition data with a stable lifetime,
+    /// allowing handlers to borrow ColumnDefinitionBytes without cloning.
+    pub column_definition_buffer: Vec<u8>,
 }
 
 impl BufferSet {
@@ -28,6 +34,7 @@ impl BufferSet {
             initial_handshake: Vec::new(),
             read_buffer: Vec::new(),
             write_buffer: vec![0; 4],
+            column_definition_buffer: Vec::new(),
         }
     }
 
@@ -37,6 +44,7 @@ impl BufferSet {
             initial_handshake,
             read_buffer: Vec::new(),
             write_buffer: vec![0; 4],
+            column_definition_buffer: Vec::new(),
         }
     }
 

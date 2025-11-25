@@ -1,5 +1,5 @@
 use zero_mysql::error::Result;
-use zero_mysql::protocol::connection::ColumnTypeAndFlags;
+use zero_mysql::protocol::command::ColumnTypeAndFlags;
 use zero_mysql::protocol::response::OkPayloadBytes;
 use zero_mysql::protocol::value::Value;
 use zero_mysql::tokio::Conn;
@@ -35,7 +35,7 @@ async fn main() -> Result<()> {
         }
     }
 
-    impl<'a> zero_mysql::protocol::r#trait::BinaryResultSetHandler<'a> for Handler {
+    impl zero_mysql::protocol::r#trait::BinaryResultSetHandler for Handler {
         fn no_result_set(&mut self, _ok: OkPayloadBytes) -> Result<()> {
             println!("Received no result set");
             Ok(())
@@ -50,9 +50,9 @@ async fn main() -> Result<()> {
             Ok(())
         }
 
-        fn col(
+        fn col<'buffers>(
             &mut self,
-            col: zero_mysql::protocol::connection::ColumnDefinitionBytes,
+            col: zero_mysql::protocol::command::ColumnDefinitionBytes<'buffers>,
         ) -> Result<()> {
             self.cols.push(col.tail()?.type_and_flags()?);
             Ok(())

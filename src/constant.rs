@@ -110,7 +110,7 @@ pub const CAPABILITIES_ALWAYS_ENABLED: CapabilityFlags = CapabilityFlags::CLIENT
     .union(CapabilityFlags::CLIENT_TRANSACTIONS)
     .union(CapabilityFlags::CLIENT_MULTI_STATEMENTS)
     .union(CapabilityFlags::CLIENT_MULTI_RESULTS)
-    .union(CapabilityFlags::CLIENT_PS_MULTI_RESULTS)
+    .union(CapabilityFlags::CLIENT_PS_MULTI_RESULTS) // prepared statement multi-resultset
     .union(CapabilityFlags::CLIENT_SECURE_CONNECTION) // On? Off?
     .union(CapabilityFlags::CLIENT_PLUGIN_AUTH)
     .union(CapabilityFlags::CLIENT_PLUGIN_AUTH_LENENC_CLIENT_DATA)

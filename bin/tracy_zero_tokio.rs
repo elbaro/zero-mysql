@@ -1,6 +1,6 @@
 use zero_mysql::error::Result;
 use zero_mysql::protocol::TextRowPayload;
-use zero_mysql::protocol::connection::ColumnDefinitionBytes;
+use zero_mysql::protocol::command::ColumnDefinitionBytes;
 use zero_mysql::protocol::response::OkPayloadBytes;
 use zero_mysql::tokio::Conn;
 
@@ -11,7 +11,7 @@ use zero_mysql::tokio::Conn;
 // Simple handler that ignores all output (for setup queries)
 struct DropHandler;
 
-impl<'a> zero_mysql::protocol::r#trait::TextResultSetHandler<'a> for DropHandler {
+impl zero_mysql::protocol::r#trait::TextResultSetHandler for DropHandler {
     fn no_result_set(&mut self, _ok: OkPayloadBytes) -> Result<()> {
         Ok(())
     }
@@ -20,7 +20,7 @@ impl<'a> zero_mysql::protocol::r#trait::TextResultSetHandler<'a> for DropHandler
         Ok(())
     }
 
-    fn col(&mut self, _col: ColumnDefinitionBytes) -> Result<()> {
+    fn col<'buffers>(&mut self, _col: ColumnDefinitionBytes<'buffers>) -> Result<()> {
         Ok(())
     }
 

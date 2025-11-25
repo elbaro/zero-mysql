@@ -1,7 +1,7 @@
 use crate::buffer::BufferSet;
 use crate::constant::CommandByte;
 use crate::error::{Error, Result};
-use crate::protocol::connection::ColumnDefinitionBytes;
+use crate::protocol::command::ColumnDefinitionBytes;
 use crate::protocol::primitive::*;
 use crate::protocol::response::{ErrPayloadBytes, OkPayloadBytes};
 use crate::protocol::TextRowPayload;
@@ -49,32 +49,14 @@ pub enum QueryResponse<'a> {
 // State Machine API for Query
 // ============================================================================
 
-/// Result of driving the query state machine
-///
-/// Returns events that the caller should handle
-#[derive(Debug)]
-pub enum QueryResult<'a> {
-    /// Query returned OK (no result set)
-    NoResultSet(OkPayloadBytes<'a>),
-    /// Result set started with column count
-    ResultSetStart { num_columns: usize },
-    /// Column definition packet received
-    Column(ColumnDefinitionBytes<'a>),
-    /// Row data received
-    Row(TextRowPayload<'a>),
-    /// Result set finished with EOF (check status flags for more results)
-    Eof(OkPayloadBytes<'a>),
-}
+use crate::protocol::r#trait::TextResultSetHandler;
 
-/// State machine for Query (text protocol)
-///
-/// Pure parsing state machine without handler dependencies.
-/// Each call to `drive()` can accept a payload with its own independent lifetime.
-#[derive(Default)]
-pub enum Query {
-    /// Waiting for initial query response
-    #[default]
+/// Internal state of the Query state machine
+enum QueryState {
+    /// Initial state - need to read first packet
     Start,
+    /// Reading the first response packet
+    ReadingFirstPacket,
     /// Reading column definitions
     ReadingColumns { remaining: usize },
     /// Reading rows
@@ -83,26 +65,43 @@ pub enum Query {
     Finished,
 }
 
-impl Query {
-    /// Returns true if all result sets have been processed
-    pub fn is_finished(&self) -> bool {
-        matches!(self, Self::Finished)
-    }
+/// State machine for Query (text protocol) with integrated handler
+///
+/// The handler is provided at construction and called directly by the state machine.
+/// The `drive()` method returns actions indicating what I/O operation is needed next.
+pub struct Query<'h, H> {
+    state: QueryState,
+    handler: &'h mut H,
 }
 
-impl Query {
-    /// Drive the state machine with the next payload
+impl<'h, H: TextResultSetHandler> Query<'h, H> {
+    /// Create a new Query state machine with the given handler
+    pub fn new(handler: &'h mut H) -> Self {
+        Self {
+            state: QueryState::Start,
+            handler,
+        }
+    }
+
+    /// Drive the state machine forward
     ///
     /// # Arguments
-    /// * `buffer_set` - The buffer set containing the payload to process
+    /// * `buffer_set` - The buffer set containing buffers to read from/write to
     ///
     /// # Returns
-    /// * `Ok(QueryResult)` - Event to handle
-    /// * `Err(Error)` - An error occurred
-    pub fn drive<'a>(&mut self, buffer_set: &'a mut BufferSet) -> Result<QueryResult<'a>> {
-        let payload = &buffer_set.read_buffer[..];
-        match self {
-            Self::Start => {
+    /// * `Action::NeedPacket(&mut Vec<u8>)` - Needs more data in the specified buffer
+    /// * `Action::Finished` - Processing complete
+    pub fn drive<'buf>(&mut self, buffer_set: &'buf mut BufferSet) -> Result<crate::protocol::command::Action<'buf>> {
+        use crate::protocol::command::Action;
+        match &mut self.state {
+            QueryState::Start => {
+                // Request the first packet
+                self.state = QueryState::ReadingFirstPacket;
+                Ok(Action::NeedPacket(&mut buffer_set.read_buffer))
+            }
+
+            QueryState::ReadingFirstPacket => {
+                let payload = &buffer_set.read_buffer[..];
                 let response = read_query_response(payload)?;
 
                 match response {
@@ -112,41 +111,51 @@ impl Query {
                         use crate::protocol::response::OkPayload;
 
                         let ok_payload = OkPayload::try_from(ok_bytes)?;
+                        self.handler.no_result_set(ok_bytes)?;
 
                         // Check if there are more results to come
                         if ok_payload
                             .status_flags
                             .contains(ServerStatusFlags::SERVER_MORE_RESULTS_EXISTS)
                         {
-                            // More resultsets coming, stay in Start state
-                            *self = Self::Start;
+                            // More resultsets coming, go to ReadingFirstPacket to process next result
+                            self.state = QueryState::ReadingFirstPacket;
+                            Ok(Action::NeedPacket(&mut buffer_set.read_buffer))
                         } else {
                             // No more results, we're done
-                            *self = Self::Finished;
+                            self.state = QueryState::Finished;
+                            Ok(Action::Finished)
                         }
-
-                        Ok(QueryResult::NoResultSet(ok_bytes))
                     }
                     QueryResponse::ResultSet { column_count } => {
                         let num_columns = column_count as usize;
-                        *self = Self::ReadingColumns {
+                        self.handler.resultset_start(num_columns)?;
+                        self.state = QueryState::ReadingColumns {
                             remaining: num_columns,
                         };
-                        Ok(QueryResult::ResultSetStart { num_columns })
+                        Ok(Action::NeedPacket(&mut buffer_set.column_definition_buffer))
                     }
                 }
             }
 
-            Self::ReadingColumns { remaining } => {
+            QueryState::ReadingColumns { remaining } => {
+                // Read from column_definition_buffer (no copy needed!)
+                let payload = &buffer_set.column_definition_buffer[..];
+                let col = ColumnDefinitionBytes(payload);
+                self.handler.col(col)?;
+
                 *remaining -= 1;
 
                 if *remaining == 0 {
-                    *self = Self::ReadingRows;
+                    self.state = QueryState::ReadingRows;
+                    Ok(Action::NeedPacket(&mut buffer_set.read_buffer))
+                } else {
+                    Ok(Action::NeedPacket(&mut buffer_set.column_definition_buffer))
                 }
-                Ok(QueryResult::Column(ColumnDefinitionBytes(payload)))
             }
 
-            Self::ReadingRows => {
+            QueryState::ReadingRows => {
+                let payload = &buffer_set.read_buffer[..];
                 // A valid row's first item is NULL (0xFB) or string<lenenc>.
                 // string<lenenc> starts with int<lenenc> which cannot start with 0xFF (ErrPacket header).
                 // Hence, 0xFF always means Err.
@@ -162,26 +171,31 @@ impl Query {
 
                         let ok_bytes = OkPayloadBytes(payload);
                         let ok_payload = OkPayload::try_from(ok_bytes)?;
+                        self.handler.resultset_end(ok_bytes)?;
 
                         // Check if there are more results to come
                         if ok_payload
                             .status_flags
                             .contains(ServerStatusFlags::SERVER_MORE_RESULTS_EXISTS)
                         {
-                            // More resultsets coming, go back to Start state
-                            *self = Self::Start;
+                            // More resultsets coming, go to ReadingFirstPacket to process next result
+                            self.state = QueryState::ReadingFirstPacket;
+                            Ok(Action::NeedPacket(&mut buffer_set.read_buffer))
                         } else {
                             // No more results, we're done
-                            *self = Self::Finished;
+                            self.state = QueryState::Finished;
+                            Ok(Action::Finished)
                         }
-
-                        Ok(QueryResult::Eof(OkPayloadBytes(payload)))
                     }
-                    _ => Ok(QueryResult::Row(TextRowPayload(payload))),
+                    _ => {
+                        let row = TextRowPayload(payload);
+                        self.handler.row(&row)?;
+                        Ok(Action::NeedPacket(&mut buffer_set.read_buffer))
+                    }
                 }
             }
 
-            Self::Finished => Err(Error::InvalidPacket),
+            QueryState::Finished => Err(Error::InvalidPacket),
         }
     }
 }
