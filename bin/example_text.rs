@@ -1,7 +1,7 @@
 use zero_mysql::error::Result;
+use zero_mysql::protocol::TextRowPayload;
 use zero_mysql::protocol::command::ColumnDefinitionBytes;
 use zero_mysql::protocol::response::OkPayloadBytes;
-use zero_mysql::protocol::TextRowPayload;
 use zero_mysql::sync::Conn;
 
 fn main() -> Result<()> {
@@ -45,7 +45,7 @@ fn main() -> Result<()> {
         fn col<'buffers>(&mut self, col: ColumnDefinitionBytes<'buffers>) -> Result<()> {
             // Parse the full column definition to get the name
             let col_def: zero_mysql::protocol::command::ColumnDefinition = col.try_into()?;
-            println!("  Column: {:?}", str::from_utf8(col_def.name));
+            println!("  Column: {:?}", str::from_utf8(col_def.name_alias));
             Ok(())
         }
 

@@ -24,12 +24,12 @@ impl<'a> ColumnDefinitionBytes<'a> {
 /// The column definition parsed from `ColumnDefinitionBytes`
 #[derive(Debug, Clone)]
 pub struct ColumnDefinition<'a> {
-    pub catalog: &'a [u8],
+    // pub catalog: &'a [u8], // always 'def'
     pub schema: &'a [u8],
-    pub table: &'a [u8],
-    pub org_table: &'a [u8],
-    pub name: &'a [u8],
-    pub org_name: &'a [u8],
+    pub table_alias: &'a [u8],
+    pub table_original: &'a [u8],
+    pub name_alias: &'a [u8],
+    pub name_original: &'a [u8],
     pub tail: &'a ColumnDefinitionTail,
 }
 
@@ -40,24 +40,24 @@ impl<'a> TryFrom<ColumnDefinitionBytes<'a>> for ColumnDefinition<'a> {
         let data = bytes.0;
 
         // ─── Variable Length String Fields ───────────────────────────
-        let (catalog, data) = read_string_lenenc(data)?;
+        let (_catalog, data) = read_string_lenenc(data)?;
         let (schema, data) = read_string_lenenc(data)?;
-        let (table, data) = read_string_lenenc(data)?;
-        let (org_table, data) = read_string_lenenc(data)?;
-        let (name, data) = read_string_lenenc(data)?;
-        let (org_name, data) = read_string_lenenc(data)?;
+        let (table_alias, data) = read_string_lenenc(data)?;
+        let (table_original, data) = read_string_lenenc(data)?;
+        let (name_alias, data) = read_string_lenenc(data)?;
+        let (name_original, data) = read_string_lenenc(data)?;
 
         // ─── Columndefinitiontail ────────────────────────────────────
         // length is always 0x0c
         let (_length, data) = read_int_lenenc(data)?;
         let tail = ColumnDefinitionTail::ref_from_bytes(data).map_err(|_| Error::InvalidPacket)?;
         Ok(Self {
-            catalog,
+            // catalog,
             schema,
-            table,
-            org_table,
-            name,
-            org_name,
+            table_alias,
+            table_original,
+            name_alias,
+            name_original,
             tail,
         })
     }
@@ -147,7 +147,10 @@ mod tests {
 
         // Test type_and_flags
         let type_and_flags = tail.type_and_flags().expect("Failed to get type_and_flags");
-        assert_eq!(type_and_flags.column_type, ColumnType::MYSQL_TYPE_VAR_STRING);
+        assert_eq!(
+            type_and_flags.column_type,
+            ColumnType::MYSQL_TYPE_VAR_STRING
+        );
         assert!(type_and_flags.flags.is_empty());
     }
 
@@ -218,7 +221,11 @@ mod tests {
         assert_eq!(type_and_flags.column_type, ColumnType::MYSQL_TYPE_LONG);
         assert!(type_and_flags.flags.contains(ColumnFlags::NOT_NULL_FLAG));
         assert!(type_and_flags.flags.contains(ColumnFlags::PRI_KEY_FLAG));
-        assert!(type_and_flags.flags.contains(ColumnFlags::AUTO_INCREMENT_FLAG));
+        assert!(
+            type_and_flags
+                .flags
+                .contains(ColumnFlags::AUTO_INCREMENT_FLAG)
+        );
         assert!(type_and_flags.flags.contains(ColumnFlags::PART_KEY_FLAG));
     }
 
@@ -327,10 +334,10 @@ mod tests {
         // Verify string fields
         assert_eq!(col_def.catalog, b"def");
         assert_eq!(col_def.schema, b"test");
-        assert_eq!(col_def.table, b"users");
-        assert_eq!(col_def.org_table, b"users");
-        assert_eq!(col_def.name, b"id");
-        assert_eq!(col_def.org_name, b"id");
+        assert_eq!(col_def.table_alias, b"users");
+        assert_eq!(col_def.table_original, b"users");
+        assert_eq!(col_def.name_alias, b"id");
+        assert_eq!(col_def.name_original, b"id");
 
         // Verify tail fields
         assert_eq!(col_def.tail.charset(), 33);
@@ -348,7 +355,10 @@ mod tests {
         assert_eq!(col_type, ColumnType::MYSQL_TYPE_LONG);
 
         // Test type_and_flags
-        let type_and_flags = col_def.tail.type_and_flags().expect("Failed to get type_and_flags");
+        let type_and_flags = col_def
+            .tail
+            .type_and_flags()
+            .expect("Failed to get type_and_flags");
         assert_eq!(type_and_flags.column_type, ColumnType::MYSQL_TYPE_LONG);
         assert!(type_and_flags.flags.contains(ColumnFlags::NOT_NULL_FLAG));
         assert!(type_and_flags.flags.contains(ColumnFlags::PRI_KEY_FLAG));

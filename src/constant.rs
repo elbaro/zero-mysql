@@ -157,13 +157,16 @@ bitflags::bitflags! {
     pub struct MariadbCapabilityFlags: u32 {
         // ─── Mariadb Extensions ──────────────────────────────────────
         const MARIADB_CLIENT_PROGRESS = 1 << 0;
-        const MARIADB_CLIENT_COM_MULTI = 1 << 1;
+        const MARIADB_CLIENT_COM_MULTI = 1 << 1; // TODO: COM_MULTI?
         const MARIADB_CLIENT_STMT_BULK_OPERATIONS = 1 << 2;
-        const MARIADB_CLIENT_EXTENDED_METADATA = 1 << 3;
-        const MARIADB_CLIENT_CACHE_METADATA = 1 << 4;
-        const MARIADB_CLIENT_BULK_UNIT_RESULTS = 1 << 5;
+        const MARIADB_CLIENT_EXTENDED_METADATA = 1 << 3; // TODO: implement
+        const MARIADB_CLIENT_CACHE_METADATA = 1 << 4; // TODO
+        const MARIADB_CLIENT_BULK_UNIT_RESULTS = 1 << 5; // TODO: implement
     }
 }
+
+pub const MARIADB_CAPABILITIES_ENABLED: MariadbCapabilityFlags =
+    MariadbCapabilityFlags::MARIADB_CLIENT_STMT_BULK_OPERATIONS;
 
 bitflags::bitflags! {
     /// MySQL Server Status Flags

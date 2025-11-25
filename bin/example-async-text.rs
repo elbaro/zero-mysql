@@ -46,7 +46,7 @@ async fn main() -> Result<()> {
         fn col<'buffers>(&mut self, col: ColumnDefinitionBytes<'buffers>) -> Result<()> {
             // Parse the full column definition to get the name
             let col_def: zero_mysql::protocol::command::ColumnDefinition = col.try_into()?;
-            println!("  Column: {:?}", col_def.name);
+            println!("  Column: {:?}", col_def.name_alias);
             Ok(())
         }
 

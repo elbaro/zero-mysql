@@ -4,7 +4,8 @@ use zerocopy::{FromBytes, Immutable, KnownLayout};
 
 use crate::buffer::BufferSet;
 use crate::constant::{
-    CAPABILITIES_ALWAYS_ENABLED, CAPABILITIES_CONFIGURABLE, CapabilityFlags, MariadbCapabilityFlags,
+    CAPABILITIES_ALWAYS_ENABLED, CAPABILITIES_CONFIGURABLE, CapabilityFlags,
+    MARIADB_CAPABILITIES_ENABLED, MariadbCapabilityFlags,
 };
 use crate::error::{Error, Result};
 use crate::protocol::primitive::*;
@@ -120,7 +121,10 @@ pub fn write_handshake_response(out: &mut Vec<u8>, response: &HandshakeResponse4
     write_int_1(out, response.charset);
 
     // reserved (23 bytes of 0x00)
-    out.extend_from_slice(&[0u8; 23]);
+    out.extend_from_slice(&[0u8; 19]);
+
+    // MariaDB capabilities
+    write_int_4(out, MARIADB_CAPABILITIES_ENABLED.bits());
 
     // username (null-terminated)
     write_string_null(out, response.username);
