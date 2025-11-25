@@ -104,6 +104,15 @@ bitflags::bitflags! {
     }
 }
 
+impl CapabilityFlags {
+    /// Check if the server is MySQL (as opposed to MariaDB)
+    ///
+    /// MariaDB unsets the CLIENT_LONG_PASSWORD flag to distinguish itself from MySQL.
+    pub fn is_mysql(&self) -> bool {
+        self.contains(CapabilityFlags::CLIENT_LONG_PASSWORD)
+    }
+}
+
 // Capabilities that are always enabled (required by zero-mysql)
 pub const CAPABILITIES_ALWAYS_ENABLED: CapabilityFlags = CapabilityFlags::CLIENT_LONG_FLAG
     .union(CapabilityFlags::CLIENT_PROTOCOL_41)
@@ -141,6 +150,20 @@ pub const CAPABILITIES_ALWAYS_DISABLED: CapabilityFlags = CapabilityFlags::CLIEN
     .union(CapabilityFlags::CLIENT_REMEMBER_OPTIONS)
     .union(CapabilityFlags::CLIENT_CONNECT_ATTRS) // TODO
     .union(CapabilityFlags::CLIENT_SESSION_TRACK); // To support this flag, we need to update the parsing logic
+
+bitflags::bitflags! {
+    /// MariaDB Extension Capability Flags
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct MariadbCapabilityFlags: u32 {
+        // ─── Mariadb Extensions ──────────────────────────────────────
+        const MARIADB_CLIENT_PROGRESS = 1 << 0;
+        const MARIADB_CLIENT_COM_MULTI = 1 << 1;
+        const MARIADB_CLIENT_STMT_BULK_OPERATIONS = 1 << 2;
+        const MARIADB_CLIENT_EXTENDED_METADATA = 1 << 3;
+        const MARIADB_CLIENT_CACHE_METADATA = 1 << 4;
+        const MARIADB_CLIENT_BULK_UNIT_RESULTS = 1 << 5;
+    }
+}
 
 bitflags::bitflags! {
     /// MySQL Server Status Flags

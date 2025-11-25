@@ -1,11 +1,11 @@
 use crate::buffer::BufferSet;
 use crate::constant::CommandByte;
 use crate::error::{Error, Result};
+use crate::protocol::BinaryRowPayload;
 use crate::protocol::command::ColumnDefinitionBytes;
 use crate::protocol::primitive::*;
-use crate::protocol::r#trait::params::Params;
 use crate::protocol::response::{ErrPayloadBytes, OkPayloadBytes};
-use crate::protocol::BinaryRowPayload;
+use crate::protocol::r#trait::params::Params;
 use zerocopy::byteorder::little_endian::{U16 as U16LE, U32 as U32LE};
 use zerocopy::{FromBytes, Immutable, KnownLayout};
 
@@ -176,7 +176,10 @@ impl<'h, H: BinaryResultSetHandler> Exec<'h, H> {
     /// # Returns
     /// * `Action::NeedPacket(&mut Vec<u8>)` - Needs more data in the specified buffer
     /// * `Action::Finished` - Processing complete
-    pub fn drive<'buf>(&mut self, buffer_set: &'buf mut BufferSet) -> Result<crate::protocol::command::Action<'buf>> {
+    pub fn step<'buf>(
+        &mut self,
+        buffer_set: &'buf mut BufferSet,
+    ) -> Result<crate::protocol::command::Action<'buf>> {
         use crate::protocol::command::Action;
         match &mut self.state {
             ExecState::Start => {

@@ -1,9 +1,11 @@
 use std::hint::cold_path;
-use zerocopy::{FromBytes, Immutable, KnownLayout};
 use zerocopy::byteorder::little_endian::{U16 as U16LE, U32 as U32LE};
+use zerocopy::{FromBytes, Immutable, KnownLayout};
 
 use crate::buffer::BufferSet;
-use crate::constant::{CAPABILITIES_ALWAYS_ENABLED, CAPABILITIES_CONFIGURABLE, CapabilityFlags};
+use crate::constant::{
+    CAPABILITIES_ALWAYS_ENABLED, CAPABILITIES_CONFIGURABLE, CapabilityFlags, MariadbCapabilityFlags,
+};
 use crate::error::{Error, Result};
 use crate::protocol::primitive::*;
 use crate::protocol::response::ErrPayloadBytes;
@@ -13,12 +15,14 @@ use crate::protocol::response::ErrPayloadBytes;
 struct HandshakeFixedFields {
     connection_id: U32LE,
     auth_data_part1: [u8; 8],
-    filler: u8,
+    _filler1: u8,
     capability_flags_lower: U16LE,
     charset: u8,
     status_flags: U16LE,
     capability_flags_upper: U16LE,
     auth_data_len: u8,
+    _fillter2: [u8; 6],
+    mariadb_capabilities: U32LE,
 }
 
 #[derive(Debug, Clone)]
@@ -28,6 +32,7 @@ pub struct InitialHandshake {
     pub connection_id: u32,
     pub auth_plugin_data: Vec<u8>,
     pub capability_flags: CapabilityFlags,
+    pub mariadb_capabilities: MariadbCapabilityFlags,
     pub charset: u8,
     pub status_flags: crate::constant::ServerStatusFlags,
     pub auth_plugin_name: std::ops::Range<usize>,
@@ -35,7 +40,7 @@ pub struct InitialHandshake {
 
 /// Read initial handshake packet from server
 pub fn read_initial_handshake(payload: &[u8]) -> Result<InitialHandshake> {
-    let (protocol_version, mut data) = read_int_1(payload)?;
+    let (protocol_version, data) = read_int_1(payload)?;
 
     if protocol_version == 0xFF {
         cold_path();
@@ -43,29 +48,27 @@ pub fn read_initial_handshake(payload: &[u8]) -> Result<InitialHandshake> {
     }
 
     let server_version_start = payload.len() - data.len();
-    let (server_version_bytes, rest) = read_string_null(data)?;
+    let (server_version_bytes, data) = read_string_null(data)?;
     let server_version = server_version_start..server_version_start + server_version_bytes.len();
-    data = rest;
 
-    let (fixed, rest) = HandshakeFixedFields::ref_from_prefix(data)
-        .map_err(|_| Error::InvalidPacket)?;
+    let (fixed, data) =
+        HandshakeFixedFields::ref_from_prefix(data).map_err(|_| Error::InvalidPacket)?;
 
     let connection_id = fixed.connection_id.get();
     let charset = fixed.charset;
     let status_flags = fixed.status_flags.get();
-    let cap_bits = ((fixed.capability_flags_upper.get() as u32) << 16)
-                  | (fixed.capability_flags_lower.get() as u32);
-    let capability_flags = CapabilityFlags::from_bits(cap_bits).ok_or(Error::InvalidPacket)?;
+    let capability_flags = CapabilityFlags::from_bits(
+        ((fixed.capability_flags_upper.get() as u32) << 16)
+            | (fixed.capability_flags_lower.get() as u32),
+    )
+    .ok_or(Error::InvalidPacket)?;
+    let mariadb_capabilities = MariadbCapabilityFlags::from_bits(fixed.mariadb_capabilities.get())
+        .ok_or(Error::InvalidPacket)?;
     let auth_data_len = fixed.auth_data_len;
 
-    let (_reserved, rest) = read_string_fix(rest, 10)?;
-    data = rest;
-
     let auth_data_2_len = (auth_data_len as usize).saturating_sub(9).max(12);
-    let (auth_data_2, rest) = read_string_fix(data, auth_data_2_len)?;
-    data = rest;
-    let (_reserved, rest) = read_int_1(data)?;
-    data = rest;
+    let (auth_data_2, data) = read_string_fix(data, auth_data_2_len)?;
+    let (_reserved, data) = read_int_1(data)?;
 
     let mut auth_plugin_data = Vec::new();
     auth_plugin_data.extend_from_slice(&fixed.auth_data_part1);
@@ -73,7 +76,8 @@ pub fn read_initial_handshake(payload: &[u8]) -> Result<InitialHandshake> {
 
     let auth_plugin_name_start = payload.len() - data.len();
     let (auth_plugin_name_bytes, rest) = read_string_null(data)?;
-    let auth_plugin_name = auth_plugin_name_start..auth_plugin_name_start + auth_plugin_name_bytes.len();
+    let auth_plugin_name =
+        auth_plugin_name_start..auth_plugin_name_start + auth_plugin_name_bytes.len();
 
     if !rest.is_empty() {
         return Err(Error::InvalidPacket);
@@ -85,6 +89,7 @@ pub fn read_initial_handshake(payload: &[u8]) -> Result<InitialHandshake> {
         connection_id,
         auth_plugin_data,
         capability_flags,
+        mariadb_capabilities,
         charset,
         status_flags: crate::constant::ServerStatusFlags::from_bits_truncate(status_flags),
         auth_plugin_name,
@@ -340,21 +345,15 @@ pub fn write_ssl_request(out: &mut Vec<u8>, capability_flags: CapabilityFlags, c
 /// Result of driving the handshake state machine
 pub enum HandshakeResult {
     /// Initial handshake received - response written to buffer_set.write_buffer
-    InitialHandshake {
-        initial_handshake: InitialHandshake,
-    },
+    InitialHandshake { initial_handshake: InitialHandshake },
     /// SSL request written to buffer_set.write_buffer - upgrade connection to TLS, then call drive_after_tls()
-    SslRequest {
-        initial_handshake: InitialHandshake,
-    },
+    SslRequest { initial_handshake: InitialHandshake },
     /// Packet written to buffer_set.write_buffer - send it to the server, then read next response
     Write,
     /// Nothing to write, just read next response
     Read,
     /// Handshake complete, connection established
-    Connected {
-        capability_flags: CapabilityFlags,
-    },
+    Connected { capability_flags: CapabilityFlags },
 }
 
 /// State machine for MySQL handshake
@@ -377,16 +376,20 @@ pub enum Handshake {
         capability_flags: CapabilityFlags,
     },
     /// Sent auth switch response, waiting for final auth result
-    WaitingFinalAuthResult {
-        capability_flags: CapabilityFlags,
-    },
+    WaitingFinalAuthResult { capability_flags: CapabilityFlags },
     /// Connected (terminal state)
     Connected,
 }
 
 impl Handshake {
     /// Create a new handshake state machine
-    pub fn new(username: String, password: String, database: Option<String>, capabilities: CapabilityFlags, tls: bool) -> Self {
+    pub fn new(
+        username: String,
+        password: String,
+        database: Option<String>,
+        capabilities: CapabilityFlags,
+        tls: bool,
+    ) -> Self {
         Self::Start {
             config: HandshakeConfig {
                 username,
@@ -415,7 +418,8 @@ impl Handshake {
                 let handshake = read_initial_handshake(&buffer_set.initial_handshake)?;
                 let server_caps = handshake.capability_flags;
 
-                let mut client_caps = CAPABILITIES_ALWAYS_ENABLED | (config.capabilities & CAPABILITIES_CONFIGURABLE);
+                let mut client_caps =
+                    CAPABILITIES_ALWAYS_ENABLED | (config.capabilities & CAPABILITIES_CONFIGURABLE);
                 if config.database.is_some() {
                     client_caps |= CapabilityFlags::CLIENT_CONNECT_WITH_DB;
                 }
@@ -427,11 +431,16 @@ impl Handshake {
                 let negotiated_caps = client_caps & server_caps;
 
                 // Clone auth_plugin_name early to avoid borrow conflicts
-                let auth_plugin_name = buffer_set.initial_handshake[handshake.auth_plugin_name.clone()].to_vec();
+                let auth_plugin_name =
+                    buffer_set.initial_handshake[handshake.auth_plugin_name.clone()].to_vec();
 
                 // If TLS is requested and server supports it, send SSL request first
                 if config.tls && negotiated_caps.contains(CapabilityFlags::CLIENT_SSL) {
-                    write_ssl_request(buffer_set.new_write_buffer(), negotiated_caps, handshake.charset);
+                    write_ssl_request(
+                        buffer_set.new_write_buffer(),
+                        negotiated_caps,
+                        handshake.charset,
+                    );
 
                     let config_owned = std::mem::replace(
                         config,
@@ -479,9 +488,7 @@ impl Handshake {
                     username: &config.username,
                     auth_response: &auth_response,
                     database: config.database.as_deref(),
-                    auth_plugin_name: Some(
-                        std::str::from_utf8(&auth_plugin_name).unwrap(),
-                    ),
+                    auth_plugin_name: Some(std::str::from_utf8(&auth_plugin_name).unwrap()),
                 };
 
                 write_handshake_response(buffer_set.new_write_buffer(), &response);
@@ -574,7 +581,10 @@ impl Handshake {
                             };
 
                             // Build auth switch response
-                            write_auth_switch_response(buffer_set.new_write_buffer(), &auth_response);
+                            write_auth_switch_response(
+                                buffer_set.new_write_buffer(),
+                                &auth_response,
+                            );
 
                             // Transition to waiting for final result
                             *self = Self::WaitingFinalAuthResult {
@@ -588,9 +598,7 @@ impl Handshake {
                 }
             }
 
-            Self::WaitingFinalAuthResult {
-                capability_flags,
-            } => {
+            Self::WaitingFinalAuthResult { capability_flags } => {
                 let payload = &buffer_set.read_buffer[..];
                 if payload.is_empty() {
                     return Err(Error::InvalidPacket);

@@ -1,10 +1,10 @@
 use crate::buffer::BufferSet;
 use crate::constant::CommandByte;
 use crate::error::{Error, Result};
+use crate::protocol::TextRowPayload;
 use crate::protocol::command::ColumnDefinitionBytes;
 use crate::protocol::primitive::*;
 use crate::protocol::response::{ErrPayloadBytes, OkPayloadBytes};
-use crate::protocol::TextRowPayload;
 
 const MAX_PAYLOAD_LENGTH: usize = (1 << 24) - 4;
 
@@ -91,7 +91,10 @@ impl<'h, H: TextResultSetHandler> Query<'h, H> {
     /// # Returns
     /// * `Action::NeedPacket(&mut Vec<u8>)` - Needs more data in the specified buffer
     /// * `Action::Finished` - Processing complete
-    pub fn drive<'buf>(&mut self, buffer_set: &'buf mut BufferSet) -> Result<crate::protocol::command::Action<'buf>> {
+    pub fn step<'buf>(
+        &mut self,
+        buffer_set: &'buf mut BufferSet,
+    ) -> Result<crate::protocol::command::Action<'buf>> {
         use crate::protocol::command::Action;
         match &mut self.state {
             QueryState::Start => {

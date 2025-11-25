@@ -152,6 +152,11 @@ impl Conn {
         self.capability_flags
     }
 
+    /// Check if the server is MySQL (as opposed to MariaDB)
+    pub fn is_mysql(&self) -> bool {
+        self.capability_flags.is_mysql()
+    }
+
     /// Get the connection ID assigned by the server
     pub fn connection_id(&self) -> u64 {
         self.initial_handshake.connection_id as u64
@@ -219,18 +224,13 @@ impl Conn {
     }
 
     /// Execute a prepared statement with a result set handler (async)
-    pub async fn exec<P, H>(
-        &mut self,
-        statement_id: u32,
-        params: P,
-        handler: &mut H,
-    ) -> Result<()>
+    pub async fn exec<P, H>(&mut self, statement_id: u32, params: P, handler: &mut H) -> Result<()>
     where
         P: Params,
         H: BinaryResultSetHandler,
     {
-        use crate::protocol::command::prepared::Exec;
         use crate::protocol::command::Action;
+        use crate::protocol::command::prepared::Exec;
 
         write_execute(self.buffer_set.new_write_buffer(), statement_id, params)?;
 
@@ -239,7 +239,7 @@ impl Conn {
         let mut exec = Exec::new(handler);
 
         loop {
-            match exec.drive(&mut self.buffer_set)? {
+            match exec.step(&mut self.buffer_set)? {
                 Action::NeedPacket(buffer) => {
                     buffer.clear();
                     let _ = read_payload(&mut self.stream, buffer).await?;
@@ -265,9 +265,9 @@ impl Conn {
         P: Params,
         H: BinaryResultSetHandler,
     {
+        use crate::protocol::command::Action;
         use crate::protocol::command::prepared::Exec;
         use crate::protocol::command::utility::FirstRowHandler;
-        use crate::protocol::command::Action;
 
         write_execute(self.buffer_set.new_write_buffer(), statement_id, params)?;
 
@@ -277,7 +277,7 @@ impl Conn {
         let mut exec = Exec::new(&mut first_row_handler);
 
         loop {
-            match exec.drive(&mut self.buffer_set)? {
+            match exec.step(&mut self.buffer_set)? {
                 Action::NeedPacket(buffer) => {
                     buffer.clear();
                     let _ = read_payload(&mut self.stream, buffer).await?;
@@ -293,9 +293,9 @@ impl Conn {
     where
         P: Params,
     {
+        use crate::protocol::command::Action;
         use crate::protocol::command::prepared::Exec;
         use crate::protocol::command::utility::DropHandler;
-        use crate::protocol::command::Action;
 
         write_execute(self.buffer_set.new_write_buffer(), statement_id, params)?;
 
@@ -305,7 +305,7 @@ impl Conn {
         let mut exec = Exec::new(&mut drop_handler);
 
         loop {
-            match exec.drive(&mut self.buffer_set)? {
+            match exec.step(&mut self.buffer_set)? {
                 Action::NeedPacket(buffer) => {
                     buffer.clear();
                     let _ = read_payload(&mut self.stream, buffer).await?;
@@ -320,8 +320,8 @@ impl Conn {
     where
         H: TextResultSetHandler,
     {
-        use crate::protocol::command::query::{Query, write_query};
         use crate::protocol::command::Action;
+        use crate::protocol::command::query::{Query, write_query};
 
         write_query(self.buffer_set.new_write_buffer(), sql);
 
@@ -330,7 +330,7 @@ impl Conn {
         let mut query_sm = Query::new(handler);
 
         loop {
-            match query_sm.drive(&mut self.buffer_set)? {
+            match query_sm.step(&mut self.buffer_set)? {
                 Action::NeedPacket(buffer) => {
                     buffer.clear();
                     let _ = read_payload(&mut self.stream, buffer).await?;
@@ -343,9 +343,9 @@ impl Conn {
     /// Execute a text protocol SQL query and discard all results (async)
     #[instrument(skip_all)]
     pub async fn query_drop(&mut self, sql: &str) -> Result<()> {
+        use crate::protocol::command::Action;
         use crate::protocol::command::query::{Query, write_query};
         use crate::protocol::command::utility::DropHandler;
-        use crate::protocol::command::Action;
 
         write_query(self.buffer_set.new_write_buffer(), sql);
 
@@ -355,7 +355,7 @@ impl Conn {
         let mut query_sm = Query::new(&mut drop_handler);
 
         loop {
-            match query_sm.drive(&mut self.buffer_set)? {
+            match query_sm.step(&mut self.buffer_set)? {
                 Action::NeedPacket(buffer) => {
                     buffer.clear();
                     let _ = read_payload(&mut self.stream, buffer).await?;
