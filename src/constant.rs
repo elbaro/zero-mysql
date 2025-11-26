@@ -32,6 +32,8 @@ pub enum CommandByte {
     Daemon = 0x1d,
     BinlogDumpGtid = 0x1e,
     ResetConnection = 0x1f,
+    /// MariaDB Extension
+    StmtBulkExecute = 0xfa,
 }
 
 bitflags::bitflags! {
@@ -166,7 +168,8 @@ bitflags::bitflags! {
 }
 
 pub const MARIADB_CAPABILITIES_ENABLED: MariadbCapabilityFlags =
-    MariadbCapabilityFlags::MARIADB_CLIENT_STMT_BULK_OPERATIONS;
+    MariadbCapabilityFlags::MARIADB_CLIENT_STMT_BULK_OPERATIONS
+        .union(MariadbCapabilityFlags::MARIADB_CLIENT_BULK_UNIT_RESULTS);
 
 bitflags::bitflags! {
     /// MySQL Server Status Flags

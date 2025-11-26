@@ -5,7 +5,10 @@ use zerocopy::{FromBytes, FromZeros, IntoBytes};
 use crate::buffer::BufferSet;
 use crate::constant::CapabilityFlags;
 use crate::error::{Error, Result};
-use crate::protocol::command::prepared::{read_prepare_ok, write_execute, write_prepare};
+use crate::protocol::command::Action;
+use crate::protocol::command::prepared::{read_prepare_ok, write_execute, write_prepare, Exec};
+use crate::protocol::command::query::{Query, write_query};
+use crate::protocol::command::utility::{DropHandler, FirstRowHandler, write_ping, write_reset_connection};
 use crate::protocol::connection::{Handshake, HandshakeResult, InitialHandshake};
 use crate::protocol::packet::PacketHeader;
 use crate::protocol::response::ErrPayloadBytes;
@@ -223,19 +226,7 @@ impl Conn {
         Ok(statement_id)
     }
 
-    /// Execute a prepared statement with a result set handler (async)
-    pub async fn exec<P, H>(&mut self, statement_id: u32, params: P, handler: &mut H) -> Result<()>
-    where
-        P: Params,
-        H: BinaryResultSetHandler,
-    {
-        use crate::protocol::command::Action;
-        use crate::protocol::command::prepared::Exec;
-
-        write_execute(self.buffer_set.new_write_buffer(), statement_id, params)?;
-
-        self.write_payload().await?;
-
+    async fn drive_exec<H: BinaryResultSetHandler>(&mut self, handler: &mut H) -> Result<()> {
         let mut exec = Exec::new(handler);
 
         loop {
@@ -247,6 +238,31 @@ impl Conn {
                 Action::Finished => return Ok(()),
             }
         }
+    }
+
+    async fn drive_query<H: TextResultSetHandler>(&mut self, handler: &mut H) -> Result<()> {
+        let mut query = Query::new(handler);
+
+        loop {
+            match query.step(&mut self.buffer_set)? {
+                Action::NeedPacket(buffer) => {
+                    buffer.clear();
+                    let _ = read_payload(&mut self.stream, buffer).await?;
+                }
+                Action::Finished => return Ok(()),
+            }
+        }
+    }
+
+    /// Execute a prepared statement with a result set handler (async)
+    pub async fn exec<P, H>(&mut self, statement_id: u32, params: P, handler: &mut H) -> Result<()>
+    where
+        P: Params,
+        H: BinaryResultSetHandler,
+    {
+        write_execute(self.buffer_set.new_write_buffer(), statement_id, params)?;
+        self.write_payload().await?;
+        self.drive_exec(handler).await
     }
 
     /// Execute a prepared statement and return only the first row, dropping the rest (async)
@@ -265,26 +281,11 @@ impl Conn {
         P: Params,
         H: BinaryResultSetHandler,
     {
-        use crate::protocol::command::Action;
-        use crate::protocol::command::prepared::Exec;
-        use crate::protocol::command::utility::FirstRowHandler;
-
         write_execute(self.buffer_set.new_write_buffer(), statement_id, params)?;
-
         self.write_payload().await?;
-
         let mut first_row_handler = FirstRowHandler::new(handler);
-        let mut exec = Exec::new(&mut first_row_handler);
-
-        loop {
-            match exec.step(&mut self.buffer_set)? {
-                Action::NeedPacket(buffer) => {
-                    buffer.clear();
-                    let _ = read_payload(&mut self.stream, buffer).await?;
-                }
-                Action::Finished => return Ok(first_row_handler.found_row),
-            }
-        }
+        self.drive_exec(&mut first_row_handler).await?;
+        Ok(first_row_handler.found_row)
     }
 
     /// Execute a prepared statement and discard all results (async)
@@ -293,26 +294,9 @@ impl Conn {
     where
         P: Params,
     {
-        use crate::protocol::command::Action;
-        use crate::protocol::command::prepared::Exec;
-        use crate::protocol::command::utility::DropHandler;
-
         write_execute(self.buffer_set.new_write_buffer(), statement_id, params)?;
-
         self.write_payload().await?;
-
-        let mut drop_handler = DropHandler::new();
-        let mut exec = Exec::new(&mut drop_handler);
-
-        loop {
-            match exec.step(&mut self.buffer_set)? {
-                Action::NeedPacket(buffer) => {
-                    buffer.clear();
-                    let _ = read_payload(&mut self.stream, buffer).await?;
-                }
-                Action::Finished => return Ok(()),
-            }
-        }
+        self.drive_exec(&mut DropHandler::new()).await
     }
 
     /// Execute a text protocol SQL query (async)
@@ -320,80 +304,37 @@ impl Conn {
     where
         H: TextResultSetHandler,
     {
-        use crate::protocol::command::Action;
-        use crate::protocol::command::query::{Query, write_query};
-
         write_query(self.buffer_set.new_write_buffer(), sql);
-
         self.write_payload().await?;
-
-        let mut query_sm = Query::new(handler);
-
-        loop {
-            match query_sm.step(&mut self.buffer_set)? {
-                Action::NeedPacket(buffer) => {
-                    buffer.clear();
-                    let _ = read_payload(&mut self.stream, buffer).await?;
-                }
-                Action::Finished => return Ok(()),
-            }
-        }
+        self.drive_query(handler).await
     }
 
     /// Execute a text protocol SQL query and discard all results (async)
     #[instrument(skip_all)]
     pub async fn query_drop(&mut self, sql: &str) -> Result<()> {
-        use crate::protocol::command::Action;
-        use crate::protocol::command::query::{Query, write_query};
-        use crate::protocol::command::utility::DropHandler;
-
         write_query(self.buffer_set.new_write_buffer(), sql);
-
         self.write_payload().await?;
-
-        let mut drop_handler = DropHandler::new();
-        let mut query_sm = Query::new(&mut drop_handler);
-
-        loop {
-            match query_sm.step(&mut self.buffer_set)? {
-                Action::NeedPacket(buffer) => {
-                    buffer.clear();
-                    let _ = read_payload(&mut self.stream, buffer).await?;
-                }
-                Action::Finished => return Ok(()),
-            }
-        }
+        self.drive_query(&mut DropHandler::new()).await
     }
 
     /// Send a ping to the server to check if the connection is alive (async)
     ///
     /// This sends a COM_PING command to the MySQL server and waits for an OK response.
     pub async fn ping(&mut self) -> Result<()> {
-        use crate::protocol::command::utility::write_ping;
-
         write_ping(self.buffer_set.new_write_buffer());
-
         self.write_payload().await?;
-
         self.buffer_set.read_buffer.clear();
         let _ = read_payload(&mut self.stream, &mut self.buffer_set.read_buffer).await?;
-
         Ok(())
     }
 
     /// Reset the connection to its initial state (async)
     pub async fn reset(&mut self) -> Result<()> {
-        use crate::protocol::command::utility::write_reset_connection;
-
         write_reset_connection(self.buffer_set.new_write_buffer());
-
         self.write_payload().await?;
-
         self.buffer_set.read_buffer.clear();
         let _ = read_payload(&mut self.stream, &mut self.buffer_set.read_buffer).await?;
-
         self.in_transaction = false;
-
         Ok(())
     }
 

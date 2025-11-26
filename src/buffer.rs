@@ -1,29 +1,25 @@
 /// A set of reusable buffers for MySQL protocol communication
 ///
-/// This struct consolidates various buffers used throughout the connection lifecycle
-/// to reduce heap allocations and improve performance.
+/// `Conn` uses a single `BufferSet` for all its operations.
+/// TODO: Implements `BufferSetPool` so that `BufferSet` can be recycled for new Conn.
 #[derive(Debug)]
 pub struct BufferSet {
-    /// Buffer that stores the initial handshake packet from the server
-    ///
-    /// This is preserved for the lifetime of the connection and may be used
-    /// for connection pooling, debugging, or re-authentication scenarios.
+    /// Bytes are valid during Conn.
     pub initial_handshake: Vec<u8>,
 
-    /// Reusable buffer for reading payloads from the network
+    /// General-purpose read buffer
+    /// Bytes are valid during an operation.
     pub read_buffer: Vec<u8>,
 
-    /// Reusable buffer for building outgoing packets
-    ///
-    /// Layout: [4-byte header space][payload...]
-    /// Use `payload_mut()` to write payload starting at offset 4.
-    /// Use `packet()` to get the full packet for sending.
+    /// General-purpose write buffer
+    /// It always has at least 4 bytes which is reserved for the first packet header.
+    /// It is followed by payload bytes without considering 16MB split.
+    /// Layout: [4-byte header space][payload that is possibly larger than 16MB]
+    /// Bytes are valid during an operation.
     write_buffer: Vec<u8>,
 
-    /// Buffer for storing column definition payloads
-    ///
-    /// This buffer stores column definition data with a stable lifetime,
-    /// allowing handlers to borrow ColumnDefinitionBytes without cloning.
+    /// ColumnDefinition packets in one buffer
+    /// Bytes are valid during an operation.
     pub column_definition_buffer: Vec<u8>,
 }
 

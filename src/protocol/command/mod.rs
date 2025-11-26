@@ -1,3 +1,4 @@
+pub mod bulk_exec;
 mod column_definition;
 pub mod prepared;
 pub mod query;

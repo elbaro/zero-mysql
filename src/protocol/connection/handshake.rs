@@ -101,6 +101,7 @@ pub fn read_initial_handshake(payload: &[u8]) -> Result<InitialHandshake> {
 #[derive(Debug, Clone)]
 pub struct HandshakeResponse41<'a> {
     pub capability_flags: CapabilityFlags,
+    pub mariadb_capabilities: MariadbCapabilityFlags,
     pub max_packet_size: u32,
     pub charset: u8,
     pub username: &'a str,
@@ -124,7 +125,7 @@ pub fn write_handshake_response(out: &mut Vec<u8>, response: &HandshakeResponse4
     out.extend_from_slice(&[0u8; 19]);
 
     // MariaDB capabilities
-    write_int_4(out, MARIADB_CAPABILITIES_ENABLED.bits());
+    write_int_4(out, response.mariadb_capabilities.bits());
 
     // username (null-terminated)
     write_string_null(out, response.username);
@@ -487,6 +488,20 @@ impl Handshake {
 
                 let response = HandshakeResponse41 {
                     capability_flags: negotiated_caps,
+                    mariadb_capabilities: if negotiated_caps.is_mysql() {
+                        MariadbCapabilityFlags::empty()
+                    } else {
+                        if !handshake
+                            .mariadb_capabilities
+                            .contains(MARIADB_CAPABILITIES_ENABLED)
+                        {
+                            return Err(Error::BadConfigError(
+                                "MariaDB server does not support the required capabilities"
+                                    .to_string(),
+                            ));
+                        }
+                        MARIADB_CAPABILITIES_ENABLED
+                    },
                     max_packet_size: 16777216,
                     charset: 45,
                     username: &config.username,
