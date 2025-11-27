@@ -4,19 +4,20 @@ use zerocopy::{FromBytes, IntoBytes};
 use crate::buffer::BufferSet;
 use crate::constant::CapabilityFlags;
 use crate::error::{Error, Result};
-use crate::protocol::command::Action;
-use crate::protocol::command::prepared::Exec;
+use crate::protocol::command::bulk_exec::{write_bulk_execute, BulkExec, BulkFlags, BulkParamsSet};
 use crate::protocol::command::prepared::write_execute;
+use crate::protocol::command::prepared::Exec;
 use crate::protocol::command::prepared::{read_prepare_ok, write_prepare};
-use crate::protocol::command::query::Query;
 use crate::protocol::command::query::write_query;
-use crate::protocol::command::utility::DropHandler;
+use crate::protocol::command::query::Query;
 use crate::protocol::command::utility::write_ping;
 use crate::protocol::command::utility::write_reset_connection;
+use crate::protocol::command::utility::DropHandler;
+use crate::protocol::command::Action;
 use crate::protocol::connection::{Handshake, HandshakeResult, InitialHandshake};
 use crate::protocol::packet::PacketHeader;
+use crate::protocol::r#trait::{param::Params, BinaryResultSetHandler, TextResultSetHandler};
 use crate::protocol::response::ErrPayloadBytes;
-use crate::protocol::r#trait::{BinaryResultSetHandler, TextResultSetHandler, params::Params};
 use std::hint::unlikely;
 use std::net::TcpStream;
 use std::os::unix::net::UnixStream;
@@ -163,6 +164,11 @@ impl Conn {
         self.capability_flags.is_mysql()
     }
 
+    /// Check if the server is MariaDB (as opposed to MySQL)
+    pub fn is_mariadb(&self) -> bool {
+        self.capability_flags.is_mariadb()
+    }
+
     /// Get the connection ID assigned by the server
     pub fn connection_id(&self) -> u64 {
         self.initial_handshake.connection_id as u64
@@ -253,6 +259,52 @@ impl Conn {
         write_execute(self.buffer_set.new_write_buffer(), statement_id, params)?;
         self.write_payload()?;
         self.drive_exec(handler)
+    }
+
+    fn drive_bulk_exec<H: BinaryResultSetHandler>(&mut self, handler: &mut H) -> Result<()> {
+        let mut bulk_exec = BulkExec::new(handler);
+
+        loop {
+            match bulk_exec.step(&mut self.buffer_set)? {
+                Action::NeedPacket(buffer) => {
+                    buffer.clear();
+                    let _ = read_payload(&mut self.stream, buffer)?;
+                }
+                Action::Finished => return Ok(()),
+            }
+        }
+    }
+
+    /// Execute a bulk prepared statement with a result set handler
+    pub fn exec_bulk<P, I, H>(
+        &mut self,
+        statement_id: u32,
+        params: P,
+        flags: BulkFlags,
+        handler: &mut H,
+    ) -> Result<()>
+    where
+        P: BulkParamsSet + IntoIterator<Item = I>,
+        I: Params,
+        H: BinaryResultSetHandler,
+    {
+        if !self.is_mariadb() {
+            // Fallback to multiple exec_drop for non-MariaDB servers
+            for param in params {
+                self.exec_drop(statement_id, param)?;
+            }
+            Ok(())
+        } else {
+            // Use MariaDB bulk execute protocol
+            write_bulk_execute(
+                self.buffer_set.new_write_buffer(),
+                statement_id,
+                params,
+                flags,
+            )?;
+            self.write_payload()?;
+            self.drive_bulk_exec(handler)
+        }
     }
 
     /// Execute a prepared statement and return only the first row, dropping the rest

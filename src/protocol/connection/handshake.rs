@@ -434,6 +434,15 @@ impl Handshake {
 
                 // Negotiate capabilities
                 let negotiated_caps = client_caps & server_caps;
+                if negotiated_caps.is_mariadb()
+                    && !handshake
+                        .mariadb_capabilities
+                        .contains(MARIADB_CAPABILITIES_ENABLED)
+                {
+                    return Err(Error::BadConfigError(
+                        format!("MariaDB server does not support the required capabilities. Server: {:?} Required: {:?}", handshake.mariadb_capabilities, MARIADB_CAPABILITIES_ENABLED)
+                    ));
+                }
 
                 // Clone auth_plugin_name early to avoid borrow conflicts
                 let auth_plugin_name =
@@ -491,15 +500,6 @@ impl Handshake {
                     mariadb_capabilities: if negotiated_caps.is_mysql() {
                         MariadbCapabilityFlags::empty()
                     } else {
-                        if !handshake
-                            .mariadb_capabilities
-                            .contains(MARIADB_CAPABILITIES_ENABLED)
-                        {
-                            return Err(Error::BadConfigError(
-                                "MariaDB server does not support the required capabilities"
-                                    .to_string(),
-                            ));
-                        }
                         MARIADB_CAPABILITIES_ENABLED
                     },
                     max_packet_size: 16777216,
@@ -679,6 +679,11 @@ impl Handshake {
 
                 let response = HandshakeResponse41 {
                     capability_flags,
+                    mariadb_capabilities: if capability_flags.is_mysql() {
+                        MariadbCapabilityFlags::empty()
+                    } else {
+                        MARIADB_CAPABILITIES_ENABLED
+                    },
                     max_packet_size: 16777216,
                     charset: 45,
                     username: &config.username,

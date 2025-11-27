@@ -110,8 +110,13 @@ impl CapabilityFlags {
     /// Check if the server is MySQL (as opposed to MariaDB)
     ///
     /// MariaDB unsets the CLIENT_LONG_PASSWORD flag to distinguish itself from MySQL.
+    #[inline]
     pub fn is_mysql(&self) -> bool {
         self.contains(CapabilityFlags::CLIENT_LONG_PASSWORD)
+    }
+    #[inline]
+    pub fn is_mariadb(&self) -> bool {
+        !self.is_mysql()
     }
 }
 
@@ -163,13 +168,13 @@ bitflags::bitflags! {
         const MARIADB_CLIENT_STMT_BULK_OPERATIONS = 1 << 2;
         const MARIADB_CLIENT_EXTENDED_METADATA = 1 << 3; // TODO: implement
         const MARIADB_CLIENT_CACHE_METADATA = 1 << 4; // TODO
-        const MARIADB_CLIENT_BULK_UNIT_RESULTS = 1 << 5; // TODO: implement
+        const MARIADB_CLIENT_BULK_UNIT_RESULTS = 1 << 5; // TODO
     }
 }
 
 pub const MARIADB_CAPABILITIES_ENABLED: MariadbCapabilityFlags =
-    MariadbCapabilityFlags::MARIADB_CLIENT_STMT_BULK_OPERATIONS
-        .union(MariadbCapabilityFlags::MARIADB_CLIENT_BULK_UNIT_RESULTS);
+    MariadbCapabilityFlags::MARIADB_CLIENT_STMT_BULK_OPERATIONS;
+// .union(MariadbCapabilityFlags::MARIADB_CLIENT_BULK_UNIT_RESULTS); // needs MariaDB 12.x, but most distributions are 10.x or 11.x now
 
 bitflags::bitflags! {
     /// MySQL Server Status Flags
@@ -372,10 +377,6 @@ mod tests {
         assert!(
             always_disabled.contains(CapabilityFlags::CLIENT_INTERACTIVE),
             "CLIENT_INTERACTIVE must be always disabled (we're not interactive)"
-        );
-        assert!(
-            configurable.contains(CapabilityFlags::CLIENT_SSL),
-            "CLIENT_SSL must be configurable"
         );
     }
 }

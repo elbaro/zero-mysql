@@ -2,23 +2,11 @@
 /// and extract data from them without needing to clone the raw bytes,
 /// thanks to the column_definition_buffer in BufferSet
 use zero_mysql::error::Result;
-use zero_mysql::protocol::command::{ColumnDefinitionBytes, ColumnTypeAndFlags};
-use zero_mysql::protocol::response::OkPayloadBytes;
 use zero_mysql::protocol::BinaryRowPayload;
+use zero_mysql::protocol::command::ColumnDefinitionBytes;
+use zero_mysql::protocol::response::OkPayloadBytes;
 
 /// Handler that extracts and stores column metadata
-struct HandlerWithColumnMetadata {
-    /// Stored column type information extracted from ColumnDefinitionBytes
-    column_types: Vec<ColumnTypeAndFlags>,
-}
-
-impl HandlerWithColumnMetadata {
-    fn new() -> Self {
-        Self {
-            column_types: Vec::new(),
-        }
-    }
-}
 
 impl zero_mysql::protocol::r#trait::BinaryResultSetHandler for HandlerWithColumnMetadata {
     fn no_result_set(&mut self, _ok: OkPayloadBytes) -> Result<()> {

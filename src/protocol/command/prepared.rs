@@ -5,7 +5,7 @@ use crate::protocol::BinaryRowPayload;
 use crate::protocol::command::ColumnDefinitionBytes;
 use crate::protocol::primitive::*;
 use crate::protocol::response::{ErrPayloadBytes, OkPayloadBytes};
-use crate::protocol::r#trait::params::Params;
+use crate::protocol::r#trait::param::Params;
 use zerocopy::byteorder::little_endian::{U16 as U16LE, U32 as U32LE};
 use zerocopy::{FromBytes, Immutable, KnownLayout};
 

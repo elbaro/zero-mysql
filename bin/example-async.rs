@@ -84,7 +84,7 @@ async fn main() -> Result<()> {
     }
 
     let mut decoder = Handler::new();
-    let params = [2i32];
+    let params = (2i32,);
     conn.exec(stmt_id, params, &mut decoder).await?;
 
     // Test INSERT
@@ -136,9 +136,7 @@ async fn main() -> Result<()> {
         .prepare("SELECT username, age, email, score, description FROM test_insert")
         .await?;
     let mut select_decoder = Handler::new();
-    let select_params: [i32; 0] = [];
-    conn.exec(select_stmt, select_params, &mut select_decoder)
-        .await?;
+    conn.exec(select_stmt, (), &mut select_decoder).await?;
 
     println!("\nExample completed successfully!");
 

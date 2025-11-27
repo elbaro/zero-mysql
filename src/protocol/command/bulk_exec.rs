@@ -2,9 +2,11 @@ use crate::buffer::BufferSet;
 use crate::constant::CommandByte;
 use crate::error::{Error, Result};
 use crate::protocol::command::ColumnDefinitionBytes;
+use crate::protocol::command::prepared::read_binary_row;
 use crate::protocol::primitive::*;
 use crate::protocol::response::{ErrPayloadBytes, OkPayloadBytes};
 use crate::protocol::r#trait::BinaryResultSetHandler;
+use crate::protocol::r#trait::param::TypedParams;
 
 bitflags::bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -14,14 +16,25 @@ bitflags::bitflags! {
     }
 }
 
-pub trait BulkParams {
-    fn num_params(&self) -> usize;
-    fn num_rows(&self) -> usize;
+pub trait BulkParamsSet {
     fn encode_types(&self, out: &mut Vec<u8>);
-    fn encode_rows(&self, out: &mut Vec<u8>) -> Result<()>;
+    fn encode_rows(self, out: &mut Vec<u8>) -> Result<()>;
 }
 
-pub fn write_bulk_execute<P: BulkParams>(
+impl<P: TypedParams> BulkParamsSet for &[P] {
+    fn encode_types(&self, out: &mut Vec<u8>) {
+        P::encode_types(out);
+    }
+
+    fn encode_rows(self, out: &mut Vec<u8>) -> Result<()> {
+        for params in self {
+            params.encode_values_for_bulk(out)?;
+        }
+        Ok(())
+    }
+}
+
+pub fn write_bulk_execute<P: BulkParamsSet>(
     out: &mut Vec<u8>,
     statement_id: u32,
     params: P,
@@ -103,22 +116,9 @@ impl<'h, H: BinaryResultSetHandler> BulkExec<'h, H> {
 
                 match response {
                     BulkExecuteResponse::Ok(ok_bytes) => {
-                        use crate::constant::ServerStatusFlags;
-                        use crate::protocol::response::OkPayload;
-
-                        let ok_payload = OkPayload::try_from(ok_bytes)?;
                         self.handler.no_result_set(ok_bytes)?;
-
-                        if ok_payload
-                            .status_flags
-                            .contains(ServerStatusFlags::SERVER_MORE_RESULTS_EXISTS)
-                        {
-                            self.state = BulkExecState::ReadingFirstPacket;
-                            Ok(Action::NeedPacket(&mut buffer_set.read_buffer))
-                        } else {
-                            self.state = BulkExecState::Finished;
-                            Ok(Action::Finished)
-                        }
+                        self.state = BulkExecState::Finished;
+                        Ok(Action::Finished)
                     }
                     BulkExecuteResponse::ResultSet { column_count } => {
                         let num_columns = column_count as usize;
@@ -156,30 +156,15 @@ impl<'h, H: BinaryResultSetHandler> BulkExec<'h, H> {
                 let payload = &buffer_set.read_buffer[..];
                 match payload[0] {
                     0x00 => {
-                        use crate::protocol::command::prepared::read_binary_row;
                         let row = read_binary_row(payload, *num_columns)?;
                         self.handler.row(&row)?;
                         Ok(Action::NeedPacket(&mut buffer_set.read_buffer))
                     }
                     0xFE => {
-                        use crate::constant::ServerStatusFlags;
-                        use crate::protocol::response::OkPayload;
-
                         let eof_bytes = OkPayloadBytes(payload);
-                        eof_bytes.assert_eof()?;
-                        let ok_payload = OkPayload::try_from(eof_bytes)?;
                         self.handler.resultset_end(eof_bytes)?;
-
-                        if ok_payload
-                            .status_flags
-                            .contains(ServerStatusFlags::SERVER_MORE_RESULTS_EXISTS)
-                        {
-                            self.state = BulkExecState::ReadingFirstPacket;
-                            Ok(Action::NeedPacket(&mut buffer_set.read_buffer))
-                        } else {
-                            self.state = BulkExecState::Finished;
-                            Ok(Action::Finished)
-                        }
+                        self.state = BulkExecState::Finished;
+                        Ok(Action::Finished)
                     }
                     _ => Err(Error::InvalidPacket),
                 }

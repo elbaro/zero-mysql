@@ -1,5 +1,4 @@
 pub mod param;
-pub mod params;
 
 use crate::error::Result;
 use crate::protocol::command::ColumnDefinitionBytes;
