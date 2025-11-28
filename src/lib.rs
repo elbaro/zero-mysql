@@ -1,5 +1,7 @@
 #![feature(cold_path)]
 #![feature(likely_unlikely)]
+#![feature(read_buf)]
+#![feature(core_io_borrowed_buf)]
 
 mod buffer;
 pub mod constant;

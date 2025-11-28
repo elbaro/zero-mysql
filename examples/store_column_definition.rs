@@ -1,60 +1,53 @@
-/// Example demonstrating that handlers can borrow ColumnDefinitionBytes
-/// and extract data from them without needing to clone the raw bytes,
-/// thanks to the column_definition_buffer in BufferSet
+/// Example demonstrating that handlers receive ColumnDefinition data
+/// along with each row, allowing access to column metadata without
+/// needing separate storage.
 use zero_mysql::error::Result;
 use zero_mysql::protocol::BinaryRowPayload;
-use zero_mysql::protocol::command::ColumnDefinitionBytes;
+use zero_mysql::protocol::command::ColumnDefinition;
 use zero_mysql::protocol::response::OkPayloadBytes;
 
-/// Handler that extracts and stores column metadata
+/// Handler that processes rows with column metadata
+struct RowProcessor;
 
-impl zero_mysql::protocol::r#trait::BinaryResultSetHandler for HandlerWithColumnMetadata {
+impl zero_mysql::protocol::r#trait::BinaryResultSetHandler for RowProcessor {
     fn no_result_set(&mut self, _ok: OkPayloadBytes) -> Result<()> {
         Ok(())
     }
 
     fn resultset_start(&mut self, num_columns: usize) -> Result<()> {
-        self.column_types.reserve(num_columns);
+        println!("Result set starting with {} columns", num_columns);
         Ok(())
     }
 
-    fn col<'buffers>(&mut self, col: ColumnDefinitionBytes<'buffers>) -> Result<()> {
-        // Extract type information from ColumnDefinitionBytes without cloning!
-        // The key improvement: ColumnDefinitionBytes now references
-        // buffer_set.column_definition_buffer with a clean lifetime,
-        // so we can borrow it safely during this callback.
-        let tail = col.tail()?;
-        let type_and_flags = tail.type_and_flags()?;
-
-        println!(
-            "Column {}: type={:?}, flags={:?}",
-            self.column_types.len(),
-            type_and_flags.column_type,
-            type_and_flags.flags
-        );
-
-        // Store the extracted metadata
-        self.column_types.push(type_and_flags);
-        Ok(())
-    }
-
-    fn row(&mut self, _row: &BinaryRowPayload) -> Result<()> {
-        println!("Processing row with {} columns", self.column_types.len());
+    fn row<'a>(
+        &mut self,
+        cols: &[ColumnDefinition<'a>],
+        _row: &'a BinaryRowPayload<'a>,
+    ) -> Result<()> {
+        // Column definitions are provided with each row
+        for (i, col) in cols.iter().enumerate() {
+            let type_and_flags = col.tail.type_and_flags()?;
+            println!(
+                "Column {}: type={:?}, flags={:?}",
+                i, type_and_flags.column_type, type_and_flags.flags
+            );
+        }
+        println!("Processing row with {} columns", cols.len());
         Ok(())
     }
 
     fn resultset_end(&mut self, _eof: OkPayloadBytes) -> Result<()> {
-        println!("Result set ended with {} columns", self.column_types.len());
+        println!("Result set ended");
         Ok(())
     }
 }
 
 fn main() {
-    println!("This example demonstrates that handlers can store ColumnDefinitionBytes");
-    println!("without cloning, thanks to buffer_set.column_definition_buffer.");
+    println!("This example demonstrates that handlers receive ColumnDefinition");
+    println!("data along with each row in the row() callback.");
     println!();
     println!("The key insight:");
-    println!("- Previously: ColumnDefinitionBytes referenced read_buffer (cleared each iteration)");
-    println!("- Now: ColumnDefinitionBytes references column_definition_buffer (stable location)");
-    println!("- Result: Handlers can store the bytes with lifetime 'a bound to BufferSet");
+    println!("- Column definitions are passed to row() along with the row data");
+    println!("- This allows handlers to decode values using type information");
+    println!("- No need to store column metadata separately in the handler");
 }

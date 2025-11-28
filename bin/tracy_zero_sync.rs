@@ -14,11 +14,11 @@ fn main() -> Result<()> {
     let mut conn = Conn::new("mysql://test:1234@localhost/test")?;
     {
         // Drop existing table
-        let drop_stmt = conn.prepare("DROP TABLE IF EXISTS test_bench")?;
-        conn.exec_drop(drop_stmt, ())?;
+        let mut drop_stmt = conn.prepare("DROP TABLE IF EXISTS test_bench")?;
+        conn.exec_drop(&mut drop_stmt, ())?;
 
         // Create new table with MEMORY engine
-        let create_stmt = conn.prepare(
+        let mut create_stmt = conn.prepare(
             "CREATE TABLE test_bench (
                 id INT PRIMARY KEY AUTO_INCREMENT,
                 name VARCHAR(100),
@@ -28,14 +28,14 @@ fn main() -> Result<()> {
                 description VARCHAR(100)
             ) ENGINE=MEMORY",
         )?;
-        conn.exec_drop(create_stmt, ())?;
+        conn.exec_drop(&mut create_stmt, ())?;
     }
 
     // Prepare statements
-    let insert_stmt = conn.prepare(
+    let mut insert_stmt = conn.prepare(
         "INSERT INTO test_bench (name, age, email, score, description) VALUES (?, ?, ?, ?, ?)",
     )?;
-    let truncate_stmt = conn.prepare("TRUNCATE TABLE test_bench")?;
+    let mut truncate_stmt = conn.prepare("TRUNCATE TABLE test_bench")?;
 
     // Pre-construct row data to avoid measuring string formatting overhead
     let mut rows = Vec::with_capacity(10_000);
@@ -57,7 +57,7 @@ fn main() -> Result<()> {
 
         for (username, age, email, score, description) in &rows {
             conn.exec_drop(
-                insert_stmt,
+                &mut insert_stmt,
                 (
                     username.as_str(),
                     *age,
@@ -74,6 +74,6 @@ fn main() -> Result<()> {
             iteration,
             elapsed.as_secs_f64() * 1000.0
         );
-        conn.exec_drop(truncate_stmt, ())?;
+        conn.exec_drop(&mut truncate_stmt, ())?;
     }
 }

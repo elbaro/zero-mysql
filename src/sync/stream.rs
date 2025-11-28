@@ -1,4 +1,4 @@
-use std::io::{BufReader, Read, Write};
+use std::io::{BufReader, BorrowedCursor, Read, Write};
 use std::net::TcpStream;
 use std::os::unix::net::UnixStream;
 
@@ -50,6 +50,15 @@ impl Stream {
             #[cfg(feature = "tls")]
             Self::Tls(r) => r.read_exact(buf),
             Self::Unix(r) => r.read_exact(buf),
+        }
+    }
+
+    pub fn read_buf_exact(&mut self, cursor: BorrowedCursor<'_>) -> std::io::Result<()> {
+        match self {
+            Self::Tcp(r) => r.read_buf_exact(cursor),
+            #[cfg(feature = "tls")]
+            Self::Tls(r) => r.read_buf_exact(cursor),
+            Self::Unix(r) => r.read_buf_exact(cursor),
         }
     }
 

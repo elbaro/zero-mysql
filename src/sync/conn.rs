@@ -18,6 +18,7 @@ use crate::protocol::packet::PacketHeader;
 use crate::protocol::response::ErrPayloadBytes;
 use crate::protocol::r#trait::{BinaryResultSetHandler, TextResultSetHandler, param::Params};
 use std::hint::unlikely;
+use std::io::BorrowedBuf;
 use std::net::TcpStream;
 use std::os::unix::net::UnixStream;
 use zerocopy::FromZeros;
@@ -182,7 +183,6 @@ impl Conn {
         self.initial_handshake.status_flags
     }
 
-    #[tracing::instrument(skip_all)]
     fn write_payload(&mut self) -> Result<()> {
         let mut sequence_id = 0u8;
         let mut buffer = self.buffer_set.write_buffer_mut().as_mut_slice();
@@ -284,7 +284,6 @@ impl Conn {
         }
     }
 
-    #[tracing::instrument(skip_all)]
     pub fn exec<'conn, P, H>(
         &'conn mut self,
         stmt: &'conn mut PreparedStatement,
@@ -379,7 +378,6 @@ impl Conn {
     }
 
     /// Execute a prepared statement and discard all results
-    #[tracing::instrument(skip_all)]
     pub fn exec_drop<'conn, 'stmt, P>(
         &'conn mut self,
         stmt: &'stmt mut PreparedStatement,
@@ -493,7 +491,6 @@ impl Conn {
 
 /// Read a complete MySQL payload, concatenating payloads if they span multiple 16MB chunks
 /// Returns the sequence_id of the last packet read.
-#[tracing::instrument(skip_all)]
 fn read_payload(reader: &mut Stream, buffer: &mut Vec<u8>) -> Result<u8> {
     buffer.clear();
 
@@ -503,13 +500,13 @@ fn read_payload(reader: &mut Stream, buffer: &mut Vec<u8>) -> Result<u8> {
     let length = header.length();
     let mut sequence_id = header.sequence_id;
 
-    if buffer.capacity() < length {
-        buffer.reserve(length - buffer.capacity());
-    }
+    buffer.reserve(length);
 
-    let start = buffer.len();
-    buffer.resize(start + length, 0);
-    reader.read_exact(&mut buffer[start..])?;
+    let spare = buffer.spare_capacity_mut();
+    let mut buf: BorrowedBuf<'_> = (&mut spare[..length]).into();
+    reader.read_buf_exact(buf.unfilled())?;
+    // SAFETY: read_buf_exact filled exactly `length` bytes
+    unsafe { buffer.set_len(length) };
 
     let mut current_length = length;
     while current_length == 0xFFFFFF {
@@ -518,15 +515,17 @@ fn read_payload(reader: &mut Stream, buffer: &mut Vec<u8>) -> Result<u8> {
         current_length = header.length();
         sequence_id = header.sequence_id;
 
-        let prev_len = buffer.len();
-        buffer.resize(prev_len + current_length, 0);
-        reader.read_exact(&mut buffer[prev_len..])?;
+        buffer.reserve(current_length);
+        let spare = buffer.spare_capacity_mut();
+        let mut buf: BorrowedBuf<'_> = (&mut spare[..current_length]).into();
+        reader.read_buf_exact(buf.unfilled())?;
+        // SAFETY: read_buf_exact filled exactly `current_length` bytes
+        unsafe { buffer.set_len(buffer.len() + current_length) };
     }
 
     Ok(sequence_id)
 }
 
-#[tracing::instrument(skip_all)]
 fn read_column_definition_packets(
     reader: &mut Stream,
     out: &mut Vec<u8>,
@@ -541,9 +540,12 @@ fn read_column_definition_packets(
         let length = header.length();
         out.extend((length as u32).to_ne_bytes());
 
-        let last_offset = out.len();
-        out.resize(last_offset + length, 0);
-        reader.read_exact(&mut out[last_offset..])?;
+        out.reserve(length);
+        let spare = out.spare_capacity_mut();
+        let mut buf: BorrowedBuf<'_> = (&mut spare[..length]).into();
+        reader.read_buf_exact(buf.unfilled())?;
+        // SAFETY: read_buf_exact filled exactly `length` bytes
+        unsafe { out.set_len(out.len() + length) };
     }
 
     Ok(header.sequence_id)

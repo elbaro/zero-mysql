@@ -96,10 +96,24 @@ impl BinaryResultSetHandler for UsersHandler {
 }
 
 fn main() -> Result<()> {
-    tracy_client::Client::start();
-    use tracing_subscriber::layer::SubscriberExt;
-    let subscriber = tracing_subscriber::registry().with(tracing_tracy::TracyLayer::default());
-    tracing::subscriber::set_global_default(subscriber).unwrap();
+    {
+        use reqray::CallTreeCollector;
+        use tracing_subscriber::{fmt, prelude::*, util::SubscriberInitExt};
+
+        let fmt_layer = fmt::layer().with_target(false);
+
+        tracing_subscriber::registry()
+            // -----------------------------------------------
+            .with(CallTreeCollector::default())
+            // -----------------------------------------------
+            .with(fmt_layer)
+            .init();
+    }
+
+    // tracy_client::Client::start();
+    // use tracing_subscriber::layer::SubscriberExt;
+    // let subscriber = tracing_subscriber::registry().with(tracing_tracy::TracyLayer::default());
+    // tracing::subscriber::set_global_default(subscriber).unwrap();
 
     let connection_url =
         std::env::var("DATABASE_URL").expect("DATABASE_URL must be set in order to run tests");
@@ -125,7 +139,7 @@ fn main() -> Result<()> {
     let mut iteration = 0u64;
     let mut handler = UsersHandler::new();
 
-    for iteration in 1..10 {
+    for iteration in 1.. {
         let iteration_start = std::time::Instant::now();
 
         for _ in 0..1000 {

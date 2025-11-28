@@ -46,8 +46,8 @@ harness = false
 required-features = ["dev"]
 
 [dependencies]
-# tracing = { version = "*", features = ["release_max_level_warn"] }
-tracing = { version = "*" }
+tracing = { version = "*", features = ["release_max_level_warn"] }
+# tracing = { version = "*" }
 tracy-client = { version = "=0.18.0", optional = true }
 tracing-subscriber = { version = "*", optional = true }
 thiserror = "2.0"
@@ -62,6 +62,7 @@ bitflags = "2.6"
 mysql = { path = "../rust-mysql-simple", optional = true }
 mysql_async = { version = "*", optional = true }
 tracing-tracy = { version = "*", optional = true }
+reqray = { version = "*", optional = true }
 log = "0.4.28"
 auto_impl = "1.3.0"
 
@@ -81,6 +82,7 @@ dev = [
   "tracing-subscriber",
   "mysql",
   "mysql_async",
+  "dep:reqray",
 ]
 
 [profile.bench]

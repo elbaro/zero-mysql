@@ -16,7 +16,7 @@ pub struct PrepareOk {
     num_columns: U16LE,
     num_params: U16LE,
     _reserved: u8,
-    warning_count: U16LE,
+    warning_count: U16LE, // MySQL >= 5.7 and MariaDB all expect at least 12 bytes: https://github.com/launchbadge/sqlx/issues/3335
 }
 
 impl PrepareOk {

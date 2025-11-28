@@ -1,6 +1,6 @@
 use zero_mysql::error::Result;
 use zero_mysql::protocol::TextRowPayload;
-use zero_mysql::protocol::command::ColumnDefinitionBytes;
+use zero_mysql::protocol::command::ColumnDefinition;
 use zero_mysql::protocol::response::OkPayloadBytes;
 use zero_mysql::tokio::Conn;
 
@@ -20,7 +20,7 @@ impl zero_mysql::protocol::r#trait::TextResultSetHandler for DropHandler {
         Ok(())
     }
 
-    fn col<'buffers>(&mut self, _col: ColumnDefinitionBytes<'buffers>) -> Result<()> {
+    fn col<'buffers>(&mut self, _col: &ColumnDefinition<'buffers>) -> Result<()> {
         Ok(())
     }
 
@@ -62,7 +62,7 @@ async fn main() -> Result<()> {
         .await?;
     }
 
-    let insert_stmt = conn
+    let mut insert_stmt = conn
         .prepare(
             "INSERT INTO test_bench (name, age, email, score, description) VALUES (?, ?, ?, ?, ?)",
         )
@@ -86,7 +86,7 @@ async fn main() -> Result<()> {
         for (username, age, email, score, description) in rows.iter() {
             // let _row_span = tracing::trace_span!("row", row_id).entered();
             conn.exec_drop(
-                insert_stmt,
+                &mut insert_stmt,
                 (
                     username.as_str(),
                     *age,

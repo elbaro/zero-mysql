@@ -1,3 +1,4 @@
+use std::mem::MaybeUninit;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpStream, UnixStream};
 
@@ -53,6 +54,15 @@ impl Stream {
         }
     }
 
+    pub async fn read_buf_exact(&mut self, buf: &mut [MaybeUninit<u8>]) -> std::io::Result<()> {
+        match self {
+            Self::Tcp(r) => read_buf_exact_impl(r, buf).await,
+            #[cfg(feature = "tls")]
+            Self::Tls(r) => read_buf_exact_impl(r, buf).await,
+            Self::Unix(r) => read_buf_exact_impl(r, buf).await,
+        }
+    }
+
     pub async fn write_all(&mut self, buf: &[u8]) -> std::io::Result<()> {
         match self {
             Self::Tcp(r) => r.get_mut().write_all(buf).await,
@@ -70,4 +80,20 @@ impl Stream {
             Self::Unix(r) => r.get_mut().flush().await,
         }
     }
+}
+
+async fn read_buf_exact_impl<R: AsyncReadExt + Unpin>(
+    reader: &mut R,
+    mut buf: &mut [MaybeUninit<u8>],
+) -> std::io::Result<()> {
+    while !buf.is_empty() {
+        let n = reader.read_buf(&mut buf).await?;
+        if n == 0 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "failed to fill whole buffer",
+            ));
+        }
+    }
+    Ok(())
 }

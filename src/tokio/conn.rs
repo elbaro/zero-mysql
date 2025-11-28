@@ -263,9 +263,11 @@ impl Conn {
             let length = header.length();
             out.extend((length as u32).to_ne_bytes());
 
-            let last_offset = out.len();
-            out.resize(last_offset + length, 0);
-            self.stream.read_exact(&mut out[last_offset..]).await?;
+            out.reserve(length);
+            let spare = out.spare_capacity_mut();
+            self.stream.read_buf_exact(&mut spare[..length]).await?;
+            // SAFETY: read_buf_exact filled exactly `length` bytes
+            unsafe { out.set_len(out.len() + length) };
         }
 
         Ok(header.sequence_id)
@@ -506,9 +508,10 @@ async fn read_payload(reader: &mut Stream, buffer: &mut Vec<u8>) -> Result<u8> {
 
     buffer.reserve(length);
 
-    let start = buffer.len();
-    buffer.resize(start + length, 0);
-    reader.read_exact(&mut buffer[start..]).await?;
+    let spare = buffer.spare_capacity_mut();
+    reader.read_buf_exact(&mut spare[..length]).await?;
+    // SAFETY: read_buf_exact filled exactly `length` bytes
+    unsafe { buffer.set_len(length) };
 
     let mut current_length = length;
     while current_length == 0xFFFFFF {
@@ -517,9 +520,11 @@ async fn read_payload(reader: &mut Stream, buffer: &mut Vec<u8>) -> Result<u8> {
         current_length = packet_header.length();
         sequence_id = packet_header.sequence_id;
 
-        let prev_len = buffer.len();
-        buffer.resize(prev_len + current_length, 0);
-        reader.read_exact(&mut buffer[prev_len..]).await?;
+        buffer.reserve(current_length);
+        let spare = buffer.spare_capacity_mut();
+        reader.read_buf_exact(&mut spare[..current_length]).await?;
+        // SAFETY: read_buf_exact filled exactly `current_length` bytes
+        unsafe { buffer.set_len(buffer.len() + current_length) };
     }
 
     Ok(sequence_id)

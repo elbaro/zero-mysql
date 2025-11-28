@@ -12,14 +12,29 @@ pub struct User {
 }
 
 fn main() -> Result<()> {
-    tracy_client::Client::start();
-    use tracing_subscriber::layer::SubscriberExt;
-    let subscriber = tracing_subscriber::registry().with(tracing_tracy::TracyLayer::default());
-    tracing::subscriber::set_global_default(subscriber).unwrap();
+    {
+        use reqray::CallTreeCollector;
+        use tracing_subscriber::{fmt, prelude::*, util::SubscriberInitExt};
 
-    let connection_url =
+        let fmt_layer = fmt::layer().with_target(false);
+
+        tracing_subscriber::registry()
+            // -----------------------------------------------
+            .with(CallTreeCollector::default())
+            // -----------------------------------------------
+            .with(fmt_layer)
+            .init();
+    }
+
+    // tracy_client::Client::start();
+    // use tracing_subscriber::layer::SubscriberExt;
+    // let subscriber = tracing_subscriber::registry().with(tracing_tracy::TracyLayer::default());
+    // tracing::subscriber::set_global_default(subscriber).unwrap();
+
+    let url =
         std::env::var("DATABASE_URL").expect("DATABASE_URL must be set in order to run tests");
-    let pool = Pool::new(connection_url.as_str())?;
+    let url = format!("{url}?prefer_socket=false");
+    let pool = Pool::new(url.as_str())?;
     let mut conn = pool.get_conn()?;
 
     // Clear existing data
@@ -48,7 +63,7 @@ fn main() -> Result<()> {
     //     }
     // }
 
-    for iteration in 1..10 {
+    for iteration in 1.. {
         let iteration_start = std::time::Instant::now();
         for _ in 0..1000 {
             let rows: Vec<User> = conn.exec_map(
