@@ -150,7 +150,6 @@ impl<'h, 'stmt, H: BinaryResultSetHandler> BulkExec<'h, 'stmt, H> {
                         has_column_metadata,
                     } => {
                         let num_columns = column_count as usize;
-                        self.handler.resultset_start(num_columns)?;
 
                         if has_column_metadata {
                             // Server sent metadata, signal that we need to read N column packets
@@ -158,7 +157,8 @@ impl<'h, 'stmt, H: BinaryResultSetHandler> BulkExec<'h, 'stmt, H> {
                             Ok(Action::ReadColumnMetadata { num_columns })
                         } else {
                             // No metadata from server, use cached definitions
-                            if self.stmt.column_definitions().is_some() {
+                            if let Some(cache) = self.stmt.column_definitions() {
+                                self.handler.resultset_start(cache)?;
                                 self.state = BulkExecState::ReadingRows { num_columns };
                                 Ok(Action::NeedPacket(&mut buffer_set.read_buffer))
                             } else {
@@ -179,6 +179,7 @@ impl<'h, 'stmt, H: BinaryResultSetHandler> BulkExec<'h, 'stmt, H> {
                 )?;
 
                 // Cache the column definitions in the prepared statement
+                self.handler.resultset_start(column_defs.definitions())?;
                 self.stmt.set_column_definitions(column_defs);
 
                 // Move to reading rows
@@ -193,8 +194,7 @@ impl<'h, 'stmt, H: BinaryResultSetHandler> BulkExec<'h, 'stmt, H> {
                 match payload[0] {
                     0x00 => {
                         let row = read_binary_row(payload, *num_columns)?;
-                        let cols = self.stmt.column_definitions().ok_or(Error::InvalidPacket)?;
-                        self.handler.row(cols, &row)?;
+                        self.handler.row(&row)?;
                         Ok(Action::NeedPacket(&mut buffer_set.read_buffer))
                     }
                     0xFE => {

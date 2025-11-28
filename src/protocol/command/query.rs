@@ -132,7 +132,6 @@ impl<'h, H: TextResultSetHandler> Query<'h, H> {
                     }
                     QueryResponse::ResultSet { column_count } => {
                         let num_columns = column_count as usize;
-                        self.handler.resultset_start(num_columns)?;
                         self.state = QueryState::ReadingColumns { num_columns };
                         Ok(Action::ReadColumnMetadata { num_columns })
                     }
@@ -142,14 +141,12 @@ impl<'h, H: TextResultSetHandler> Query<'h, H> {
             QueryState::ReadingColumns { num_columns } => {
                 // Parse all column definitions from the buffer
                 // The buffer contains [len(u32)][payload][len(u32)][payload]...
-                let column_defs = ColumnDefinitions::new(*num_columns, buffer_set.column_definition_buffer.clone())?;
+                let column_defs = ColumnDefinitions::new(
+                    *num_columns,
+                    buffer_set.column_definition_buffer.clone(),
+                )?;
 
-                // Call handler for each column
-                for col in column_defs.definitions() {
-                    self.handler.col(col)?;
-                }
-
-                // Move to reading rows
+                self.handler.resultset_start(column_defs.definitions())?;
                 self.state = QueryState::ReadingRows;
                 Ok(Action::NeedPacket(&mut buffer_set.read_buffer))
             }

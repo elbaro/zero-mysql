@@ -2,8 +2,8 @@ use crate::constant::CommandByte;
 use crate::error::Result;
 use crate::protocol::command::ColumnDefinition;
 use crate::protocol::primitive::*;
-use crate::protocol::r#trait::{BinaryResultSetHandler, TextResultSetHandler};
 use crate::protocol::response::{OkPayload, OkPayloadBytes};
+use crate::protocol::r#trait::{BinaryResultSetHandler, TextResultSetHandler};
 use crate::protocol::{BinaryRowPayload, TextRowPayload};
 
 /// Write COM_QUIT command
@@ -67,11 +67,11 @@ impl BinaryResultSetHandler for DropHandler {
         Ok(())
     }
 
-    fn resultset_start(&mut self, _: usize) -> Result<()> {
+    fn resultset_start<'stmt>(&mut self, _: &'stmt [ColumnDefinition<'stmt>]) -> Result<()> {
         Ok(())
     }
 
-    fn row<'a>(&mut self, _: &[ColumnDefinition<'a>], _: &'a BinaryRowPayload<'a>) -> Result<()> {
+    fn row<'buf>(&mut self, _: &'buf BinaryRowPayload<'buf>) -> Result<()> {
         Ok(())
     }
 
@@ -91,11 +91,7 @@ impl TextResultSetHandler for DropHandler {
         Ok(())
     }
 
-    fn resultset_start(&mut self, _: usize) -> Result<()> {
-        Ok(())
-    }
-
-    fn col<'buffers>(&mut self, _: &ColumnDefinition<'buffers>) -> Result<()> {
+    fn resultset_start<'stmt>(&mut self, _: &[ColumnDefinition<'stmt>]) -> Result<()> {
         Ok(())
     }
 
@@ -133,14 +129,14 @@ impl<'a, H: BinaryResultSetHandler> BinaryResultSetHandler for FirstRowHandler<'
         self.inner.no_result_set(ok)
     }
 
-    fn resultset_start(&mut self, n: usize) -> Result<()> {
-        self.inner.resultset_start(n)
+    fn resultset_start<'stmt>(&mut self, cols: &'stmt [ColumnDefinition<'stmt>]) -> Result<()> {
+        self.inner.resultset_start(cols)
     }
 
-    fn row<'b>(&mut self, cols: &[ColumnDefinition<'b>], row: &'b BinaryRowPayload<'b>) -> Result<()> {
+    fn row<'b>(&mut self, row: &'b BinaryRowPayload<'b>) -> Result<()> {
         if !self.found_row {
             self.found_row = true;
-            self.inner.row(cols, row)
+            self.inner.row(row)
         } else {
             Ok(()) // Ignore subsequent rows
         }
