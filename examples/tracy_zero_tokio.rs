@@ -16,11 +16,7 @@ impl zero_mysql::protocol::r#trait::TextResultSetHandler for DropHandler {
         Ok(())
     }
 
-    fn resultset_start(&mut self, _num_columns: usize) -> Result<()> {
-        Ok(())
-    }
-
-    fn col<'buffers>(&mut self, _col: &ColumnDefinition<'buffers>) -> Result<()> {
+    fn resultset_start<'stmt>(&mut self, _cols: &'stmt [ColumnDefinition<'stmt>]) -> Result<()> {
         Ok(())
     }
 
@@ -33,15 +29,15 @@ impl zero_mysql::protocol::r#trait::TextResultSetHandler for DropHandler {
     }
 }
 
-#[tokio::main(flavor = "current_thread")]
-async fn main() -> Result<()> {
-    {
-        // tracy_client::Client::start();
-        // use tracing_subscriber::layer::SubscriberExt;
-        // let subscriber = tracing_subscriber::registry().with(tracing_tracy::TracyLayer::default());
-        // tracing::subscriber::set_global_default(subscriber).unwrap();
-    }
+fn main() -> Result<()> {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(async_main())
+}
 
+async fn async_main() -> Result<()> {
     let mut conn = Conn::new("mysql://test:1234@127.0.0.1/test").await?;
 
     {

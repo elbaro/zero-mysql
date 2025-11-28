@@ -288,7 +288,8 @@ impl<'h, 'stmt, H: BinaryResultSetHandler> Exec<'h, 'stmt, H> {
                 match payload[0] {
                     0x00 => {
                         let row = read_binary_row(payload, *num_columns)?;
-                        self.handler.row(&row)?;
+                        let cols = self.stmt.column_definitions().ok_or(Error::InvalidPacket)?;
+                        self.handler.row(cols, row)?;
                         Ok(Action::NeedPacket(&mut buffer_set.read_buffer))
                     }
                     0xFE => {

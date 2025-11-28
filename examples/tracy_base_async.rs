@@ -4,15 +4,15 @@ use mysql_async::{prelude::*, *};
 // static GLOBAL: tracy_client::ProfiledAllocator<std::alloc::System> =
 //     tracy_client::ProfiledAllocator::new(std::alloc::System, 100);
 
-#[tokio::main(flavor = "current_thread")]
-async fn main() -> Result<()> {
-    {
-        // tracy_client::Client::start();
-        // use tracing_subscriber::layer::SubscriberExt;
-        // let subscriber = tracing_subscriber::registry().with(tracing_tracy::TracyLayer::default());
-        // tracing::subscriber::set_global_default(subscriber).unwrap();
-    }
+fn main() -> Result<()> {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(async_main())
+}
 
+async fn async_main() -> Result<()> {
     let pool = Pool::new("mysql://test:1234@127.0.0.1/test?prefer_socket=false");
     let mut conn = pool.get_conn().await?;
 

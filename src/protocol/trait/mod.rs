@@ -26,8 +26,8 @@ pub trait RowDecoder<'a> {
 /// Trait that defines event callbacks for binary protocol result sets
 pub trait BinaryResultSetHandler {
     fn no_result_set(&mut self, ok: OkPayloadBytes) -> Result<()>;
-    fn resultset_start<'stmt>(&mut self, cols: &'stmt [ColumnDefinition<'stmt>]) -> Result<()>;
-    fn row<'buffer>(&mut self, row: &'buffer BinaryRowPayload<'buffer>) -> Result<()>;
+    fn resultset_start(&mut self, cols: &[ColumnDefinition<'_>]) -> Result<()>;
+    fn row(&mut self, cols: &[ColumnDefinition<'_>], row: BinaryRowPayload<'_>) -> Result<()>;
     fn resultset_end(&mut self, eof: OkPayloadBytes) -> Result<()>;
 }
 

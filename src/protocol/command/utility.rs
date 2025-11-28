@@ -67,11 +67,11 @@ impl BinaryResultSetHandler for DropHandler {
         Ok(())
     }
 
-    fn resultset_start<'stmt>(&mut self, _: &'stmt [ColumnDefinition<'stmt>]) -> Result<()> {
+    fn resultset_start(&mut self, _: &[ColumnDefinition<'_>]) -> Result<()> {
         Ok(())
     }
 
-    fn row<'buf>(&mut self, _: &'buf BinaryRowPayload<'buf>) -> Result<()> {
+    fn row(&mut self, _: &[ColumnDefinition<'_>], _: BinaryRowPayload<'_>) -> Result<()> {
         Ok(())
     }
 
@@ -129,14 +129,14 @@ impl<'a, H: BinaryResultSetHandler> BinaryResultSetHandler for FirstRowHandler<'
         self.inner.no_result_set(ok)
     }
 
-    fn resultset_start<'stmt>(&mut self, cols: &'stmt [ColumnDefinition<'stmt>]) -> Result<()> {
+    fn resultset_start(&mut self, cols: &[ColumnDefinition<'_>]) -> Result<()> {
         self.inner.resultset_start(cols)
     }
 
-    fn row<'b>(&mut self, row: &'b BinaryRowPayload<'b>) -> Result<()> {
+    fn row(&mut self, cols: &[ColumnDefinition<'_>], row: BinaryRowPayload<'_>) -> Result<()> {
         if !self.found_row {
             self.found_row = true;
-            self.inner.row(row)
+            self.inner.row(cols, row)
         } else {
             Ok(()) // Ignore subsequent rows
         }

@@ -24,7 +24,6 @@ impl<'a> ColumnDefinitionBytes<'a> {
 /// The column definition parsed from `ColumnDefinitionBytes`
 #[derive(Debug, Clone)]
 pub struct ColumnDefinition<'a> {
-    // pub catalog: &'a [u8], // always 'def'
     pub schema: &'a [u8],
     pub table_alias: &'a [u8],
     pub table_original: &'a [u8],
@@ -256,11 +255,9 @@ mod tests {
         assert_eq!(type_and_flags.column_type, ColumnType::MYSQL_TYPE_LONG);
         assert!(type_and_flags.flags.contains(ColumnFlags::NOT_NULL_FLAG));
         assert!(type_and_flags.flags.contains(ColumnFlags::PRI_KEY_FLAG));
-        assert!(
-            type_and_flags
-                .flags
-                .contains(ColumnFlags::AUTO_INCREMENT_FLAG)
-        );
+        assert!(type_and_flags
+            .flags
+            .contains(ColumnFlags::AUTO_INCREMENT_FLAG));
         assert!(type_and_flags.flags.contains(ColumnFlags::PART_KEY_FLAG));
     }
 

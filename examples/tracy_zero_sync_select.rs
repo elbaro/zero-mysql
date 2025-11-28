@@ -34,18 +34,14 @@ impl BinaryResultSetHandler for UsersHandler {
     }
 
     #[inline(always)]
-    fn resultset_start(&mut self, _num_columns: usize) -> zero_mysql::error::Result<()> {
+    fn resultset_start(&mut self, _cols: &[ColumnDefinition<'_>]) -> zero_mysql::error::Result<()> {
         Ok(())
     }
 
     #[inline(always)]
-    fn row<'a>(
-        &mut self,
-        cols: &[ColumnDefinition<'a>],
-        row: &'a BinaryRowPayload<'a>,
-    ) -> zero_mysql::error::Result<()> {
+    fn row(&mut self, cols: &[ColumnDefinition<'_>], row: BinaryRowPayload<'_>) -> zero_mysql::error::Result<()> {
         let mut bytes = row.values();
-        let mut values: [std::mem::MaybeUninit<Value<'a>>; 3] =
+        let mut values: [std::mem::MaybeUninit<Value<'_>>; 3] =
             [const { std::mem::MaybeUninit::uninit() }; 3];
 
         for i in 0..cols.len() {
@@ -96,19 +92,19 @@ impl BinaryResultSetHandler for UsersHandler {
 }
 
 fn main() -> Result<()> {
-    {
-        use reqray::CallTreeCollector;
-        use tracing_subscriber::{fmt, prelude::*, util::SubscriberInitExt};
+    // {
+    //     use reqray::CallTreeCollector;
+    //     use tracing_subscriber::{fmt, prelude::*, util::SubscriberInitExt};
 
-        let fmt_layer = fmt::layer().with_target(false);
+    //     let fmt_layer = fmt::layer().with_target(false);
 
-        tracing_subscriber::registry()
-            // -----------------------------------------------
-            .with(CallTreeCollector::default())
-            // -----------------------------------------------
-            .with(fmt_layer)
-            .init();
-    }
+    //     tracing_subscriber::registry()
+    //         // -----------------------------------------------
+    //         .with(CallTreeCollector::default())
+    //         // -----------------------------------------------
+    //         .with(fmt_layer)
+    //         .init();
+    // }
 
     // tracy_client::Client::start();
     // use tracing_subscriber::layer::SubscriberExt;

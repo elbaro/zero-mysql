@@ -3,39 +3,6 @@ name = "zero-mysql"
 version = "0.1.0"
 edition = "2024"
 
-[[bin]]
-name = "tracy-zero-sync"
-path = "bin/tracy_zero_sync.rs"
-required-features = ["dev"]
-[[bin]]
-name = "tracy-zero-tokio"
-path = "bin/tracy_zero_tokio.rs"
-required-features = ["dev"]
-[[bin]]
-name = "tracy-base-sync"
-path = "bin/tracy_base_sync.rs"
-required-features = ["dev"]
-[[bin]]
-name = "tracy-base-async"
-path = "bin/tracy_base_async.rs"
-required-features = ["dev"]
-[[bin]]
-name = "tracy-zero-sync-select"
-path = "bin/tracy_zero_sync_select.rs"
-required-features = ["dev"]
-[[bin]]
-name = "tracy-base-sync-select"
-path = "bin/tracy_base_sync_select.rs"
-required-features = ["dev"]
-# [[bin]]
-# name = "bench-write-payload"
-# path = "bin/bench_write_payload.rs"
-# required-features = ["dev"]
-# [[bin]]
-# name = "test-multi-resultset"
-# path = "bin/test-multi-resultset.rs"
-# required-features = ["dev"]
-
 [[bench]]
 name = "zero_mysql_benches"
 harness = false
@@ -46,10 +13,6 @@ harness = false
 required-features = ["dev"]
 
 [dependencies]
-tracing = { version = "*", features = ["release_max_level_warn"] }
-# tracing = { version = "*" }
-tracy-client = { version = "=0.18.0", optional = true }
-tracing-subscriber = { version = "*", optional = true }
 thiserror = "2.0"
 tokio = { version = "1", features = ["io-util", "net"], optional = true }
 native-tls = { version = "0.2", optional = true }
@@ -59,31 +22,28 @@ sha1 = "0.10"
 sha2 = "0.10"
 url = "2.5"
 bitflags = "2.6"
-mysql = { path = "../rust-mysql-simple", optional = true }
-mysql_async = { version = "*", optional = true }
-tracing-tracy = { version = "*", optional = true }
-reqray = { version = "*", optional = true }
 log = "0.4.28"
 auto_impl = "1.3.0"
+tracing = { version = "*", features = ["release_max_level_warn"] }
+
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
-dotenvy = "0.15"
+pretty_assertions = "*"
+# tracing = { version = "*" }
+tracy-client = { version = "=0.18.0" }
+tracing-subscriber = { version = "*" }
+# mysql = { path = "../rust-mysql-simple", optional = true }
+mysql = { version = "*" }
+mysql_async = { version = "*" }
+tracing-tracy = { version = "*" }
+reqray = { version = "*" }
 
 [features]
 default = ["sync", "tokio"]
 sync = []
 tokio = ["dep:tokio"]
 tls = ["dep:native-tls", "dep:tokio-native-tls"]
-dev = [
-  "tokio/full",
-  "tracy-client",
-  "tracing-tracy",
-  "tracing-subscriber",
-  "mysql",
-  "mysql_async",
-  "dep:reqray",
-]
 
 [profile.bench]
 debug = true
