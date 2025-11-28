@@ -251,6 +251,7 @@ impl Conn {
         }
     }
 
+    #[tracing::instrument(skip_all)]
     pub fn exec<P, H>(&mut self, statement_id: u32, params: P, handler: &mut H) -> Result<()>
     where
         P: Params,

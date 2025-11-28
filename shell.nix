@@ -3,12 +3,12 @@
 }:
 
 pkgs.mkShell {
-  buildInputs = [
-    pkgs.openssl
-    pkgs.pkg-config
-  ];
+  buildInputs = with pkgs; [
+    # For criterion benchmarks (plots)
+    gnuplot
 
-  shellHook = ''
-    echo "zero-mysql development environment"
-  '';
+    # SSL support
+    openssl
+    pkg-config
+  ];
 }

@@ -1,12 +1,12 @@
-use std::hint::cold_path;
+use std::hint::{cold_path, unlikely};
 
 use crate::error::{Error, Result};
-use zerocopy::FromBytes;
 use zerocopy::byteorder::little_endian::{U16 as U16LE, U32 as U32LE, U64 as U64LE};
+use zerocopy::FromBytes;
 
 /// Read 1-byte integer
 pub fn read_int_1(data: &[u8]) -> Result<(u8, &[u8])> {
-    if data.is_empty() {
+    if unlikely(data.is_empty()) {
         return Err(Error::InvalidPacket);
     }
     Ok((data[0], &data[1..]))
@@ -14,7 +14,7 @@ pub fn read_int_1(data: &[u8]) -> Result<(u8, &[u8])> {
 
 /// Read 2-byte little-endian integer
 pub fn read_int_2(data: &[u8]) -> Result<(u16, &[u8])> {
-    if data.len() < 2 {
+    if unlikely(data.len() < 2) {
         return Err(Error::InvalidPacket);
     }
     let value = U16LE::ref_from_bytes(&data[..2])
@@ -25,7 +25,7 @@ pub fn read_int_2(data: &[u8]) -> Result<(u16, &[u8])> {
 
 /// Read 3-byte little-endian integer
 pub fn read_int_3(data: &[u8]) -> Result<(u32, &[u8])> {
-    if data.len() < 3 {
+    if unlikely(data.len() < 3) {
         return Err(Error::InvalidPacket);
     }
     let value = u32::from_le_bytes([data[0], data[1], data[2], 0]);
@@ -34,7 +34,7 @@ pub fn read_int_3(data: &[u8]) -> Result<(u32, &[u8])> {
 
 /// Read 4-byte little-endian integer
 pub fn read_int_4(data: &[u8]) -> Result<(u32, &[u8])> {
-    if data.len() < 4 {
+    if unlikely(data.len() < 4) {
         return Err(Error::InvalidPacket);
     }
     let value = U32LE::ref_from_bytes(&data[..4])
@@ -45,7 +45,7 @@ pub fn read_int_4(data: &[u8]) -> Result<(u32, &[u8])> {
 
 /// Read 6-byte little-endian integer
 pub fn read_int_6(data: &[u8]) -> Result<(u64, &[u8])> {
-    if data.len() < 6 {
+    if unlikely(data.len() < 6) {
         return Err(Error::InvalidPacket);
     }
     let value = u64::from_le_bytes([data[0], data[1], data[2], data[3], data[4], data[5], 0, 0]);
@@ -54,7 +54,7 @@ pub fn read_int_6(data: &[u8]) -> Result<(u64, &[u8])> {
 
 /// Read 8-byte little-endian integer
 pub fn read_int_8(data: &[u8]) -> Result<(u64, &[u8])> {
-    if data.len() < 8 {
+    if unlikely(data.len() < 8) {
         return Err(Error::InvalidPacket);
     }
     let value = U64LE::ref_from_bytes(&data[..8])
@@ -88,7 +88,7 @@ pub fn read_int_lenenc(data: &[u8]) -> Result<(u64, &[u8])> {
 
 /// Read fixed-length string
 pub fn read_string_fix(data: &[u8], len: usize) -> Result<(&[u8], &[u8])> {
-    if data.len() < len {
+    if unlikely(data.len() < len) {
         return Err(Error::InvalidPacket);
     }
     Ok((&data[..len], &data[len..]))
@@ -111,32 +111,32 @@ pub fn read_string_lenenc(data: &[u8]) -> Result<(&[u8], &[u8])> {
     read_string_fix(rest, len as usize)
 }
 
-/// Read remaining data as string
-pub fn read_string_eof(data: &[u8]) -> &[u8] {
-    data
-}
-
 /// Write 1-byte integer
+#[inline]
 pub fn write_int_1(out: &mut Vec<u8>, value: u8) {
     out.push(value);
 }
 
 /// Write 2-byte little-endian integer
+#[inline]
 pub fn write_int_2(out: &mut Vec<u8>, value: u16) {
     out.extend_from_slice(&value.to_le_bytes());
 }
 
 /// Write 3-byte little-endian integer
+#[inline]
 pub fn write_int_3(out: &mut Vec<u8>, value: u32) {
     out.extend_from_slice(&value.to_le_bytes()[..3]);
 }
 
 /// Write 4-byte little-endian integer
+#[inline]
 pub fn write_int_4(out: &mut Vec<u8>, value: u32) {
     out.extend_from_slice(&value.to_le_bytes());
 }
 
 /// Write 8-byte little-endian integer
+#[inline]
 pub fn write_int_8(out: &mut Vec<u8>, value: u64) {
     out.extend_from_slice(&value.to_le_bytes());
 }
@@ -158,23 +158,27 @@ pub fn write_int_lenenc(out: &mut Vec<u8>, value: u64) {
 }
 
 /// Write fixed-length bytes
+#[inline]
 pub fn write_bytes_fix(out: &mut Vec<u8>, data: &[u8]) {
     out.extend_from_slice(data);
 }
 
 /// Write null-terminated string
+#[inline]
 pub fn write_string_null(out: &mut Vec<u8>, s: &str) {
     out.extend_from_slice(s.as_bytes());
     out.push(0);
 }
 
 /// Write length-encoded string
+#[inline]
 pub fn write_string_lenenc(out: &mut Vec<u8>, s: &str) {
     write_int_lenenc(out, s.len() as u64);
     out.extend_from_slice(s.as_bytes());
 }
 
 /// Write length-encoded bytes
+#[inline]
 pub fn write_bytes_lenenc(out: &mut Vec<u8>, data: &[u8]) {
     write_int_lenenc(out, data.len() as u64);
     out.extend_from_slice(data);

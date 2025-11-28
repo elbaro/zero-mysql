@@ -34,6 +34,14 @@ name = "tracy-base-async"
 path = "bin/tracy_base_async.rs"
 required-features = ["dev"]
 [[bin]]
+name = "tracy-zero-sync-select"
+path = "bin/tracy_zero_sync_select.rs"
+required-features = ["dev"]
+[[bin]]
+name = "tracy-base-sync-select"
+path = "bin/tracy_base_sync_select.rs"
+required-features = ["dev"]
+[[bin]]
 name = "bench-write-payload"
 path = "bin/bench_write_payload.rs"
 required-features = ["dev"]
@@ -42,9 +50,18 @@ name = "test-multi-resultset"
 path = "bin/test-multi-resultset.rs"
 required-features = ["dev"]
 
+[[bench]]
+name = "zero_mysql_benches"
+harness = false
+
+[[bench]]
+name = "mysql_benches"
+harness = false
+required-features = ["dev"]
+
 [dependencies]
-tracing = { version = "*", features = ["release_max_level_warn"] }
-# tracing = { version = "*" }
+# tracing = { version = "*", features = ["release_max_level_warn"] }
+tracing = { version = "*" }
 tracy-client = { version = "=0.18.0", optional = true }
 tracing-subscriber = { version = "*", optional = true }
 thiserror = "2.0"
@@ -56,11 +73,15 @@ sha1 = "0.10"
 sha2 = "0.10"
 url = "2.5"
 bitflags = "2.6"
-mysql = { version = "*", optional = true }
+mysql = { path = "../rust-mysql-simple", optional = true }
 mysql_async = { version = "*", optional = true }
 tracing-tracy = { version = "*", optional = true }
 log = "0.4.28"
 auto_impl = "1.3.0"
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+dotenvy = "0.15"
 
 [features]
 default = ["sync", "tokio"]
@@ -75,3 +96,9 @@ dev = [
   "mysql",
   "mysql_async",
 ]
+
+[profile.bench]
+debug = true
+
+[profile.release]
+debug = true
