@@ -1,7 +1,7 @@
 pub mod param;
 
 use crate::error::Result;
-use crate::protocol::command::ColumnDefinitionBytes;
+use crate::protocol::command::ColumnDefinition;
 use crate::protocol::response::OkPayloadBytes;
 use crate::protocol::{BinaryRowPayload, TextRowPayload};
 
@@ -24,15 +24,10 @@ pub trait RowDecoder<'a> {
 }
 
 /// Trait that defines event callbacks for binary protocol result sets
-///
-/// The lifetime parameter `'buffers` is bound to the BufferSet, allowing handlers
-/// to store references to column definitions without cloning.
 pub trait BinaryResultSetHandler {
     fn no_result_set(&mut self, ok: OkPayloadBytes) -> Result<()>;
-    // fn err(&mut self, err: &ErrPayload) -> Result<()>;
     fn resultset_start(&mut self, num_columns: usize) -> Result<()>;
-    fn col<'buffers>(&mut self, col: ColumnDefinitionBytes<'buffers>) -> Result<()>;
-    fn row(&mut self, row: &BinaryRowPayload) -> Result<()>;
+    fn row<'a>(&mut self, cols: &[ColumnDefinition<'a>], row: &'a BinaryRowPayload<'a>) -> Result<()>;
     fn resultset_end(&mut self, eof: OkPayloadBytes) -> Result<()>;
 }
 
@@ -43,7 +38,7 @@ pub trait BinaryResultSetHandler {
 pub trait TextResultSetHandler {
     fn no_result_set(&mut self, ok: OkPayloadBytes) -> Result<()>;
     fn resultset_start(&mut self, num_columns: usize) -> Result<()>;
-    fn col<'buffers>(&mut self, col: ColumnDefinitionBytes<'buffers>) -> Result<()>;
+    fn col<'buffers>(&mut self, col: &ColumnDefinition<'buffers>) -> Result<()>;
     fn row(&mut self, row: &TextRowPayload) -> Result<()>;
     fn resultset_end(&mut self, eof: OkPayloadBytes) -> Result<()>;
 }

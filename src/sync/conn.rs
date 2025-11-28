@@ -1,26 +1,27 @@
-use crate::protocol::command::utility::FirstRowHandler;
-use zerocopy::{FromBytes, IntoBytes};
-
+use crate::PreparedStatement;
 use crate::buffer::BufferSet;
 use crate::constant::CapabilityFlags;
 use crate::error::{Error, Result};
-use crate::protocol::command::bulk_exec::{write_bulk_execute, BulkExec, BulkFlags, BulkParamsSet};
-use crate::protocol::command::prepared::write_execute;
+use crate::protocol::command::Action;
+use crate::protocol::command::bulk_exec::{BulkExec, BulkFlags, BulkParamsSet, write_bulk_execute};
 use crate::protocol::command::prepared::Exec;
+use crate::protocol::command::prepared::write_execute;
 use crate::protocol::command::prepared::{read_prepare_ok, write_prepare};
-use crate::protocol::command::query::write_query;
 use crate::protocol::command::query::Query;
+use crate::protocol::command::query::write_query;
+use crate::protocol::command::utility::DropHandler;
+use crate::protocol::command::utility::FirstRowHandler;
 use crate::protocol::command::utility::write_ping;
 use crate::protocol::command::utility::write_reset_connection;
-use crate::protocol::command::utility::DropHandler;
-use crate::protocol::command::Action;
 use crate::protocol::connection::{Handshake, HandshakeResult, InitialHandshake};
 use crate::protocol::packet::PacketHeader;
-use crate::protocol::r#trait::{param::Params, BinaryResultSetHandler, TextResultSetHandler};
 use crate::protocol::response::ErrPayloadBytes;
+use crate::protocol::r#trait::{BinaryResultSetHandler, TextResultSetHandler, param::Params};
 use std::hint::unlikely;
 use std::net::TcpStream;
 use std::os::unix::net::UnixStream;
+use zerocopy::FromZeros;
+use zerocopy::{FromBytes, IntoBytes};
 
 use super::stream::Stream;
 
@@ -29,6 +30,7 @@ pub struct Conn {
     buffer_set: BufferSet,
     initial_handshake: InitialHandshake,
     capability_flags: CapabilityFlags,
+    mariadb_capabilities: crate::constant::MariadbCapabilityFlags,
     pub(crate) in_transaction: bool,
 }
 
@@ -146,6 +148,7 @@ impl Conn {
             buffer_set,
             initial_handshake: initial_handshake.unwrap(),
             capability_flags,
+            mariadb_capabilities: crate::constant::MARIADB_CAPABILITIES_ENABLED,
             in_transaction: false,
         })
     }
@@ -203,7 +206,9 @@ impl Conn {
     }
 
     /// Returns `Ok(statement_id) on success
-    pub fn prepare(&mut self, sql: &str) -> Result<u32> {
+    pub fn prepare(&mut self, sql: &str) -> Result<PreparedStatement> {
+        use crate::protocol::command::ColumnDefinitions;
+
         self.buffer_set.read_buffer.clear();
 
         write_prepare(self.buffer_set.new_write_buffer(), sql);
@@ -222,23 +227,44 @@ impl Conn {
         let num_params = prepare_ok.num_params();
         let num_columns = prepare_ok.num_columns();
 
+        // Skip param definitions (we don't cache them)
         if num_params > 0 {
             for _ in 0..num_params {
                 let _ = read_payload(&mut self.stream, &mut self.buffer_set.read_buffer)?;
             }
         }
 
-        if num_columns > 0 {
-            for _ in 0..num_columns {
-                let _ = read_payload(&mut self.stream, &mut self.buffer_set.read_buffer)?;
-            }
-        }
+        // Read and cache column definitions for MARIADB_CLIENT_CACHE_METADATA support
+        let column_definitions = if num_columns > 0 {
+            read_column_definition_packets(
+                &mut self.stream,
+                &mut self.buffer_set.column_definition_buffer,
+                num_columns as usize,
+            )?;
+            Some(ColumnDefinitions::new(
+                num_columns as usize,
+                std::mem::take(&mut self.buffer_set.column_definition_buffer),
+            )?)
+        } else {
+            None
+        };
 
-        Ok(statement_id)
+        let mut stmt = PreparedStatement::new(statement_id);
+        if let Some(col_defs) = column_definitions {
+            stmt.set_column_definitions(col_defs);
+        }
+        Ok(stmt)
     }
 
-    fn drive_exec<H: BinaryResultSetHandler>(&mut self, handler: &mut H) -> Result<()> {
-        let mut exec = Exec::new(handler);
+    fn drive_exec<'conn, 'stmt, H: BinaryResultSetHandler>(
+        &'conn mut self,
+        stmt: &'stmt mut PreparedStatement,
+        handler: &mut H,
+    ) -> Result<()> {
+        let cache_metadata = self
+            .mariadb_capabilities
+            .contains(crate::constant::MariadbCapabilityFlags::MARIADB_CLIENT_CACHE_METADATA);
+        let mut exec = Exec::new(handler, stmt, cache_metadata);
 
         loop {
             match exec.step(&mut self.buffer_set)? {
@@ -246,24 +272,43 @@ impl Conn {
                     buffer.clear();
                     let _ = read_payload(&mut self.stream, buffer)?;
                 }
+                Action::ReadColumnMetadata { num_columns } => {
+                    read_column_definition_packets(
+                        &mut self.stream,
+                        &mut self.buffer_set.column_definition_buffer,
+                        num_columns,
+                    )?;
+                }
                 Action::Finished => return Ok(()),
             }
         }
     }
 
     #[tracing::instrument(skip_all)]
-    pub fn exec<P, H>(&mut self, statement_id: u32, params: P, handler: &mut H) -> Result<()>
+    pub fn exec<'conn, P, H>(
+        &'conn mut self,
+        stmt: &'conn mut PreparedStatement,
+        params: P,
+        handler: &mut H,
+    ) -> Result<()>
     where
         P: Params,
         H: BinaryResultSetHandler,
     {
-        write_execute(self.buffer_set.new_write_buffer(), statement_id, params)?;
+        write_execute(self.buffer_set.new_write_buffer(), stmt.id(), params)?;
         self.write_payload()?;
-        self.drive_exec(handler)
+        self.drive_exec(stmt, handler)
     }
 
-    fn drive_bulk_exec<H: BinaryResultSetHandler>(&mut self, handler: &mut H) -> Result<()> {
-        let mut bulk_exec = BulkExec::new(handler);
+    fn drive_bulk_exec<'conn, 'stmt, H: BinaryResultSetHandler>(
+        &'conn mut self,
+        stmt: &'stmt mut PreparedStatement,
+        handler: &mut H,
+    ) -> Result<()> {
+        let cache_metadata = self
+            .mariadb_capabilities
+            .contains(crate::constant::MariadbCapabilityFlags::MARIADB_CLIENT_CACHE_METADATA);
+        let mut bulk_exec = BulkExec::new(handler, stmt, cache_metadata);
 
         loop {
             match bulk_exec.step(&mut self.buffer_set)? {
@@ -271,15 +316,22 @@ impl Conn {
                     buffer.clear();
                     let _ = read_payload(&mut self.stream, buffer)?;
                 }
+                Action::ReadColumnMetadata { num_columns } => {
+                    read_column_definition_packets(
+                        &mut self.stream,
+                        &mut self.buffer_set.column_definition_buffer,
+                        num_columns,
+                    )?;
+                }
                 Action::Finished => return Ok(()),
             }
         }
     }
 
     /// Execute a bulk prepared statement with a result set handler
-    pub fn exec_bulk<P, I, H>(
-        &mut self,
-        statement_id: u32,
+    pub fn exec_bulk<'conn, 'stmt, P, I, H>(
+        &'conn mut self,
+        stmt: &'stmt mut PreparedStatement,
         params: P,
         flags: BulkFlags,
         handler: &mut H,
@@ -290,21 +342,16 @@ impl Conn {
         H: BinaryResultSetHandler,
     {
         if !self.is_mariadb() {
-            // Fallback to multiple exec_drop for non-MariaDB servers
+            // Fallback to multiple exec_drop 'conn, for non-MariaDB servers'conn
             for param in params {
-                self.exec_drop(statement_id, param)?;
+                self.exec_drop(stmt, param)?;
             }
             Ok(())
         } else {
             // Use MariaDB bulk execute protocol
-            write_bulk_execute(
-                self.buffer_set.new_write_buffer(),
-                statement_id,
-                params,
-                flags,
-            )?;
+            write_bulk_execute(self.buffer_set.new_write_buffer(), stmt.id(), params, flags)?;
             self.write_payload()?;
-            self.drive_bulk_exec(handler)
+            self.drive_bulk_exec(stmt, handler)
         }
     }
 
@@ -314,9 +361,9 @@ impl Conn {
     /// * `Ok(true)` - First row was found and processed
     /// * `Ok(false)` - No rows in result set
     /// * `Err(Error)` - Query execution or handler callback failed
-    pub fn exec_first<P, H>(
-        &mut self,
-        statement_id: u32,
+    pub fn exec_first<'conn, P, H>(
+        &'conn mut self,
+        stmt: &'conn mut PreparedStatement,
         params: P,
         handler: &mut H,
     ) -> Result<bool>
@@ -324,22 +371,26 @@ impl Conn {
         P: Params,
         H: BinaryResultSetHandler,
     {
-        write_execute(self.buffer_set.new_write_buffer(), statement_id, params)?;
+        write_execute(self.buffer_set.new_write_buffer(), stmt.id(), params)?;
         self.write_payload()?;
         let mut first_row_handler = FirstRowHandler::new(handler);
-        self.drive_exec(&mut first_row_handler)?;
+        self.drive_exec(stmt, &mut first_row_handler)?;
         Ok(first_row_handler.found_row)
     }
 
     /// Execute a prepared statement and discard all results
     #[tracing::instrument(skip_all)]
-    pub fn exec_drop<P>(&mut self, statement_id: u32, params: P) -> Result<()>
+    pub fn exec_drop<'conn, 'stmt, P>(
+        &'conn mut self,
+        stmt: &'stmt mut PreparedStatement,
+        params: P,
+    ) -> Result<()>
     where
         P: Params,
     {
-        write_execute(self.buffer_set.new_write_buffer(), statement_id, params)?;
+        write_execute(self.buffer_set.new_write_buffer(), stmt.id(), params)?;
         self.write_payload()?;
-        self.drive_exec(&mut DropHandler::new())
+        self.drive_exec(stmt, &mut DropHandler::new())
     }
 
     fn drive_query<H: TextResultSetHandler>(&mut self, handler: &mut H) -> Result<()> {
@@ -350,6 +401,13 @@ impl Conn {
                 Action::NeedPacket(buffer) => {
                     buffer.clear();
                     let _ = read_payload(&mut self.stream, buffer)?;
+                }
+                Action::ReadColumnMetadata { num_columns } => {
+                    read_column_definition_packets(
+                        &mut self.stream,
+                        &mut self.buffer_set.column_definition_buffer,
+                        num_columns,
+                    )?;
                 }
                 Action::Finished => return Ok(()),
             }
@@ -433,12 +491,10 @@ impl Conn {
     }
 }
 
-/// Read a complete MySQL payload, concatenating packets if they span multiple 16MB chunks
+/// Read a complete MySQL payload, concatenating payloads if they span multiple 16MB chunks
 /// Returns the sequence_id of the last packet read.
 #[tracing::instrument(skip_all)]
 fn read_payload(reader: &mut Stream, buffer: &mut Vec<u8>) -> Result<u8> {
-    use zerocopy::FromZeros;
-
     buffer.clear();
 
     let mut header = PacketHeader::new_zeroed();
@@ -468,6 +524,29 @@ fn read_payload(reader: &mut Stream, buffer: &mut Vec<u8>) -> Result<u8> {
     }
 
     Ok(sequence_id)
+}
+
+#[tracing::instrument(skip_all)]
+fn read_column_definition_packets(
+    reader: &mut Stream,
+    out: &mut Vec<u8>,
+    num_columns: usize,
+) -> Result<u8> {
+    out.clear();
+    let mut header = PacketHeader::new_zeroed();
+
+    // For each column, write [4 bytes len][payload]
+    for _ in 0..num_columns {
+        reader.read_exact(header.as_mut_bytes())?;
+        let length = header.length();
+        out.extend((length as u32).to_ne_bytes());
+
+        let last_offset = out.len();
+        out.resize(last_offset + length, 0);
+        reader.read_exact(&mut out[last_offset..])?;
+    }
+
+    Ok(header.sequence_id)
 }
 
 fn write_handshake_payload(

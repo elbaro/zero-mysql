@@ -1,5 +1,5 @@
 use zero_mysql::error::Result;
-use zero_mysql::protocol::command::ColumnTypeAndFlags;
+use zero_mysql::protocol::command::ColumnDefinition;
 use zero_mysql::protocol::r#trait::BinaryResultSetHandler;
 use zero_mysql::protocol::response::OkPayloadBytes;
 use zero_mysql::protocol::value::Value;
@@ -18,18 +18,12 @@ pub struct User {
 
 // Handler for collecting users
 struct UsersHandler {
-    cols: Vec<ColumnTypeAndFlags>,
     users: Vec<User>,
-    buf: Vec<Value<'static>>,
 }
 
 impl UsersHandler {
     fn new() -> Self {
-        Self {
-            cols: Vec::new(),
-            users: Vec::new(),
-            buf: Vec::new(),
-        }
+        Self { users: Vec::new() }
     }
 }
 
@@ -40,36 +34,26 @@ impl BinaryResultSetHandler for UsersHandler {
     }
 
     #[inline(always)]
-    fn resultset_start(&mut self, num_columns: usize) -> zero_mysql::error::Result<()> {
-        self.cols.clear();
-        if self.cols.capacity() < num_columns {
-            self.cols.reserve(num_columns - self.cols.capacity());
-        }
+    fn resultset_start(&mut self, _num_columns: usize) -> zero_mysql::error::Result<()> {
         Ok(())
     }
 
     #[inline(always)]
-    fn col<'buffers>(
+    fn row<'a>(
         &mut self,
-        col: zero_mysql::protocol::command::ColumnDefinitionBytes<'buffers>,
+        cols: &[ColumnDefinition<'a>],
+        row: &'a BinaryRowPayload<'a>,
     ) -> zero_mysql::error::Result<()> {
-        self.cols.push(col.tail()?.type_and_flags()?);
-        Ok(())
-    }
-
-    #[inline(always)]
-    fn row<'a>(&mut self, row: &'a BinaryRowPayload) -> zero_mysql::error::Result<()> {
         let mut bytes = row.values();
-        // let values: &mut Vec<Value<'_>> = unsafe { std::mem::transmute::<_, _>(&mut self.buf) };
-        // values.clear();
         let mut values: [std::mem::MaybeUninit<Value<'a>>; 3] =
             [const { std::mem::MaybeUninit::uninit() }; 3];
 
-        for i in 0..self.cols.len() {
+        for i in 0..cols.len() {
             if row.null_bitmap().is_null(i) {
                 values[i].write(Value::Null);
             } else {
-                let (value, remaining) = Value::parse(&self.cols[i], bytes)?;
+                let type_and_flags = cols[i].tail.type_and_flags()?;
+                let (value, remaining) = Value::parse(&type_and_flags, bytes)?;
                 values[i].write(value);
                 bytes = remaining;
             }
@@ -125,8 +109,8 @@ fn main() -> Result<()> {
     // conn.query_drop("TRUNCATE TABLE comments")?;
     // conn.query_drop("TRUNCATE TABLE posts")?;
     // conn.query_drop("TRUNCATE TABLE users")?;
-    let insert_stmt = conn.prepare("INSERT INTO users (name, hair_color) VALUES (?, ?)")?;
-    let select_stmt = conn.prepare("SELECT id, name, hair_color FROM users")?;
+    let mut _insert_stmt = conn.prepare("INSERT INTO users (name, hair_color) VALUES (?, ?)")?;
+    let mut select_stmt = conn.prepare("SELECT id, name, hair_color FROM users")?;
     // for i in 0..1 {
     //     let name = format!("User {}", i);
     //     let hair_color = if i % 2 == 0 {
@@ -141,13 +125,12 @@ fn main() -> Result<()> {
     let mut iteration = 0u64;
     let mut handler = UsersHandler::new();
 
-    loop {
-        iteration += 1;
+    for iteration in 1..10 {
         let iteration_start = std::time::Instant::now();
 
         for _ in 0..1000 {
             handler.users.clear();
-            conn.exec(select_stmt, (), &mut handler)?;
+            conn.exec(&mut select_stmt, (), &mut handler)?;
         }
         let elapsed = iteration_start.elapsed();
         println!(
@@ -156,4 +139,5 @@ fn main() -> Result<()> {
             elapsed.as_secs_f64() * 1000.0
         );
     }
+    Ok(())
 }

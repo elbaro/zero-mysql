@@ -109,6 +109,41 @@ impl ColumnDefinitionTail {
     }
 }
 
+pub struct ColumnDefinitions {
+    _packets: Vec<u8>, // concatenation of packets (length(usize, native endian) + payload)
+    definitions: Vec<ColumnDefinition<'static>>,
+}
+
+impl ColumnDefinitions {
+    pub fn new(num_columns: usize, packets: Vec<u8>) -> Result<Self> {
+        let definitions = {
+            let mut buf = packets.as_slice();
+            let mut definitions = Vec::with_capacity(num_columns);
+            for _ in 0..num_columns {
+                let len = u32::from_ne_bytes(buf[0..4].try_into().unwrap()) as usize;
+                definitions.push(ColumnDefinition::try_from(ColumnDefinitionBytes(
+                    &buf[4..4 + len],
+                ))?);
+                buf = &buf[4 + len..]; // Advance past the length prefix and payload
+            }
+            unsafe {
+                std::mem::transmute::<Vec<ColumnDefinition<'_>>, Vec<ColumnDefinition<'static>>>(
+                    definitions,
+                )
+            }
+        };
+
+        Ok(Self {
+            _packets: packets,
+            definitions,
+        })
+    }
+
+    pub fn definitions<'a>(&'a self) -> &'a [ColumnDefinition<'a>] {
+        self.definitions.as_slice()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

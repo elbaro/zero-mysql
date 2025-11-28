@@ -48,9 +48,7 @@ fn main() -> Result<()> {
     //     }
     // }
 
-    let mut iteration = 0u64;
-    loop {
-        iteration += 1;
+    for iteration in 1..10 {
         let iteration_start = std::time::Instant::now();
         for _ in 0..1000 {
             let rows: Vec<User> = conn.exec_map(
@@ -71,4 +69,5 @@ fn main() -> Result<()> {
             elapsed.as_secs_f64() * 1000.0
         );
     }
+    Ok(())
 }

@@ -1,9 +1,9 @@
 use crate::constant::CommandByte;
 use crate::error::Result;
-use crate::protocol::command::ColumnDefinitionBytes;
+use crate::protocol::command::ColumnDefinition;
 use crate::protocol::primitive::*;
-use crate::protocol::response::{OkPayload, OkPayloadBytes};
 use crate::protocol::r#trait::{BinaryResultSetHandler, TextResultSetHandler};
+use crate::protocol::response::{OkPayload, OkPayloadBytes};
 use crate::protocol::{BinaryRowPayload, TextRowPayload};
 
 /// Write COM_QUIT command
@@ -71,11 +71,7 @@ impl BinaryResultSetHandler for DropHandler {
         Ok(())
     }
 
-    fn col<'buffers>(&mut self, _: ColumnDefinitionBytes<'buffers>) -> Result<()> {
-        Ok(())
-    }
-
-    fn row(&mut self, _: &BinaryRowPayload) -> Result<()> {
+    fn row<'a>(&mut self, _: &[ColumnDefinition<'a>], _: &'a BinaryRowPayload<'a>) -> Result<()> {
         Ok(())
     }
 
@@ -99,7 +95,7 @@ impl TextResultSetHandler for DropHandler {
         Ok(())
     }
 
-    fn col<'buffers>(&mut self, _: ColumnDefinitionBytes<'buffers>) -> Result<()> {
+    fn col<'buffers>(&mut self, _: &ColumnDefinition<'buffers>) -> Result<()> {
         Ok(())
     }
 
@@ -141,16 +137,12 @@ impl<'a, H: BinaryResultSetHandler> BinaryResultSetHandler for FirstRowHandler<'
         self.inner.resultset_start(n)
     }
 
-    fn col<'buffers>(&mut self, col: ColumnDefinitionBytes<'buffers>) -> Result<()> {
-        self.inner.col(col)
-    }
-
-    fn row(&mut self, row: &BinaryRowPayload) -> Result<()> {
+    fn row<'b>(&mut self, cols: &[ColumnDefinition<'b>], row: &'b BinaryRowPayload<'b>) -> Result<()> {
         if !self.found_row {
             self.found_row = true;
-            self.inner.row(row)
+            self.inner.row(cols, row)
         } else {
-            Ok(())  // Ignore subsequent rows
+            Ok(()) // Ignore subsequent rows
         }
     }
 

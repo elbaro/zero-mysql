@@ -4,20 +4,6 @@ version = "0.1.0"
 edition = "2024"
 
 [[bin]]
-name = "example"
-path = "bin/example.rs"
-[[bin]]
-name = "example-text"
-path = "bin/example_text.rs"
-[[bin]]
-name = "example-async"
-path = "bin/example-async.rs"
-required-features = ["dev"]
-[[bin]]
-name = "example-async-text"
-path = "bin/example-async-text.rs"
-required-features = ["dev"]
-[[bin]]
 name = "tracy-zero-sync"
 path = "bin/tracy_zero_sync.rs"
 required-features = ["dev"]
@@ -41,14 +27,14 @@ required-features = ["dev"]
 name = "tracy-base-sync-select"
 path = "bin/tracy_base_sync_select.rs"
 required-features = ["dev"]
-[[bin]]
-name = "bench-write-payload"
-path = "bin/bench_write_payload.rs"
-required-features = ["dev"]
-[[bin]]
-name = "test-multi-resultset"
-path = "bin/test-multi-resultset.rs"
-required-features = ["dev"]
+# [[bin]]
+# name = "bench-write-payload"
+# path = "bin/bench_write_payload.rs"
+# required-features = ["dev"]
+# [[bin]]
+# name = "test-multi-resultset"
+# path = "bin/test-multi-resultset.rs"
+# required-features = ["dev"]
 
 [[bench]]
 name = "zero_mysql_benches"

@@ -7,7 +7,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     use zero_mysql::constant::ServerStatusFlags;
 
     // Create a connection (adjust credentials as needed)
-    let conn = zero_mysql::sync::Conn::new("mysql://root@localhost:3306")?;
+    let conn = zero_mysql::sync::Conn::new("mysql://test:1234@localhost:3306")?;
 
     // Get connection ID assigned by the server
     let conn_id = conn.connection_id();

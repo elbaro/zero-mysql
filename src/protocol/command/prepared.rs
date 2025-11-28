@@ -1,11 +1,10 @@
 use crate::buffer::BufferSet;
 use crate::constant::CommandByte;
 use crate::error::{Error, Result};
-use crate::protocol::BinaryRowPayload;
-use crate::protocol::command::ColumnDefinitionBytes;
 use crate::protocol::primitive::*;
-use crate::protocol::response::{ErrPayloadBytes, OkPayloadBytes};
 use crate::protocol::r#trait::param::Params;
+use crate::protocol::response::{ErrPayloadBytes, OkPayloadBytes};
+use crate::protocol::BinaryRowPayload;
 use zerocopy::byteorder::little_endian::{U16 as U16LE, U32 as U32LE};
 use zerocopy::{FromBytes, Immutable, KnownLayout};
 
@@ -88,7 +87,7 @@ pub fn write_execute<P: Params>(out: &mut Vec<u8>, statement_id: u32, params: P)
 
 /// Read COM_STMT_EXECUTE response
 /// This can be either an OK packet or a result set
-pub fn read_execute_response(payload: &[u8]) -> Result<ExecuteResponse<'_>> {
+pub fn read_execute_response(payload: &[u8], cache_metadata: bool) -> Result<ExecuteResponse<'_>> {
     if payload.is_empty() {
         return Err(Error::InvalidPacket);
     }
@@ -97,8 +96,23 @@ pub fn read_execute_response(payload: &[u8]) -> Result<ExecuteResponse<'_>> {
         0x00 => Ok(ExecuteResponse::Ok(OkPayloadBytes(payload))),
         0xFF => Err(ErrPayloadBytes(payload).into()),
         _ => {
-            let (column_count, _rest) = read_int_lenenc(payload)?;
-            Ok(ExecuteResponse::ResultSet { column_count })
+            let (column_count, rest) = read_int_lenenc(payload)?;
+
+            // If MARIADB_CLIENT_CACHE_METADATA is set, read the metadata_follows flag
+            let has_column_metadata = if cache_metadata {
+                if rest.is_empty() {
+                    return Err(Error::InvalidPacket);
+                }
+                rest[0] != 0
+            } else {
+                // Without caching, metadata always follows
+                true
+            };
+
+            Ok(ExecuteResponse::ResultSet {
+                column_count,
+                has_column_metadata,
+            })
         }
     }
 }
@@ -107,7 +121,10 @@ pub fn read_execute_response(payload: &[u8]) -> Result<ExecuteResponse<'_>> {
 #[derive(Debug)]
 pub enum ExecuteResponse<'a> {
     Ok(OkPayloadBytes<'a>),
-    ResultSet { column_count: u64 },
+    ResultSet {
+        column_count: u64,
+        has_column_metadata: bool,
+    },
 }
 
 /// Read binary protocol row from execute response
@@ -131,7 +148,9 @@ pub fn write_reset_statement(out: &mut Vec<u8>, statement_id: u32) {
 // State Machine API for exec_fold
 // ============================================================================
 
+use crate::protocol::command::ColumnDefinitions;
 use crate::protocol::r#trait::BinaryResultSetHandler;
+use crate::PreparedStatement;
 
 /// Internal state of the Exec state machine
 enum ExecState {
@@ -139,11 +158,8 @@ enum ExecState {
     Start,
     /// Reading the first response packet
     ReadingFirstPacket,
-    /// Reading column definitions
-    ReadingColumns {
-        num_columns: usize,
-        remaining: usize,
-    },
+    /// Reading column definitions (processing the buffer after reading all packets)
+    ReadingColumns { num_columns: usize },
     /// Reading rows
     ReadingRows { num_columns: usize },
     /// Finished
@@ -154,17 +170,25 @@ enum ExecState {
 ///
 /// The handler is provided at construction and called directly by the state machine.
 /// The `drive()` method returns actions indicating what I/O operation is needed next.
-pub struct Exec<'h, H> {
+pub struct Exec<'h, 'stmt, H> {
     state: ExecState,
     handler: &'h mut H,
+    stmt: &'stmt mut PreparedStatement,
+    cache_metadata: bool,
 }
 
-impl<'h, H: BinaryResultSetHandler> Exec<'h, H> {
-    /// Create a new Exec state machine with the given handler
-    pub fn new(handler: &'h mut H) -> Self {
+impl<'h, 'stmt, H: BinaryResultSetHandler> Exec<'h, 'stmt, H> {
+    /// Create a new Exec state machine with the given handler and prepared statement
+    pub fn new(
+        handler: &'h mut H,
+        stmt: &'stmt mut PreparedStatement,
+        cache_metadata: bool,
+    ) -> Self {
         Self {
             state: ExecState::Start,
             handler,
+            stmt,
+            cache_metadata,
         }
     }
 
@@ -190,7 +214,7 @@ impl<'h, H: BinaryResultSetHandler> Exec<'h, H> {
 
             ExecState::ReadingFirstPacket => {
                 let payload = &buffer_set.read_buffer[..];
-                let response = read_execute_response(payload)?;
+                let response = read_execute_response(payload, self.cache_metadata)?;
 
                 match response {
                     ExecuteResponse::Ok(ok_bytes) => {
@@ -215,37 +239,47 @@ impl<'h, H: BinaryResultSetHandler> Exec<'h, H> {
                             Ok(Action::Finished)
                         }
                     }
-                    ExecuteResponse::ResultSet { column_count } => {
+                    ExecuteResponse::ResultSet {
+                        column_count,
+                        has_column_metadata,
+                    } => {
                         let num_columns = column_count as usize;
                         self.handler.resultset_start(num_columns)?;
-                        self.state = ExecState::ReadingColumns {
-                            num_columns,
-                            remaining: num_columns,
-                        };
-                        Ok(Action::NeedPacket(&mut buffer_set.column_definition_buffer))
+
+                        if has_column_metadata {
+                            // Server sent metadata, signal that we need to read N column packets
+                            self.state = ExecState::ReadingColumns { num_columns };
+                            Ok(Action::ReadColumnMetadata { num_columns })
+                        } else {
+                            // No metadata from server, use cached definitions
+                            if self.stmt.column_definitions().is_some() {
+                                self.state = ExecState::ReadingRows { num_columns };
+                                Ok(Action::NeedPacket(&mut buffer_set.read_buffer))
+                            } else {
+                                // No cache available but server didn't send metadata - error
+                                Err(Error::InvalidPacket)
+                            }
+                        }
                     }
                 }
             }
 
-            ExecState::ReadingColumns {
-                num_columns,
-                remaining,
-            } => {
-                // Read from column_definition_buffer (no copy needed!)
-                let payload = &buffer_set.column_definition_buffer[..];
-                let col = ColumnDefinitionBytes(payload);
-                self.handler.col(col)?;
+            ExecState::ReadingColumns { num_columns } => {
+                // Parse all column definitions from the buffer
+                // The buffer contains [len(u32)][payload][len(u32)][payload]...
+                let column_defs = ColumnDefinitions::new(
+                    *num_columns,
+                    std::mem::take(&mut buffer_set.column_definition_buffer),
+                )?;
 
-                *remaining -= 1;
+                // Cache the column definitions in the prepared statement
+                self.stmt.set_column_definitions(column_defs);
 
-                if *remaining == 0 {
-                    self.state = ExecState::ReadingRows {
-                        num_columns: *num_columns,
-                    };
-                    Ok(Action::NeedPacket(&mut buffer_set.read_buffer))
-                } else {
-                    Ok(Action::NeedPacket(&mut buffer_set.column_definition_buffer))
-                }
+                // Move to reading rows
+                self.state = ExecState::ReadingRows {
+                    num_columns: *num_columns,
+                };
+                Ok(Action::NeedPacket(&mut buffer_set.read_buffer))
             }
 
             ExecState::ReadingRows { num_columns } => {
@@ -253,7 +287,8 @@ impl<'h, H: BinaryResultSetHandler> Exec<'h, H> {
                 match payload[0] {
                     0x00 => {
                         let row = read_binary_row(payload, *num_columns)?;
-                        self.handler.row(&row)?;
+                        let cols = self.stmt.column_definitions().ok_or(Error::InvalidPacket)?;
+                        self.handler.row(cols, &row)?;
                         Ok(Action::NeedPacket(&mut buffer_set.read_buffer))
                     }
                     0xFE => {

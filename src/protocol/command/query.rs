@@ -2,7 +2,7 @@ use crate::buffer::BufferSet;
 use crate::constant::CommandByte;
 use crate::error::{Error, Result};
 use crate::protocol::TextRowPayload;
-use crate::protocol::command::ColumnDefinitionBytes;
+use crate::protocol::command::ColumnDefinitions;
 use crate::protocol::primitive::*;
 use crate::protocol::response::{ErrPayloadBytes, OkPayloadBytes};
 
@@ -58,7 +58,7 @@ enum QueryState {
     /// Reading the first response packet
     ReadingFirstPacket,
     /// Reading column definitions
-    ReadingColumns { remaining: usize },
+    ReadingColumns { num_columns: usize },
     /// Reading rows
     ReadingRows,
     /// Finished
@@ -133,28 +133,25 @@ impl<'h, H: TextResultSetHandler> Query<'h, H> {
                     QueryResponse::ResultSet { column_count } => {
                         let num_columns = column_count as usize;
                         self.handler.resultset_start(num_columns)?;
-                        self.state = QueryState::ReadingColumns {
-                            remaining: num_columns,
-                        };
-                        Ok(Action::NeedPacket(&mut buffer_set.column_definition_buffer))
+                        self.state = QueryState::ReadingColumns { num_columns };
+                        Ok(Action::ReadColumnMetadata { num_columns })
                     }
                 }
             }
 
-            QueryState::ReadingColumns { remaining } => {
-                // Read from column_definition_buffer (no copy needed!)
-                let payload = &buffer_set.column_definition_buffer[..];
-                let col = ColumnDefinitionBytes(payload);
-                self.handler.col(col)?;
+            QueryState::ReadingColumns { num_columns } => {
+                // Parse all column definitions from the buffer
+                // The buffer contains [len(u32)][payload][len(u32)][payload]...
+                let column_defs = ColumnDefinitions::new(*num_columns, buffer_set.column_definition_buffer.clone())?;
 
-                *remaining -= 1;
-
-                if *remaining == 0 {
-                    self.state = QueryState::ReadingRows;
-                    Ok(Action::NeedPacket(&mut buffer_set.read_buffer))
-                } else {
-                    Ok(Action::NeedPacket(&mut buffer_set.column_definition_buffer))
+                // Call handler for each column
+                for col in column_defs.definitions() {
+                    self.handler.col(col)?;
                 }
+
+                // Move to reading rows
+                self.state = QueryState::ReadingRows;
+                Ok(Action::NeedPacket(&mut buffer_set.read_buffer))
             }
 
             QueryState::ReadingRows => {

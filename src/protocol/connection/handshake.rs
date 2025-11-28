@@ -439,9 +439,10 @@ impl Handshake {
                         .mariadb_capabilities
                         .contains(MARIADB_CAPABILITIES_ENABLED)
                 {
-                    return Err(Error::BadConfigError(
-                        format!("MariaDB server does not support the required capabilities. Server: {:?} Required: {:?}", handshake.mariadb_capabilities, MARIADB_CAPABILITIES_ENABLED)
-                    ));
+                    return Err(Error::BadConfigError(format!(
+                        "MariaDB server does not support the required capabilities. Server: {:?} Required: {:?}",
+                        handshake.mariadb_capabilities, MARIADB_CAPABILITIES_ENABLED
+                    )));
                 }
 
                 // Clone auth_plugin_name early to avoid borrow conflicts
