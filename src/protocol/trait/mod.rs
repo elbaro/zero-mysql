@@ -35,6 +35,6 @@ pub trait BinaryResultSetHandler {
 pub trait TextResultSetHandler {
     fn no_result_set(&mut self, ok: OkPayloadBytes) -> Result<()>;
     fn resultset_start(&mut self, cols: &[ColumnDefinition<'_>]) -> Result<()>;
-    fn row(&mut self, cols: &[ColumnDefinition<'_>], row: &TextRowPayload<'_>) -> Result<()>;
+    fn row(&mut self, cols: &[ColumnDefinition<'_>], row: TextRowPayload<'_>) -> Result<()>;
     fn resultset_end(&mut self, eof: OkPayloadBytes) -> Result<()>;
 }

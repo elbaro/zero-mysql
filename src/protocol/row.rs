@@ -23,5 +23,5 @@ impl<'a> BinaryRowPayload<'a> {
 }
 
 /// The payload part of a row packet.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct TextRowPayload<'a>(pub &'a [u8]);

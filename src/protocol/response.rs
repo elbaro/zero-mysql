@@ -91,13 +91,6 @@ impl TryFrom<ErrPayloadBytes<'_>> for ErrPayload {
     }
 }
 
-/// EOF packet
-///
-/// # Examples
-///
-/// ```
-/// EofPacket::ref_from_bytes(&buffer[..4])`
-/// ```
 #[repr(C, packed)]
 #[derive(Debug, Clone, Copy, FromBytes, KnownLayout, Immutable)]
 pub struct EofPacket {

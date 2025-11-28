@@ -20,7 +20,7 @@ impl zero_mysql::protocol::r#trait::TextResultSetHandler for DropHandler {
         Ok(())
     }
 
-    fn row(&mut self, _cols: &[ColumnDefinition<'_>], _row: &TextRowPayload<'_>) -> Result<()> {
+    fn row(&mut self, _cols: &[ColumnDefinition<'_>], _row: TextRowPayload<'_>) -> Result<()> {
         Ok(())
     }
 

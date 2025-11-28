@@ -190,7 +190,7 @@ impl<'h, H: TextResultSetHandler> Query<'h, H> {
                     _ => {
                         let cols = self.column_defs.as_ref().ok_or(Error::InvalidPacket)?;
                         let row = TextRowPayload(payload);
-                        self.handler.row(cols.definitions(), &row)?;
+                        self.handler.row(cols.definitions(), row)?;
                         Ok(Action::NeedPacket(&mut buffer_set.read_buffer))
                     }
                 }

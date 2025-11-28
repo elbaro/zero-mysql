@@ -95,7 +95,7 @@ impl TextResultSetHandler for DropHandler {
         Ok(())
     }
 
-    fn row(&mut self, _: &[ColumnDefinition<'_>], _: &TextRowPayload<'_>) -> Result<()> {
+    fn row(&mut self, _: &[ColumnDefinition<'_>], _: TextRowPayload<'_>) -> Result<()> {
         Ok(())
     }
 
