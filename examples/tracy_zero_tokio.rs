@@ -16,11 +16,11 @@ impl zero_mysql::protocol::r#trait::TextResultSetHandler for DropHandler {
         Ok(())
     }
 
-    fn resultset_start<'stmt>(&mut self, _cols: &'stmt [ColumnDefinition<'stmt>]) -> Result<()> {
+    fn resultset_start(&mut self, _cols: &[ColumnDefinition<'_>]) -> Result<()> {
         Ok(())
     }
 
-    fn row(&mut self, _row: &TextRowPayload) -> Result<()> {
+    fn row(&mut self, _cols: &[ColumnDefinition<'_>], _row: &TextRowPayload<'_>) -> Result<()> {
         Ok(())
     }
 

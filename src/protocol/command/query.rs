@@ -72,6 +72,7 @@ enum QueryState {
 pub struct Query<'h, H> {
     state: QueryState,
     handler: &'h mut H,
+    column_defs: Option<ColumnDefinitions>,
 }
 
 impl<'h, H: TextResultSetHandler> Query<'h, H> {
@@ -80,6 +81,7 @@ impl<'h, H: TextResultSetHandler> Query<'h, H> {
         Self {
             state: QueryState::Start,
             handler,
+            column_defs: None,
         }
     }
 
@@ -143,10 +145,11 @@ impl<'h, H: TextResultSetHandler> Query<'h, H> {
                 // The buffer contains [len(u32)][payload][len(u32)][payload]...
                 let column_defs = ColumnDefinitions::new(
                     *num_columns,
-                    buffer_set.column_definition_buffer.clone(),
+                    std::mem::take(&mut buffer_set.column_definition_buffer),
                 )?;
 
                 self.handler.resultset_start(column_defs.definitions())?;
+                self.column_defs = Some(column_defs);
                 self.state = QueryState::ReadingRows;
                 Ok(Action::NeedPacket(&mut buffer_set.read_buffer))
             }
@@ -185,8 +188,9 @@ impl<'h, H: TextResultSetHandler> Query<'h, H> {
                         }
                     }
                     _ => {
+                        let cols = self.column_defs.as_ref().ok_or(Error::InvalidPacket)?;
                         let row = TextRowPayload(payload);
-                        self.handler.row(&row)?;
+                        self.handler.row(cols.definitions(), &row)?;
                         Ok(Action::NeedPacket(&mut buffer_set.read_buffer))
                     }
                 }

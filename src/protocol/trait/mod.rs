@@ -32,12 +32,9 @@ pub trait BinaryResultSetHandler {
 }
 
 /// Trait that defines event callbacks for text protocol result sets
-///
-/// The lifetime parameter `'buffers` is bound to the BufferSet, allowing handlers
-/// to store references to column definitions without cloning.
 pub trait TextResultSetHandler {
     fn no_result_set(&mut self, ok: OkPayloadBytes) -> Result<()>;
-    fn resultset_start<'stmt>(&mut self, cols: &'stmt [ColumnDefinition<'stmt>]) -> Result<()>;
-    fn row(&mut self, row: &TextRowPayload) -> Result<()>;
+    fn resultset_start(&mut self, cols: &[ColumnDefinition<'_>]) -> Result<()>;
+    fn row(&mut self, cols: &[ColumnDefinition<'_>], row: &TextRowPayload<'_>) -> Result<()>;
     fn resultset_end(&mut self, eof: OkPayloadBytes) -> Result<()>;
 }
