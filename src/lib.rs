@@ -4,6 +4,7 @@
 #![feature(core_io_borrowed_buf)]
 
 mod buffer;
+mod buffer_pool;
 pub mod constant;
 pub mod error;
 mod opts;

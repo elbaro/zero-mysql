@@ -23,10 +23,9 @@ Its test, benchmark and feature development is driven by the need of [pyro-mysql
 - Custom max_allowed_packet
 - Sequence ID verification
 - Authentication plugins other than username/password
-- MariaDB-specific flags
-- CLIENT_SESSION_TRACK, CLIENT_CONNECT_ATTRS, CLIENT_OPTIONAL_RESULTSET_METADATA
 
-### Not Supported
-- MySQL <= 5.7.5
-- Old protocol (ColumnDefinition320)
-- Non-UTF8 Encoding
+## Perf Notes
+- Prefer MariaDB to MySQL
+- Prefer UnixSocket to TCP
+- Use BufferPool to reuse allocations between connections
+- Use Conn.exec_bulk to grpup 2~1000 INSERTs or UPDATEs

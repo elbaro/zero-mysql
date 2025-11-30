@@ -1,3 +1,6 @@
+use std::sync::Arc;
+
+use crate::buffer_pool::{BufferPool, GLOBAL_BUFFER_POOL};
 use crate::constant::{CAPABILITIES_ALWAYS_ENABLED, CapabilityFlags};
 use crate::error::Error;
 
@@ -41,6 +44,8 @@ pub struct Opts {
     pub password: Option<String>,
 
     pub tls: bool,
+
+    pub buffer_pool: Arc<BufferPool>,
 }
 
 impl Default for Opts {
@@ -56,6 +61,7 @@ impl Default for Opts {
             user: String::new(),
             password: None,
             tls: false,
+            buffer_pool: Arc::clone(&GLOBAL_BUFFER_POOL),
         }
     }
 }
@@ -104,6 +110,7 @@ impl TryFrom<&str> for Opts {
             user,
             password,
             tls: false,
+            buffer_pool: Arc::clone(&GLOBAL_BUFFER_POOL),
         })
     }
 }

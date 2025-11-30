@@ -2311,6 +2311,7 @@ dependencies = [
  "auto_impl",
  "bitflags 2.10.0",
  "criterion",
+ "crossbeam-queue",
  "log",
  "mysql",
  "mysql_async",

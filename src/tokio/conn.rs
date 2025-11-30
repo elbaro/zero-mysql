@@ -4,6 +4,7 @@ use zerocopy::{FromBytes, FromZeros, IntoBytes};
 
 use crate::PreparedStatement;
 use crate::buffer::BufferSet;
+use crate::buffer_pool::PooledBufferSet;
 use crate::constant::CapabilityFlags;
 use crate::error::{Error, Result};
 use crate::protocol::command::Action;
@@ -22,7 +23,7 @@ use super::stream::Stream;
 
 pub struct Conn {
     stream: Stream,
-    buffer_set: BufferSet,
+    buffer_set: PooledBufferSet,
     initial_handshake: InitialHandshake,
     capability_flags: CapabilityFlags,
     mariadb_capabilities: crate::constant::MariadbCapabilityFlags,
@@ -57,7 +58,7 @@ impl Conn {
     /// Create a new MySQL connection with an existing stream (async)
     pub async fn new_with_stream(stream: Stream, opts: &crate::opts::Opts) -> Result<Self> {
         let mut conn_stream = stream;
-        let mut buffer_set = BufferSet::new();
+        let mut buffer_set = opts.buffer_pool.get_buffer_set();
         let mut initial_handshake = None;
 
         #[cfg(feature = "tls")]
