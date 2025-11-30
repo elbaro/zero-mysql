@@ -1,7 +1,6 @@
 /// A set of reusable buffers for MySQL protocol communication
 ///
 /// `Conn` uses a single `BufferSet` for all its operations.
-/// TODO: Implements `BufferSetPool` so that `BufferSet` can be recycled for new Conn.
 #[derive(Debug)]
 pub struct BufferSet {
     /// Bytes are valid during Conn.

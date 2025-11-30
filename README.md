@@ -6,7 +6,6 @@ Each submodule is behind a feature gate.
 - `zero_mysql::protocol`: implements sans I/O for MySQL protocol.
 - `zero_mysql::sync`: implements a synchronous `Conn`.
 - `zero_mysql::tokio`: implements an asynchronous `Conn`.
-- `zero_mysql::compio`: implements an asynchronous `Conn` (the API returns `!Send` futures).
 
 Its test, benchmark and feature development is driven by the need of [pyro-mysql](https://github.com/elbaro/pyro-mysql/).
 
@@ -28,4 +27,4 @@ Its test, benchmark and feature development is driven by the need of [pyro-mysql
 - Prefer MariaDB to MySQL
 - Prefer UnixSocket to TCP
 - Use BufferPool to reuse allocations between connections
-- Use Conn.exec_bulk to grpup 2~1000 INSERTs or UPDATEs
+- Use Conn.exec_bulk to group 2~1000 INSERTs or UPDATEs
