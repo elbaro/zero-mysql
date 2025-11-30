@@ -257,9 +257,9 @@ impl Conn {
         Ok(stmt)
     }
 
-    fn drive_exec<'conn, 'stmt, H: BinaryResultSetHandler>(
-        &'conn mut self,
-        stmt: &'stmt mut PreparedStatement,
+    fn drive_exec<H: BinaryResultSetHandler>(
+        &mut self,
+        stmt: &mut PreparedStatement,
         handler: &mut H,
     ) -> Result<()> {
         let cache_metadata = self
@@ -300,9 +300,9 @@ impl Conn {
         self.drive_exec(stmt, handler)
     }
 
-    fn drive_bulk_exec<'conn, 'stmt, H: BinaryResultSetHandler>(
-        &'conn mut self,
-        stmt: &'stmt mut PreparedStatement,
+    fn drive_bulk_exec<H: BinaryResultSetHandler>(
+        &mut self,
+        stmt: &mut PreparedStatement,
         handler: &mut H,
     ) -> Result<()> {
         let cache_metadata = self
@@ -329,9 +329,9 @@ impl Conn {
     }
 
     /// Execute a bulk prepared statement with a result set handler
-    pub fn exec_bulk<'conn, 'stmt, P, I, H>(
-        &'conn mut self,
-        stmt: &'stmt mut PreparedStatement,
+    pub fn exec_bulk<P, I, H>(
+        &mut self,
+        stmt: &mut PreparedStatement,
         params: P,
         flags: BulkFlags,
         handler: &mut H,
@@ -379,9 +379,9 @@ impl Conn {
     }
 
     /// Execute a prepared statement and discard all results
-    pub fn exec_drop<'conn, 'stmt, P>(
-        &'conn mut self,
-        stmt: &'stmt mut PreparedStatement,
+    pub fn exec_drop<P>(
+        &mut self,
+        stmt: &mut PreparedStatement,
         params: P,
     ) -> Result<()>
     where
@@ -389,7 +389,7 @@ impl Conn {
     {
         write_execute(self.buffer_set.new_write_buffer(), stmt.id(), params)?;
         self.write_payload()?;
-        self.drive_exec(stmt, &mut DropHandler::new())
+        self.drive_exec(stmt, &mut DropHandler::default())
     }
 
     fn drive_query<H: TextResultSetHandler>(&mut self, handler: &mut H) -> Result<()> {
@@ -427,7 +427,7 @@ impl Conn {
     pub fn query_drop(&mut self, sql: &str) -> Result<()> {
         write_query(self.buffer_set.new_write_buffer(), sql);
         self.write_payload()?;
-        self.drive_query(&mut DropHandler::new())
+        self.drive_query(&mut DropHandler::default())
     }
 
     /// Send a ping to the server to check if the connection is alive

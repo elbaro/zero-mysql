@@ -20,7 +20,7 @@ impl PreparedStatement {
         self.column_definitions.as_ref().map(|v| v.definitions())
     }
 
-    pub fn set_column_definitions<'a>(&mut self, column_definitions: ColumnDefinitions) {
+    pub fn set_column_definitions(&mut self, column_definitions: ColumnDefinitions) {
         self.column_definitions = Some(column_definitions);
     }
 }

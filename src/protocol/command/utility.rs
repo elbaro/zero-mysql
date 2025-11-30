@@ -34,20 +34,13 @@ pub fn write_reset_connection(out: &mut Vec<u8>) {
 /// A handler that ignores all result set data but captures affected_rows and last_insert_id
 ///
 /// Useful for `exec_drop()` and `query_drop()` methods that discard results but need metadata.
+#[derive(Default)]
 pub struct DropHandler {
     affected_rows: u64,
     last_insert_id: u64,
 }
 
 impl DropHandler {
-    /// Create a new DropHandler
-    pub fn new() -> Self {
-        Self {
-            affected_rows: 0,
-            last_insert_id: 0,
-        }
-    }
-
     /// Get the number of affected rows from the last operation
     pub fn affected_rows(&self) -> u64 {
         self.affected_rows

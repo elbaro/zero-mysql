@@ -274,9 +274,9 @@ impl Conn {
         Ok(header.sequence_id)
     }
 
-    async fn drive_exec<'a, H: BinaryResultSetHandler>(
+    async fn drive_exec<H: BinaryResultSetHandler>(
         &mut self,
-        stmt: &'a mut crate::PreparedStatement,
+        stmt: &mut crate::PreparedStatement,
         handler: &mut H,
     ) -> Result<()> {
         let cache_metadata = self
@@ -331,9 +331,9 @@ impl Conn {
         self.drive_exec(stmt, handler).await
     }
 
-    async fn drive_bulk_exec<'a, H: BinaryResultSetHandler>(
+    async fn drive_bulk_exec<H: BinaryResultSetHandler>(
         &mut self,
-        stmt: &'a mut crate::PreparedStatement,
+        stmt: &mut crate::PreparedStatement,
         handler: &mut H,
     ) -> Result<()> {
         let cache_metadata = self
@@ -413,7 +413,7 @@ impl Conn {
     {
         write_execute(self.buffer_set.new_write_buffer(), stmt.id(), params)?;
         self.write_payload().await?;
-        self.drive_exec(stmt, &mut DropHandler::new()).await
+        self.drive_exec(stmt, &mut DropHandler::default()).await
     }
 
     /// Execute a text protocol SQL query (async)
@@ -431,7 +431,7 @@ impl Conn {
     pub async fn query_drop(&mut self, sql: &str) -> Result<()> {
         write_query(self.buffer_set.new_write_buffer(), sql);
         self.write_payload().await?;
-        self.drive_query(&mut DropHandler::new()).await
+        self.drive_query(&mut DropHandler::default()).await
     }
 
     /// Send a ping to the server to check if the connection is alive (async)
