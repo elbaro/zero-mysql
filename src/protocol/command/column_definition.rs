@@ -1,5 +1,5 @@
 use crate::constant::{ColumnFlags, ColumnType};
-use crate::error::{Error, Result};
+use crate::error::{Error, Result, eyre};
 use crate::protocol::primitive::*;
 use zerocopy::byteorder::little_endian::{U16 as U16LE, U32 as U32LE};
 use zerocopy::{FromBytes, Immutable, KnownLayout};
@@ -14,10 +14,13 @@ impl<'a> ColumnDefinitionBytes<'a> {
     /// The tail is always the last 12 bytes of the column definition packet
     pub fn tail(&self) -> Result<&'a ColumnDefinitionTail> {
         if self.0.len() < 12 {
-            return Err(Error::InvalidPacket);
+            return Err(Error::LibraryBug(eyre!(
+                "column definition too short: {} < 12",
+                self.0.len()
+            )));
         }
         let tail_bytes = &self.0[self.0.len() - 12..];
-        ColumnDefinitionTail::ref_from_bytes(tail_bytes).map_err(|_| Error::InvalidPacket)
+        ColumnDefinitionTail::ref_from_bytes(tail_bytes).map_err(Error::from_debug)
     }
 }
 
@@ -49,7 +52,7 @@ impl<'a> TryFrom<ColumnDefinitionBytes<'a>> for ColumnDefinition<'a> {
         // ─── Columndefinitiontail ────────────────────────────────────
         // length is always 0x0c
         let (_length, data) = read_int_lenenc(data)?;
-        let tail = ColumnDefinitionTail::ref_from_bytes(data).map_err(|_| Error::InvalidPacket)?;
+        let tail = ColumnDefinitionTail::ref_from_bytes(data).map_err(Error::from_debug)?;
         Ok(Self {
             // catalog,
             schema,
@@ -92,11 +95,13 @@ impl ColumnDefinitionTail {
 
     /// Returns an error if the column type is unknown
     pub fn column_type(&self) -> Result<ColumnType> {
-        ColumnType::from_u8(self.column_type).ok_or(Error::InvalidPacket)
+        ColumnType::from_u8(self.column_type)
+            .ok_or_else(|| Error::LibraryBug(eyre!("unknown column type: 0x{:02X}", self.column_type)))
     }
 
     pub fn flags(&self) -> Result<ColumnFlags> {
-        ColumnFlags::from_bits(self.flags.get()).ok_or(Error::InvalidPacket)
+        ColumnFlags::from_bits(self.flags.get())
+            .ok_or_else(|| Error::LibraryBug(eyre!("invalid column flags: 0x{:04X}", self.flags.get())))
     }
 
     /// A handy function to get `ColumnTypeAndFlags` for decoding a value
@@ -255,9 +260,11 @@ mod tests {
         assert_eq!(type_and_flags.column_type, ColumnType::MYSQL_TYPE_LONG);
         assert!(type_and_flags.flags.contains(ColumnFlags::NOT_NULL_FLAG));
         assert!(type_and_flags.flags.contains(ColumnFlags::PRI_KEY_FLAG));
-        assert!(type_and_flags
-            .flags
-            .contains(ColumnFlags::AUTO_INCREMENT_FLAG));
+        assert!(
+            type_and_flags
+                .flags
+                .contains(ColumnFlags::AUTO_INCREMENT_FLAG)
+        );
         assert!(type_and_flags.flags.contains(ColumnFlags::PART_KEY_FLAG));
     }
 

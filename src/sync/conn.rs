@@ -119,7 +119,10 @@ impl Conn {
 
                     // Continue handshake after TLS upgrade
                     let HandshakeResult::Write = handshake.drive_after_tls(&mut buffer_set)? else {
-                        return Err(Error::InvalidPacket);
+                        use color_eyre::eyre::eyre;
+                        return Err(Error::LibraryBug(eyre!(
+                            "expected Write result from drive_after_tls"
+                        )));
                     };
                     write_handshake_payload(
                         &mut conn_stream,

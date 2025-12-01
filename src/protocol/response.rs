@@ -1,5 +1,5 @@
 use crate::constant::ServerStatusFlags;
-use crate::error::{Error, Result};
+use crate::error::{Error, Result, eyre};
 use crate::protocol::primitive::*;
 use zerocopy::byteorder::little_endian::U16 as U16LE;
 use zerocopy::{FromBytes, Immutable, KnownLayout};
@@ -13,7 +13,10 @@ impl<'a> OkPayloadBytes<'a> {
         if self.0[0] == 0xFE {
             Ok(())
         } else {
-            Err(Error::InvalidPacket)
+            Err(Error::LibraryBug(eyre!(
+                "expected EOF packet header 0xFE, got 0x{:02X}",
+                self.0[0]
+            )))
         }
     }
 
@@ -39,7 +42,10 @@ impl TryFrom<OkPayloadBytes<'_>> for OkPayload {
     fn try_from(bytes: OkPayloadBytes<'_>) -> Result<Self> {
         let (header, data) = read_int_1(bytes.bytes())?;
         if header != 0x00 && header != 0xFE {
-            return Err(Error::InvalidPacket);
+            return Err(Error::LibraryBug(eyre!(
+                "expected OK/EOF packet header 0x00 or 0xFE, got 0x{:02X}",
+                header
+            )));
         }
 
         let (affected_rows, data) = read_int_lenenc(data)?;
@@ -112,14 +118,20 @@ impl EofPacket {
 pub fn read_eof_packet(payload: &[u8]) -> Result<&EofPacket> {
     let (header, data) = read_int_1(payload)?;
     if header != 0xFE {
-        return Err(Error::InvalidPacket);
+        return Err(Error::LibraryBug(eyre!(
+            "expected EOF packet header 0xFE, got 0x{:02X}",
+            header
+        )));
     }
 
     // EofPacket is 4 bytes (2 + 2)
     if data.len() < 4 {
-        return Err(Error::InvalidPacket);
+        return Err(Error::LibraryBug(eyre!(
+            "EOF packet data too short: {} < 4",
+            data.len()
+        )));
     }
 
     // Zero-copy cast using zerocopy
-    EofPacket::ref_from_bytes(&data[..4]).map_err(|_| Error::InvalidPacket)
+    EofPacket::ref_from_bytes(&data[..4]).map_err(Error::from_debug)
 }

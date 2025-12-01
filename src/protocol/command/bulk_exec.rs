@@ -1,7 +1,7 @@
 use crate::PreparedStatement;
 use crate::buffer::BufferSet;
 use crate::constant::CommandByte;
-use crate::error::{Error, Result};
+use crate::error::{Error, Result, eyre};
 use crate::protocol::command::ColumnDefinitions;
 use crate::protocol::command::prepared::read_binary_row;
 use crate::protocol::primitive::*;
@@ -58,7 +58,9 @@ pub fn read_bulk_execute_response(
     cache_metadata: bool,
 ) -> Result<BulkExecuteResponse<'_>> {
     if payload.is_empty() {
-        return Err(Error::InvalidPacket);
+        return Err(Error::LibraryBug(eyre!(
+            "read_bulk_execute_response: empty payload"
+        )));
     }
 
     match payload[0] {
@@ -70,7 +72,9 @@ pub fn read_bulk_execute_response(
             // If MARIADB_CLIENT_CACHE_METADATA is set, read the metadata_follows flag
             let has_column_metadata = if cache_metadata {
                 if rest.is_empty() {
-                    return Err(Error::InvalidPacket);
+                    return Err(Error::LibraryBug(eyre!(
+                        "read_bulk_execute_response: missing metadata_follows flag"
+                    )));
                 }
                 rest[0] != 0
             } else {
@@ -163,7 +167,9 @@ impl<'h, 'stmt, H: BinaryResultSetHandler> BulkExec<'h, 'stmt, H> {
                                 Ok(Action::NeedPacket(&mut buffer_set.read_buffer))
                             } else {
                                 // No cache available but server didn't send metadata - error
-                                Err(Error::InvalidPacket)
+                                Err(Error::LibraryBug(eyre!(
+                                    "no cached column definitions available"
+                                )))
                             }
                         }
                     }
@@ -194,7 +200,9 @@ impl<'h, 'stmt, H: BinaryResultSetHandler> BulkExec<'h, 'stmt, H> {
                 match payload[0] {
                     0x00 => {
                         let row = read_binary_row(payload, *num_columns)?;
-                        let cols = self.stmt.column_definitions().ok_or(Error::InvalidPacket)?;
+                        let cols = self.stmt.column_definitions().ok_or_else(|| {
+                            Error::LibraryBug(eyre!("no column definitions while reading rows"))
+                        })?;
                         self.handler.row(cols, row)?;
                         Ok(Action::NeedPacket(&mut buffer_set.read_buffer))
                     }
@@ -204,11 +212,16 @@ impl<'h, 'stmt, H: BinaryResultSetHandler> BulkExec<'h, 'stmt, H> {
                         self.state = BulkExecState::Finished;
                         Ok(Action::Finished)
                     }
-                    _ => Err(Error::InvalidPacket),
+                    header => Err(Error::LibraryBug(eyre!(
+                        "unexpected row packet header: 0x{:02X}",
+                        header
+                    ))),
                 }
             }
 
-            BulkExecState::Finished => Err(Error::InvalidPacket),
+            BulkExecState::Finished => Err(Error::LibraryBug(eyre!(
+                "BulkExec::step called after finished"
+            ))),
         }
     }
 }

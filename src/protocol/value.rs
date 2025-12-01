@@ -1,6 +1,6 @@
 /// MySQL Binary Protocol Value Types
 use crate::constant::{ColumnFlags, ColumnType};
-use crate::error::{Error, Result};
+use crate::error::{Error, Result, eyre};
 use crate::protocol::command::ColumnTypeAndFlags;
 use crate::protocol::primitive::*;
 use zerocopy::byteorder::little_endian::{U16 as U16LE, U32 as U32LE};
@@ -109,24 +109,25 @@ impl<'a> Value<'a> {
                 match len {
                     0 => Ok((Value::Timestamp0, rest)),
                     4 => {
-                        let ts = Timestamp4::ref_from_bytes(&rest[..4])
-                            .map_err(|_| Error::InvalidPacket)?;
+                        let ts = Timestamp4::ref_from_bytes(&rest[..4]).map_err(Error::from_debug)?;
                         rest = &rest[4..];
                         Ok((Value::Timestamp4(ts), rest))
                     }
                     7 => {
-                        let ts = Timestamp7::ref_from_bytes(&rest[..7])
-                            .map_err(|_| Error::InvalidPacket)?;
+                        let ts = Timestamp7::ref_from_bytes(&rest[..7]).map_err(Error::from_debug)?;
                         rest = &rest[7..];
                         Ok((Value::Timestamp7(ts), rest))
                     }
                     11 => {
-                        let ts = Timestamp11::ref_from_bytes(&rest[..11])
-                            .map_err(|_| Error::InvalidPacket)?;
+                        let ts =
+                            Timestamp11::ref_from_bytes(&rest[..11]).map_err(Error::from_debug)?;
                         rest = &rest[11..];
                         Ok((Value::Timestamp11(ts), rest))
                     }
-                    _ => Err(Error::InvalidPacket),
+                    _ => Err(Error::LibraryBug(eyre!(
+                        "invalid timestamp length: {}",
+                        len
+                    ))),
                 }
             }
 
@@ -136,18 +137,16 @@ impl<'a> Value<'a> {
                 match len {
                     0 => Ok((Value::Time0, rest)),
                     8 => {
-                        let time =
-                            Time8::ref_from_bytes(&rest[..8]).map_err(|_| Error::InvalidPacket)?;
+                        let time = Time8::ref_from_bytes(&rest[..8]).map_err(Error::from_debug)?;
                         rest = &rest[8..];
                         Ok((Value::Time8(time), rest))
                     }
                     12 => {
-                        let time = Time12::ref_from_bytes(&rest[..12])
-                            .map_err(|_| Error::InvalidPacket)?;
+                        let time = Time12::ref_from_bytes(&rest[..12]).map_err(Error::from_debug)?;
                         rest = &rest[12..];
                         Ok((Value::Time12(time), rest))
                     }
-                    _ => Err(Error::InvalidPacket),
+                    _ => Err(Error::LibraryBug(eyre!("invalid time length: {}", len))),
                 }
             }
 

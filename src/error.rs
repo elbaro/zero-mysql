@@ -1,6 +1,10 @@
 use thiserror::Error;
 
+pub use color_eyre::eyre::eyre;
+
 use crate::protocol::{response::ErrPayload, response::ErrPayloadBytes};
+
+pub type Result<T> = core::result::Result<T, Error>;
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -13,11 +17,11 @@ pub enum Error {
     #[error("Bad config error: {0}")]
     BadConfigError(String),
 
-    #[error("Invalid packet")]
-    InvalidPacket,
+    #[error("A bug in zero-mysql: {0}")]
+    LibraryBug(color_eyre::Report),
 
     #[error("Unsupported authentication plugin: {0}")]
-    UnsupportedAuthPlugin(String),
+    Unsupported(String),
 
     #[error(
         "Connection mismatch: transaction started on connection {expected}, but commit/rollback called on connection {actual}"
@@ -40,4 +44,8 @@ impl From<core::convert::Infallible> for Error {
     }
 }
 
-pub type Result<T> = core::result::Result<T, Error>;
+impl Error {
+    pub fn from_debug(err: impl std::fmt::Debug) -> Self {
+        Self::LibraryBug(color_eyre::eyre::eyre!(format!("{:#?}", err)))
+    }
+}

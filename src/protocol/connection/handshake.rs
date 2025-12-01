@@ -7,7 +7,7 @@ use crate::constant::{
     CAPABILITIES_ALWAYS_ENABLED, CAPABILITIES_CONFIGURABLE, CapabilityFlags,
     MARIADB_CAPABILITIES_ENABLED, MariadbCapabilityFlags,
 };
-use crate::error::{Error, Result};
+use crate::error::{Error, Result, eyre};
 use crate::protocol::primitive::*;
 use crate::protocol::response::ErrPayloadBytes;
 
@@ -52,8 +52,7 @@ pub fn read_initial_handshake(payload: &[u8]) -> Result<InitialHandshake> {
     let (server_version_bytes, data) = read_string_null(data)?;
     let server_version = server_version_start..server_version_start + server_version_bytes.len();
 
-    let (fixed, data) =
-        HandshakeFixedFields::ref_from_prefix(data).map_err(|_| Error::InvalidPacket)?;
+    let (fixed, data) = HandshakeFixedFields::ref_from_prefix(data).map_err(Error::from_debug)?;
 
     let connection_id = fixed.connection_id.get();
     let charset = fixed.charset;
@@ -62,9 +61,9 @@ pub fn read_initial_handshake(payload: &[u8]) -> Result<InitialHandshake> {
         ((fixed.capability_flags_upper.get() as u32) << 16)
             | (fixed.capability_flags_lower.get() as u32),
     )
-    .ok_or(Error::InvalidPacket)?;
+    .ok_or_else(|| Error::LibraryBug(eyre!("invalid capability flags from server")))?;
     let mariadb_capabilities = MariadbCapabilityFlags::from_bits(fixed.mariadb_capabilities.get())
-        .ok_or(Error::InvalidPacket)?;
+        .ok_or_else(|| Error::LibraryBug(eyre!("invalid mariadb capability flags from server")))?;
     let auth_data_len = fixed.auth_data_len;
 
     let auth_data_2_len = (auth_data_len as usize).saturating_sub(9).max(12);
@@ -81,7 +80,10 @@ pub fn read_initial_handshake(payload: &[u8]) -> Result<InitialHandshake> {
         auth_plugin_name_start..auth_plugin_name_start + auth_plugin_name_bytes.len();
 
     if !rest.is_empty() {
-        return Err(Error::InvalidPacket);
+        return Err(Error::LibraryBug(eyre!(
+            "unexpected trailing data in handshake packet: {} bytes",
+            rest.len()
+        )));
     }
 
     Ok(InitialHandshake {
@@ -177,7 +179,10 @@ pub struct AuthSwitchRequest<'buf> {
 pub fn read_auth_switch_request(payload: &[u8]) -> Result<AuthSwitchRequest<'_>> {
     let (header, mut data) = read_int_1(payload)?;
     if header != 0xFE {
-        return Err(Error::InvalidPacket);
+        return Err(Error::LibraryBug(eyre!(
+            "expected auth switch header 0xFE, got 0x{:02X}",
+            header
+        )));
     }
 
     let (plugin_name, rest) = read_string_null(data)?;
@@ -189,7 +194,9 @@ pub fn read_auth_switch_request(payload: &[u8]) -> Result<AuthSwitchRequest<'_>>
             plugin_data: &data[..data.len() - 1],
         })
     } else {
-        Err(Error::InvalidPacket)
+        Err(Error::LibraryBug(eyre!(
+            "auth switch request plugin data not null-terminated"
+        )))
     }
 }
 
@@ -299,13 +306,18 @@ pub fn read_caching_sha2_password_fast_auth_result(
     payload: &[u8],
 ) -> Result<CachingSha2PasswordFastAuthResult> {
     if payload.is_empty() {
-        return Err(Error::InvalidPacket);
+        return Err(Error::LibraryBug(eyre!(
+            "empty payload for caching_sha2_password fast auth result"
+        )));
     }
 
     match payload[0] {
         0x03 => Ok(CachingSha2PasswordFastAuthResult::Success),
         0x04 => Ok(CachingSha2PasswordFastAuthResult::FullAuthRequired),
-        _ => Err(Error::InvalidPacket),
+        _ => Err(Error::LibraryBug(eyre!(
+            "unexpected caching_sha2_password fast auth result: 0x{:02X}",
+            payload[0]
+        ))),
     }
 }
 
@@ -482,7 +494,7 @@ impl Handshake {
                             .to_vec()
                     }
                     plugin => {
-                        return Err(Error::UnsupportedAuthPlugin(
+                        return Err(Error::Unsupported(
                             String::from_utf8_lossy(plugin).to_string(),
                         ));
                     }
@@ -535,7 +547,9 @@ impl Handshake {
             } => {
                 let payload = &buffer_set.read_buffer[..];
                 if payload.is_empty() {
-                    return Err(Error::InvalidPacket);
+                    return Err(Error::LibraryBug(eyre!(
+                        "empty payload while waiting for auth result"
+                    )));
                 }
 
                 match payload[0] {
@@ -563,7 +577,7 @@ impl Handshake {
                                     Ok(HandshakeResult::Read)
                                 }
                                 CachingSha2PasswordFastAuthResult::FullAuthRequired => {
-                                    Err(Error::UnsupportedAuthPlugin(
+                                    Err(Error::Unsupported(
                                         "caching_sha2_password full auth (requires SSL/RSA)"
                                             .to_string(),
                                     ))
@@ -586,7 +600,7 @@ impl Handshake {
                                 )
                                 .to_vec(),
                                 plugin => {
-                                    return Err(Error::UnsupportedAuthPlugin(
+                                    return Err(Error::Unsupported(
                                         String::from_utf8_lossy(plugin).to_string(),
                                     ));
                                 }
@@ -606,14 +620,19 @@ impl Handshake {
                             Ok(HandshakeResult::Write)
                         }
                     }
-                    _ => Err(Error::InvalidPacket),
+                    header => Err(Error::LibraryBug(eyre!(
+                        "unexpected packet header 0x{:02X} while waiting for auth result",
+                        header
+                    ))),
                 }
             }
 
             Self::WaitingFinalAuthResult { capability_flags } => {
                 let payload = &buffer_set.read_buffer[..];
                 if payload.is_empty() {
-                    return Err(Error::InvalidPacket);
+                    return Err(Error::LibraryBug(eyre!(
+                        "empty payload while waiting for final auth result"
+                    )));
                 }
 
                 match payload[0] {
@@ -629,18 +648,23 @@ impl Handshake {
                         // ERR packet - authentication failed
                         Err(ErrPayloadBytes(payload).into())
                     }
-                    _ => Err(Error::InvalidPacket),
+                    header => Err(Error::LibraryBug(eyre!(
+                        "unexpected packet header 0x{:02X} while waiting for final auth result",
+                        header
+                    ))),
                 }
             }
 
             Self::WaitingTlsUpgrade { .. } => {
                 // Should not call drive() in this state - use drive_after_tls() instead
-                Err(Error::InvalidPacket)
+                Err(Error::LibraryBug(eyre!(
+                    "drive() called while in WaitingTlsUpgrade state - use drive_after_tls() instead"
+                )))
             }
 
             Self::Connected => {
                 // Should not receive more data after connected
-                Err(Error::InvalidPacket)
+                Err(Error::LibraryBug(eyre!("drive() called while already connected")))
             }
         }
     }
@@ -664,7 +688,7 @@ impl Handshake {
                         auth_caching_sha2_password(&config.password, &auth_plugin_data).to_vec()
                     }
                     plugin => {
-                        return Err(Error::UnsupportedAuthPlugin(
+                        return Err(Error::Unsupported(
                             String::from_utf8_lossy(plugin).to_string(),
                         ));
                     }
@@ -697,7 +721,9 @@ impl Handshake {
             }
             other => {
                 *self = other;
-                Err(Error::InvalidPacket)
+                Err(Error::LibraryBug(eyre!(
+                    "drive_after_tls() called in unexpected state"
+                )))
             }
         }
     }

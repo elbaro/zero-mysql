@@ -1,4 +1,4 @@
-use crate::error::{Error, Result};
+use crate::error::{Error, Result, eyre};
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout};
 
 #[repr(C, packed)]
@@ -29,8 +29,11 @@ impl PacketHeader {
 
     pub fn from_bytes(data: &[u8]) -> Result<&Self> {
         if data.len() < 4 {
-            return Err(Error::InvalidPacket);
+            return Err(Error::LibraryBug(eyre!(
+                "packet header too short: {} < 4",
+                data.len()
+            )));
         }
-        Self::ref_from_bytes(&data[..4]).map_err(|_| Error::InvalidPacket)
+        Self::ref_from_bytes(&data[..4]).map_err(Error::from_debug)
     }
 }

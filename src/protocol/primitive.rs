@@ -1,13 +1,13 @@
 use std::hint::{cold_path, unlikely};
 
-use crate::error::{Error, Result};
+use crate::error::{Error, Result, eyre};
 use zerocopy::FromBytes;
 use zerocopy::byteorder::little_endian::{U16 as U16LE, U32 as U32LE, U64 as U64LE};
 
 /// Read 1-byte integer
 pub fn read_int_1(data: &[u8]) -> Result<(u8, &[u8])> {
     if unlikely(data.is_empty()) {
-        return Err(Error::InvalidPacket);
+        return Err(Error::LibraryBug(eyre!("read_int_1: empty buffer")));
     }
     Ok((data[0], &data[1..]))
 }
@@ -15,10 +15,13 @@ pub fn read_int_1(data: &[u8]) -> Result<(u8, &[u8])> {
 /// Read 2-byte little-endian integer
 pub fn read_int_2(data: &[u8]) -> Result<(u16, &[u8])> {
     if unlikely(data.len() < 2) {
-        return Err(Error::InvalidPacket);
+        return Err(Error::LibraryBug(eyre!(
+            "read_int_2: buffer too short: {} < 2",
+            data.len()
+        )));
     }
     let value = U16LE::ref_from_bytes(&data[..2])
-        .map_err(|_| Error::InvalidPacket)?
+        .map_err(Error::from_debug)?
         .get();
     Ok((value, &data[2..]))
 }
@@ -26,7 +29,10 @@ pub fn read_int_2(data: &[u8]) -> Result<(u16, &[u8])> {
 /// Read 3-byte little-endian integer
 pub fn read_int_3(data: &[u8]) -> Result<(u32, &[u8])> {
     if unlikely(data.len() < 3) {
-        return Err(Error::InvalidPacket);
+        return Err(Error::LibraryBug(eyre!(
+            "read_int_3: buffer too short: {} < 3",
+            data.len()
+        )));
     }
     let value = u32::from_le_bytes([data[0], data[1], data[2], 0]);
     Ok((value, &data[3..]))
@@ -35,10 +41,13 @@ pub fn read_int_3(data: &[u8]) -> Result<(u32, &[u8])> {
 /// Read 4-byte little-endian integer
 pub fn read_int_4(data: &[u8]) -> Result<(u32, &[u8])> {
     if unlikely(data.len() < 4) {
-        return Err(Error::InvalidPacket);
+        return Err(Error::LibraryBug(eyre!(
+            "read_int_4: buffer too short: {} < 4",
+            data.len()
+        )));
     }
     let value = U32LE::ref_from_bytes(&data[..4])
-        .map_err(|_| Error::InvalidPacket)?
+        .map_err(Error::from_debug)?
         .get();
     Ok((value, &data[4..]))
 }
@@ -46,7 +55,10 @@ pub fn read_int_4(data: &[u8]) -> Result<(u32, &[u8])> {
 /// Read 6-byte little-endian integer
 pub fn read_int_6(data: &[u8]) -> Result<(u64, &[u8])> {
     if unlikely(data.len() < 6) {
-        return Err(Error::InvalidPacket);
+        return Err(Error::LibraryBug(eyre!(
+            "read_int_6: buffer too short: {} < 6",
+            data.len()
+        )));
     }
     let value = u64::from_le_bytes([data[0], data[1], data[2], data[3], data[4], data[5], 0, 0]);
     Ok((value, &data[6..]))
@@ -55,10 +67,13 @@ pub fn read_int_6(data: &[u8]) -> Result<(u64, &[u8])> {
 /// Read 8-byte little-endian integer
 pub fn read_int_8(data: &[u8]) -> Result<(u64, &[u8])> {
     if unlikely(data.len() < 8) {
-        return Err(Error::InvalidPacket);
+        return Err(Error::LibraryBug(eyre!(
+            "read_int_8: buffer too short: {} < 8",
+            data.len()
+        )));
     }
     let value = U64LE::ref_from_bytes(&data[..8])
-        .map_err(|_| Error::InvalidPacket)?
+        .map_err(Error::from_debug)?
         .get();
     Ok((value, &data[8..]))
 }
@@ -81,7 +96,7 @@ pub fn read_int_lenenc(data: &[u8]) -> Result<(u64, &[u8])> {
         Some(val) => Ok((*val as u64, &data[1..])),
         None => {
             cold_path();
-            Err(Error::InvalidPacket)
+            Err(Error::LibraryBug(eyre!("read_int_lenenc: empty buffer")))
         }
     }
 }
@@ -89,7 +104,11 @@ pub fn read_int_lenenc(data: &[u8]) -> Result<(u64, &[u8])> {
 /// Read fixed-length string
 pub fn read_string_fix(data: &[u8], len: usize) -> Result<(&[u8], &[u8])> {
     if unlikely(data.len() < len) {
-        return Err(Error::InvalidPacket);
+        return Err(Error::LibraryBug(eyre!(
+            "read_string_fix: buffer too short: {} < {}",
+            data.len(),
+            len
+        )));
     }
     Ok((&data[..len], &data[len..]))
 }
@@ -102,7 +121,9 @@ pub fn read_string_null(data: &[u8]) -> Result<(&[u8], &[u8])> {
             return Ok((&data[..i], &data[i + 1..]));
         }
     }
-    Err(Error::InvalidPacket)
+    Err(Error::LibraryBug(eyre!(
+        "read_string_null: no null terminator found"
+    )))
 }
 
 /// Read length-encoded string

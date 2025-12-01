@@ -1,6 +1,6 @@
 use crate::buffer::BufferSet;
 use crate::constant::CommandByte;
-use crate::error::{Error, Result};
+use crate::error::{Error, Result, eyre};
 use crate::protocol::TextRowPayload;
 use crate::protocol::command::ColumnDefinitions;
 use crate::protocol::primitive::*;
@@ -22,7 +22,7 @@ pub fn write_query(out: &mut Vec<u8>, sql: &str) {
 /// - Otherwise: Result set (first byte is column count as length-encoded integer)
 pub fn read_query_response(payload: &[u8]) -> Result<QueryResponse<'_>> {
     if payload.is_empty() {
-        return Err(Error::InvalidPacket);
+        return Err(Error::LibraryBug(eyre!("read_query_response: empty payload")));
     }
 
     match payload[0] {
@@ -188,7 +188,9 @@ impl<'h, H: TextResultSetHandler> Query<'h, H> {
                         }
                     }
                     _ => {
-                        let cols = self.column_defs.as_ref().ok_or(Error::InvalidPacket)?;
+                        let cols = self.column_defs.as_ref().ok_or_else(|| {
+                            Error::LibraryBug(eyre!("no column definitions while reading rows"))
+                        })?;
                         let row = TextRowPayload(payload);
                         self.handler.row(cols.definitions(), row)?;
                         Ok(Action::NeedPacket(&mut buffer_set.read_buffer))
@@ -196,7 +198,9 @@ impl<'h, H: TextResultSetHandler> Query<'h, H> {
                 }
             }
 
-            QueryState::Finished => Err(Error::InvalidPacket),
+            QueryState::Finished => Err(Error::LibraryBug(eyre!(
+                "Query::step called after finished"
+            ))),
         }
     }
 }

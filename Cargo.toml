@@ -27,6 +27,7 @@ log = "0.4.28"
 auto_impl = "1.3.0"
 tracing = { version = "0.1", features = ["release_max_level_warn"] }
 crossbeam-queue = "0.3.12"
+color-eyre = "0.6.5"
 
 [lints.clippy]
 all = { level = "deny", priority = -1 }
@@ -148,4 +149,4 @@ harness = false
 [[bench]]
 name = "mysql_benches"
 harness = false
-required-features = ["dev"]
+required-features = []
