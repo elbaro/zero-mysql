@@ -14,10 +14,13 @@ use crate::protocol::command::query::{Query, write_query};
 use crate::protocol::command::utility::{
     DropHandler, FirstRowHandler, write_ping, write_reset_connection,
 };
-use crate::protocol::connection::{Handshake, HandshakeResult, InitialHandshake};
+use crate::protocol::command::ColumnDefinition;
+use crate::protocol::connection::{Handshake, HandshakeAction, InitialHandshake};
 use crate::protocol::packet::PacketHeader;
-use crate::protocol::response::ErrPayloadBytes;
+use crate::protocol::primitive::read_string_lenenc;
+use crate::protocol::response::{ErrPayloadBytes, OkPayloadBytes};
 use crate::protocol::r#trait::{BinaryResultSetHandler, TextResultSetHandler, param::Params};
+use crate::protocol::TextRowPayload;
 
 use super::stream::Stream;
 
@@ -59,101 +62,62 @@ impl Conn {
     pub async fn new_with_stream(stream: Stream, opts: &crate::opts::Opts) -> Result<Self> {
         let mut conn_stream = stream;
         let mut buffer_set = opts.buffer_pool.get_buffer_set();
-        let mut initial_handshake = None;
 
         #[cfg(feature = "tls")]
         let host = opts.host.clone().unwrap_or_default();
 
-        let mut handshake = Handshake::new(
-            opts.user.clone(),
-            opts.password.clone().unwrap_or_default(),
-            opts.db.clone(),
-            opts.capabilities,
-            opts.tls,
-        );
+        let mut handshake = Handshake::new(opts);
 
-        let mut last_sequence_id;
-        let capability_flags = loop {
-            let buffer = if matches!(handshake, Handshake::Start { .. }) {
-                &mut buffer_set.initial_handshake
-            } else {
-                &mut buffer_set.read_buffer
-            };
-            buffer.clear();
-            last_sequence_id = read_payload(&mut conn_stream, buffer).await?;
-
-            match handshake.drive(&mut buffer_set)? {
-                HandshakeResult::InitialHandshake {
-                    initial_handshake: hs,
-                } => {
-                    initial_handshake = Some(hs);
-                    write_handshake_payload(
-                        &mut conn_stream,
-                        &mut buffer_set,
-                        &mut last_sequence_id,
-                    )
-                    .await?;
+        loop {
+            match handshake.step(&mut buffer_set)? {
+                HandshakeAction::ReadPacket(buffer) => {
+                    buffer.clear();
+                    read_payload(&mut conn_stream, buffer).await?;
+                }
+                HandshakeAction::WritePacket { sequence_id } => {
+                    write_handshake_payload(&mut conn_stream, &mut buffer_set, sequence_id).await?;
+                    buffer_set.read_buffer.clear();
+                    read_payload(&mut conn_stream, &mut buffer_set.read_buffer).await?;
                 }
                 #[cfg(feature = "tls")]
-                HandshakeResult::SslRequest {
-                    initial_handshake: hs,
-                } => {
-                    initial_handshake = Some(hs);
-                    write_handshake_payload(
-                        &mut conn_stream,
-                        &mut buffer_set,
-                        &mut last_sequence_id,
-                    )
-                    .await?;
-
-                    // Upgrade to TLS
+                HandshakeAction::UpgradeTls { sequence_id } => {
+                    write_handshake_payload(&mut conn_stream, &mut buffer_set, sequence_id).await?;
                     conn_stream = conn_stream.upgrade_to_tls(&host).await?;
-
-                    // Continue handshake after TLS upgrade
-                    let HandshakeResult::Write = handshake.drive_after_tls(&mut buffer_set)? else {
-                        use color_eyre::eyre::eyre;
-                        return Err(Error::LibraryBug(eyre!(
-                            "expected Write result from drive_after_tls"
-                        )));
-                    };
-                    write_handshake_payload(
-                        &mut conn_stream,
-                        &mut buffer_set,
-                        &mut last_sequence_id,
-                    )
-                    .await?;
                 }
                 #[cfg(not(feature = "tls"))]
-                HandshakeResult::SslRequest { .. } => {
+                HandshakeAction::UpgradeTls { .. } => {
                     return Err(Error::BadConfigError(
                         "TLS requested but tls feature is not enabled".to_string(),
                     ));
                 }
-                HandshakeResult::Write => {
-                    write_handshake_payload(
-                        &mut conn_stream,
-                        &mut buffer_set,
-                        &mut last_sequence_id,
-                    )
-                    .await?;
-                }
-                HandshakeResult::Read => {
-                    // Nothing to write, just continue to read next packet
-                }
-                HandshakeResult::Connected { capability_flags } => {
-                    break capability_flags;
-                }
+                HandshakeAction::Finished => break,
             }
-        };
+        }
 
-        Ok(Self {
+        let (initial_handshake, capability_flags, mariadb_capabilities) = handshake.finish()?;
+
+        let conn = Self {
             stream: conn_stream,
             buffer_set,
-            initial_handshake: initial_handshake.unwrap(),
+            initial_handshake,
             capability_flags,
-            mariadb_capabilities: crate::constant::MARIADB_CAPABILITIES_ENABLED,
+            mariadb_capabilities,
             in_transaction: false,
-        })
+        };
+
+        // Upgrade to Unix socket if connected via TCP to loopback
+        let mut conn = if opts.upgrade_to_unix_socket && conn.stream.is_tcp_loopback() {
+            conn.try_upgrade_to_unix_socket(opts).await
+        } else {
+            conn
+        };
+
+        // Execute init command if specified
+        if let Some(init_command) = &opts.init_command {
+            conn.query_drop(init_command).await?;
+        }
+
+        Ok(conn)
     }
 
     pub fn server_version(&self) -> &[u8] {
@@ -187,6 +151,38 @@ impl Conn {
 
     pub(crate) fn set_in_transaction(&mut self, value: bool) {
         self.in_transaction = value;
+    }
+
+    /// Try to upgrade to Unix socket connection.
+    /// Returns upgraded conn on success, original conn on failure.
+    async fn try_upgrade_to_unix_socket(mut self, opts: &crate::opts::Opts) -> Self {
+        // Query the server for its Unix socket path
+        let mut handler = SocketPathHandler { path: None };
+        if self.query("SELECT @@socket", &mut handler).await.is_err() {
+            return self;
+        }
+
+        let socket_path = match handler.path {
+            Some(p) if !p.is_empty() => p,
+            _ => return self,
+        };
+
+        // Connect via Unix socket
+        let unix_stream = match UnixStream::connect(&socket_path).await {
+            Ok(s) => s,
+            Err(_) => return self,
+        };
+        let stream = Stream::unix(unix_stream);
+
+        // Create new connection over Unix socket (re-handshakes)
+        // Disable upgrade_to_unix_socket to prevent infinite recursion
+        let mut opts_unix = opts.clone();
+        opts_unix.upgrade_to_unix_socket = false;
+
+        match Box::pin(Self::new_with_stream(stream, &opts_unix)).await {
+            Ok(new_conn) => new_conn,
+            Err(_) => self,
+        }
     }
 
     /// Write a MySQL packet from write_buffer asynchronously, splitting it into 16MB chunks if necessary
@@ -549,23 +545,52 @@ async fn read_payload(reader: &mut Stream, buffer: &mut Vec<u8>) -> Result<u8> {
 async fn write_handshake_payload(
     stream: &mut Stream,
     buffer_set: &mut BufferSet,
-    last_sequence_id: &mut u8,
+    sequence_id: u8,
 ) -> Result<()> {
     let mut buffer = buffer_set.write_buffer_mut().as_mut_slice();
+    let mut seq_id = sequence_id;
 
     loop {
         let chunk_size = buffer[4..].len().min(0xFFFFFF);
-        *last_sequence_id = last_sequence_id.wrapping_add(1);
-        PacketHeader::mut_from_bytes(&mut buffer[0..4])?
-            .encode_in_place(chunk_size, *last_sequence_id);
+        PacketHeader::mut_from_bytes(&mut buffer[0..4])?.encode_in_place(chunk_size, seq_id);
         stream.write_all(&buffer[..4 + chunk_size]).await?;
 
         if chunk_size < 0xFFFFFF {
             break;
         }
 
+        seq_id = seq_id.wrapping_add(1);
         buffer = &mut buffer[0xFFFFFF..];
     }
     stream.flush().await?;
     Ok(())
+}
+
+/// Handler to capture socket path from SELECT @@socket query
+struct SocketPathHandler {
+    path: Option<String>,
+}
+
+impl TextResultSetHandler for SocketPathHandler {
+    fn no_result_set(&mut self, _: OkPayloadBytes) -> Result<()> {
+        Ok(())
+    }
+    fn resultset_start(&mut self, _: &[ColumnDefinition<'_>]) -> Result<()> {
+        Ok(())
+    }
+    fn resultset_end(&mut self, _: OkPayloadBytes) -> Result<()> {
+        Ok(())
+    }
+    fn row(&mut self, _: &[ColumnDefinition<'_>], row: TextRowPayload<'_>) -> Result<()> {
+        // 0xFB indicates NULL value
+        if row.0.first() == Some(&0xFB) {
+            return Ok(());
+        }
+        // Parse the first length-encoded string
+        let (value, _) = read_string_lenenc(row.0)?;
+        if !value.is_empty() {
+            self.path = Some(String::from_utf8_lossy(value).into_owned());
+        }
+        Ok(())
+    }
 }

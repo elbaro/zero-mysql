@@ -121,7 +121,8 @@ impl CapabilityFlags {
 }
 
 // Capabilities that are always enabled (required by zero-mysql)
-pub const CAPABILITIES_ALWAYS_ENABLED: CapabilityFlags = CapabilityFlags::CLIENT_LONG_FLAG
+pub const CAPABILITIES_ALWAYS_ENABLED: CapabilityFlags = CapabilityFlags::CLIENT_LONG_PASSWORD
+    .union(CapabilityFlags::CLIENT_LONG_FLAG)
     .union(CapabilityFlags::CLIENT_PROTOCOL_41)
     .union(CapabilityFlags::CLIENT_TRANSACTIONS)
     .union(CapabilityFlags::CLIENT_MULTI_STATEMENTS)
@@ -140,23 +141,23 @@ pub const CAPABILITIES_CONFIGURABLE: CapabilityFlags = CapabilityFlags::CLIENT_F
     .union(CapabilityFlags::CLIENT_CAN_HANDLE_EXPIRED_PASSWORDS);
 
 // Capabilities that are always disabled (deprecated, not implemented, or not applicable)
-pub const CAPABILITIES_ALWAYS_DISABLED: CapabilityFlags = CapabilityFlags::CLIENT_LONG_PASSWORD
-    .union(CapabilityFlags::CLIENT_CONNECT_WITH_DB) // This is automatically set if opts.db is provided
-    .union(CapabilityFlags::CLIENT_OPTIONAL_RESULTSET_METADATA) // TODO
-    .union(CapabilityFlags::CLIENT_NO_SCHEMA)
-    .union(CapabilityFlags::CLIENT_ODBC)
-    .union(CapabilityFlags::CLIENT_INTERACTIVE)
-    .union(CapabilityFlags::CLIENT_IGNORE_SIGPIPE)
-    .union(CapabilityFlags::CLIENT_RESERVED)
-    .union(CapabilityFlags::CLIENT_QUERY_ATTRIBUTES)
-    .union(CapabilityFlags::CLIENT_ZSTD_COMPRESSION_ALGORITHM)
-    .union(CapabilityFlags::CLIENT_MULTI_FACTOR_AUTHENTICATION)
-    .union(CapabilityFlags::CLIENT_CAPABILITY_EXTENSION)
-    .union(CapabilityFlags::CLIENT_SSL) // set by opts.tls
-    .union(CapabilityFlags::CLIENT_SSL_VERIFY_SERVER_CERT)
-    .union(CapabilityFlags::CLIENT_REMEMBER_OPTIONS)
-    .union(CapabilityFlags::CLIENT_CONNECT_ATTRS) // TODO
-    .union(CapabilityFlags::CLIENT_SESSION_TRACK); // To support this flag, we need to update the parsing logic
+pub const CAPABILITIES_ALWAYS_DISABLED: CapabilityFlags =
+    CapabilityFlags::CLIENT_CONNECT_WITH_DB // This is automatically set if opts.db is provided
+        .union(CapabilityFlags::CLIENT_OPTIONAL_RESULTSET_METADATA) // TODO
+        .union(CapabilityFlags::CLIENT_NO_SCHEMA)
+        .union(CapabilityFlags::CLIENT_ODBC)
+        .union(CapabilityFlags::CLIENT_INTERACTIVE)
+        .union(CapabilityFlags::CLIENT_IGNORE_SIGPIPE)
+        .union(CapabilityFlags::CLIENT_RESERVED)
+        .union(CapabilityFlags::CLIENT_QUERY_ATTRIBUTES)
+        .union(CapabilityFlags::CLIENT_ZSTD_COMPRESSION_ALGORITHM)
+        .union(CapabilityFlags::CLIENT_MULTI_FACTOR_AUTHENTICATION)
+        .union(CapabilityFlags::CLIENT_CAPABILITY_EXTENSION)
+        .union(CapabilityFlags::CLIENT_SSL) // set by opts.tls
+        .union(CapabilityFlags::CLIENT_SSL_VERIFY_SERVER_CERT)
+        .union(CapabilityFlags::CLIENT_REMEMBER_OPTIONS)
+        .union(CapabilityFlags::CLIENT_CONNECT_ATTRS) // TODO
+        .union(CapabilityFlags::CLIENT_SESSION_TRACK); // To support this flag, we need to update the parsing logic
 
 bitflags::bitflags! {
     /// MariaDB Extension Capability Flags

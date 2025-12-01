@@ -85,4 +85,23 @@ impl Stream {
             Self::Unix(r) => r.get_mut().flush(),
         }
     }
+
+    /// Returns true if this is a TCP connection to a loopback address
+    pub fn is_tcp_loopback(&self) -> bool {
+        match self {
+            Self::Tcp(r) => r
+                .get_ref()
+                .peer_addr()
+                .map(|addr| addr.ip().is_loopback())
+                .unwrap_or(false),
+            #[cfg(feature = "tls")]
+            Self::Tls(r) => r
+                .get_ref()
+                .get_ref()
+                .peer_addr()
+                .map(|addr| addr.ip().is_loopback())
+                .unwrap_or(false),
+            Self::Unix(_) => false,
+        }
+    }
 }

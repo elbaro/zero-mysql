@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::buffer_pool::{BufferPool, GLOBAL_BUFFER_POOL};
-use crate::constant::{CAPABILITIES_ALWAYS_ENABLED, CapabilityFlags};
+use crate::constant::{CapabilityFlags, CAPABILITIES_ALWAYS_ENABLED};
 use crate::error::Error;
 
 /// A configuration for connection
@@ -45,6 +45,12 @@ pub struct Opts {
 
     pub tls: bool,
 
+    /// When connected via TCP, read `SELECT @@socket` and reconnect to the unix socket
+    pub upgrade_to_unix_socket: bool,
+
+    /// SQL command to execute after connection is established
+    pub init_command: Option<String>,
+
     pub buffer_pool: Arc<BufferPool>,
 }
 
@@ -61,6 +67,8 @@ impl Default for Opts {
             user: String::new(),
             password: None,
             tls: false,
+            upgrade_to_unix_socket: true,
+            init_command: None,
             buffer_pool: Arc::clone(&GLOBAL_BUFFER_POOL),
         }
     }
@@ -100,17 +108,12 @@ impl TryFrom<&str> for Opts {
             .map(ToString::to_string);
 
         Ok(Self {
-            tcp_nodelay: true,
-            capabilities: CAPABILITIES_ALWAYS_ENABLED,
-            compress: false,
-            db,
             host,
             port,
-            socket: None,
             user,
             password,
-            tls: false,
-            buffer_pool: Arc::clone(&GLOBAL_BUFFER_POOL),
+            db,
+            ..Default::default()
         })
     }
 }

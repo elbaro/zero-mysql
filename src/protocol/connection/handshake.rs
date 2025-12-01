@@ -8,6 +8,7 @@ use crate::constant::{
     MARIADB_CAPABILITIES_ENABLED, MariadbCapabilityFlags,
 };
 use crate::error::{Error, Result, eyre};
+use crate::opts::Opts;
 use crate::protocol::primitive::*;
 use crate::protocol::response::ErrPayloadBytes;
 
@@ -97,75 +98,6 @@ pub fn read_initial_handshake(payload: &[u8]) -> Result<InitialHandshake> {
         status_flags: crate::constant::ServerStatusFlags::from_bits_truncate(status_flags),
         auth_plugin_name,
     })
-}
-
-/// Handshake response packet sent by client (HandshakeResponse41)
-#[derive(Debug, Clone)]
-pub struct HandshakeResponse41<'a> {
-    pub capability_flags: CapabilityFlags,
-    pub mariadb_capabilities: MariadbCapabilityFlags,
-    pub max_packet_size: u32,
-    pub charset: u8,
-    pub username: &'a str,
-    pub auth_response: &'a [u8],
-    pub database: Option<&'a str>,
-    pub auth_plugin_name: Option<&'a [u8]>,
-}
-
-/// Write handshake response packet (HandshakeResponse41)
-pub fn write_handshake_response(out: &mut Vec<u8>, response: &HandshakeResponse41) {
-    // capability flags (4 bytes)
-    write_int_4(out, response.capability_flags.bits());
-
-    // max packet size (4 bytes)
-    write_int_4(out, response.max_packet_size);
-
-    // charset (1 byte)
-    write_int_1(out, response.charset);
-
-    // reserved (23 bytes of 0x00)
-    out.extend_from_slice(&[0_u8; 19]);
-
-    // MariaDB capabilities
-    write_int_4(out, response.mariadb_capabilities.bits());
-
-    // username (null-terminated)
-    write_string_null(out, response.username.as_bytes());
-
-    // auth response - if no password, '\0'
-    if response
-        .capability_flags
-        .contains(CapabilityFlags::CLIENT_PLUGIN_AUTH_LENENC_CLIENT_DATA)
-    {
-        // length-encoded auth response (modern protocol)
-        // TODO: NULL avlue in auth_response should be encoded as ? (mariadb docs)
-        write_bytes_lenenc(out, response.auth_response);
-    } else {
-        // 1-byte length + data (older protocol)
-        write_int_1(out, response.auth_response.len() as u8);
-        out.extend_from_slice(response.auth_response);
-    }
-
-    // database name (null-terminated, if CLIENT_CONNECT_WITH_DB)
-    if let Some(db) = response.database {
-        write_string_null(out, db.as_bytes());
-    }
-
-    // auth plugin name (null-terminated, if CLIENT_PLUGIN_AUTH)
-    if let Some(plugin) = response.auth_plugin_name
-        && response
-            .capability_flags
-            .contains(CapabilityFlags::CLIENT_PLUGIN_AUTH)
-    {
-        write_string_null(out, plugin);
-    }
-
-    // TODO: CLIENT_CONNECT_ATTRS
-
-    // TODO: CLIENT_ZSTD_COMPRESSION_ALGORITHM
-    // if response.capability_flags.contains(CapabilityFlags::CLIENT_ZSTD_COMPRESSION_ALGORITHM) {
-    //     write_int_1(out, compression_level);
-    // }
 }
 
 /// Auth switch request from server
@@ -325,19 +257,8 @@ pub fn read_caching_sha2_password_fast_auth_result(
 // State Machine API for Handshake
 // ============================================================================
 
-/// Configuration for handshake
-pub struct HandshakeConfig {
-    pub username: String,
-    pub password: String,
-    pub database: Option<String>,
-    pub capabilities: CapabilityFlags,
-    pub tls: bool,
-}
-
 /// Write SSL request packet (sent before HandshakeResponse when TLS is enabled)
-pub fn write_ssl_request(out: &mut Vec<u8>, capability_flags: CapabilityFlags, charset: u8) {
-    use crate::protocol::primitive::*;
-
+fn write_ssl_request(out: &mut Vec<u8>, capability_flags: CapabilityFlags, charset: u8) {
     // capability flags (4 bytes)
     write_int_4(out, capability_flags.bits());
 
@@ -351,200 +272,140 @@ pub fn write_ssl_request(out: &mut Vec<u8>, capability_flags: CapabilityFlags, c
     out.extend_from_slice(&[0_u8; 23]);
 }
 
-/// Result of driving the handshake state machine
-pub enum HandshakeResult {
-    /// Initial handshake received - response written to buffer_set.write_buffer
-    InitialHandshake { initial_handshake: InitialHandshake },
-    /// SSL request written to buffer_set.write_buffer - upgrade connection to TLS, then call drive_after_tls()
-    SslRequest { initial_handshake: InitialHandshake },
-    /// Packet written to buffer_set.write_buffer - send it to the server, then read next response
-    Write,
-    /// Nothing to write, just read next response
-    Read,
-    /// Handshake complete, connection established
-    Connected { capability_flags: CapabilityFlags },
+/// Action returned by the Handshake state machine indicating what I/O operation is needed next
+pub enum HandshakeAction<'buf> {
+    /// Read a packet into the provided buffer
+    ReadPacket(&'buf mut Vec<u8>),
+
+    /// Write the prepared packet with given sequence_id, then read next response
+    WritePacket { sequence_id: u8 },
+
+    /// Write SSL request, then upgrade stream to TLS
+    UpgradeTls { sequence_id: u8 },
+
+    /// Handshake complete - call finish() to get results
+    Finished,
+}
+
+/// Internal state of the handshake state machine
+enum HandshakeState {
+    /// Initial state - need to read initial handshake from server
+    Start,
+    /// Waiting for initial handshake packet to be read
+    WaitingInitialHandshake,
+    /// SSL request written, waiting for TLS upgrade to complete
+    WaitingTlsUpgrade,
+    /// Handshake response written, waiting for auth result
+    WaitingAuthResult,
+    /// Auth switch response written, waiting for final result
+    WaitingFinalAuthResult,
+    /// Connected (terminal state)
+    Connected,
 }
 
 /// State machine for MySQL handshake
 ///
 /// Pure parsing and packet generation state machine without I/O dependencies.
-pub enum Handshake {
-    /// Waiting for initial handshake from server
-    Start { config: HandshakeConfig },
-    /// Sent SSL request, waiting for TLS upgrade to complete before sending handshake response
-    WaitingTlsUpgrade {
-        config: HandshakeConfig,
-        auth_plugin_name: Vec<u8>,
-        auth_plugin_data: Vec<u8>,
-        capability_flags: CapabilityFlags,
-    },
-    /// Sent handshake response, waiting for auth result
-    WaitingAuthResult {
-        config: HandshakeConfig,
-        initial_plugin: Vec<u8>,
-        capability_flags: CapabilityFlags,
-    },
-    /// Sent auth switch response, waiting for final auth result
-    WaitingFinalAuthResult { capability_flags: CapabilityFlags },
-    /// Connected (terminal state)
-    Connected,
+pub struct Handshake<'a> {
+    state: HandshakeState,
+    opts: &'a Opts,
+    initial_handshake: Option<InitialHandshake>,
+    next_sequence_id: u8,
+    capability_flags: Option<CapabilityFlags>,
+    mariadb_capabilities: Option<MariadbCapabilityFlags>,
 }
 
-impl Handshake {
+impl<'a> Handshake<'a> {
     /// Create a new handshake state machine
-    pub fn new(
-        username: String,
-        password: String,
-        database: Option<String>,
-        capabilities: CapabilityFlags,
-        tls: bool,
-    ) -> Self {
-        Self::Start {
-            config: HandshakeConfig {
-                username,
-                password,
-                database,
-                capabilities,
-                tls,
-            },
+    pub fn new(opts: &'a Opts) -> Self {
+        Self {
+            state: HandshakeState::Start,
+            opts,
+            initial_handshake: None,
+            next_sequence_id: 1,
+            capability_flags: None,
+            mariadb_capabilities: None,
         }
     }
 
-    /// Drive the state machine with the next payload
+    /// Drive the state machine forward
     ///
-    /// # Arguments
-    /// * `buffer_set` - The buffer set containing the payload to process.
-    ///   Output is written to `buffer_set.write_buffer` when needed.
-    ///
-    /// # Returns
-    /// * `Ok(HandshakeResult::Write)` - Send write_buffer, then read response
-    /// * `Ok(HandshakeResult::Read)` - Just read next response (nothing to write)
-    /// * `Ok(HandshakeResult::Connected)` - Handshake complete
-    /// * `Err(Error)` - An error occurred
-    pub fn drive(&mut self, buffer_set: &mut BufferSet) -> Result<HandshakeResult> {
-        match self {
-            Self::Start { config } => {
-                let handshake = read_initial_handshake(&buffer_set.initial_handshake)?;
-                let server_caps = handshake.capability_flags;
+    /// Returns an action indicating what I/O operation the caller should perform.
+    pub fn step<'buf>(&mut self, buffer_set: &'buf mut BufferSet) -> Result<HandshakeAction<'buf>> {
+        match &mut self.state {
+            HandshakeState::Start => {
+                self.state = HandshakeState::WaitingInitialHandshake;
+                Ok(HandshakeAction::ReadPacket(
+                    &mut buffer_set.initial_handshake,
+                ))
+            }
 
-                let mut client_caps =
-                    CAPABILITIES_ALWAYS_ENABLED | (config.capabilities & CAPABILITIES_CONFIGURABLE);
-                if config.database.is_some() {
+            HandshakeState::WaitingInitialHandshake => {
+                let handshake = read_initial_handshake(&buffer_set.initial_handshake)?;
+
+                let mut client_caps = CAPABILITIES_ALWAYS_ENABLED
+                    | (self.opts.capabilities & CAPABILITIES_CONFIGURABLE);
+                if self.opts.db.is_some() {
                     client_caps |= CapabilityFlags::CLIENT_CONNECT_WITH_DB;
                 }
-                if config.tls {
+                if self.opts.tls {
                     client_caps |= CapabilityFlags::CLIENT_SSL;
                 }
 
-                // Negotiate capabilities
-                let negotiated_caps = client_caps & server_caps;
-                if negotiated_caps.is_mariadb()
-                    && !handshake
+                let negotiated_caps = client_caps & handshake.capability_flags;
+                let mariadb_caps = if negotiated_caps.is_mariadb() {
+                    if !handshake
                         .mariadb_capabilities
                         .contains(MARIADB_CAPABILITIES_ENABLED)
-                {
-                    return Err(Error::BadConfigError(format!(
-                        "MariaDB server does not support the required capabilities. Server: {:?} Required: {:?}",
-                        handshake.mariadb_capabilities, MARIADB_CAPABILITIES_ENABLED
-                    )));
+                    {
+                        return Err(Error::Unsupported(format!(
+                            "MariaDB server does not support the required capabilities. Server: {:?} Required: {:?}",
+                            handshake.mariadb_capabilities, MARIADB_CAPABILITIES_ENABLED
+                        )));
+                    }
+                    MARIADB_CAPABILITIES_ENABLED
+                } else {
+                    MariadbCapabilityFlags::empty()
+                };
+
+                // Store capabilities and initial handshake
+                let charset = handshake.charset;
+                self.capability_flags = Some(negotiated_caps);
+                self.mariadb_capabilities = Some(mariadb_caps);
+                self.initial_handshake = Some(handshake);
+
+                // TLS: SSLRequest + HandshakeResponse
+                if self.opts.tls && negotiated_caps.contains(CapabilityFlags::CLIENT_SSL) {
+                    write_ssl_request(buffer_set.new_write_buffer(), negotiated_caps, charset);
+
+                    let seq = self.next_sequence_id;
+                    self.next_sequence_id = self.next_sequence_id.wrapping_add(1);
+                    self.state = HandshakeState::WaitingTlsUpgrade;
+
+                    Ok(HandshakeAction::UpgradeTls { sequence_id: seq })
+                } else {
+                    // No TLS: HandshakeResponse
+                    self.write_handshake_response(buffer_set)?;
+                    let seq = self.next_sequence_id;
+                    self.next_sequence_id = self.next_sequence_id.wrapping_add(1);
+                    self.state = HandshakeState::WaitingAuthResult;
+
+                    Ok(HandshakeAction::WritePacket { sequence_id: seq })
                 }
-
-                // Clone auth_plugin_name early to avoid borrow conflicts
-                let auth_plugin_name =
-                    buffer_set.initial_handshake[handshake.auth_plugin_name.clone()].to_vec();
-
-                // If TLS is requested and server supports it, send SSL request first
-                if config.tls && negotiated_caps.contains(CapabilityFlags::CLIENT_SSL) {
-                    write_ssl_request(
-                        buffer_set.new_write_buffer(),
-                        negotiated_caps,
-                        handshake.charset,
-                    );
-
-                    let config_owned = std::mem::replace(
-                        config,
-                        HandshakeConfig {
-                            username: String::new(),
-                            password: String::new(),
-                            database: None,
-                            capabilities: CapabilityFlags::empty(),
-                            tls: false,
-                        },
-                    );
-
-                    *self = Self::WaitingTlsUpgrade {
-                        config: config_owned,
-                        auth_plugin_name,
-                        auth_plugin_data: handshake.auth_plugin_data.clone(),
-                        capability_flags: negotiated_caps,
-                    };
-
-                    return Ok(HandshakeResult::SslRequest {
-                        initial_handshake: handshake,
-                    });
-                }
-
-                let auth_response = match auth_plugin_name.as_slice() {
-                    b"mysql_native_password" => {
-                        auth_mysql_native_password(&config.password, &handshake.auth_plugin_data)
-                            .to_vec()
-                    }
-                    b"caching_sha2_password" => {
-                        auth_caching_sha2_password(&config.password, &handshake.auth_plugin_data)
-                            .to_vec()
-                    }
-                    plugin => {
-                        return Err(Error::Unsupported(
-                            String::from_utf8_lossy(plugin).to_string(),
-                        ));
-                    }
-                };
-
-                let response = HandshakeResponse41 {
-                    capability_flags: negotiated_caps,
-                    mariadb_capabilities: if negotiated_caps.is_mysql() {
-                        MariadbCapabilityFlags::empty()
-                    } else {
-                        MARIADB_CAPABILITIES_ENABLED
-                    },
-                    max_packet_size: 0x0100_0000,
-                    charset: 45,
-                    username: &config.username,
-                    auth_response: &auth_response,
-                    database: config.database.as_deref(),
-                    auth_plugin_name: Some(&auth_plugin_name),
-                };
-
-                write_handshake_response(buffer_set.new_write_buffer(), &response);
-
-                let initial_plugin = auth_plugin_name;
-                let config_owned = std::mem::replace(
-                    config,
-                    HandshakeConfig {
-                        username: String::new(),
-                        password: String::new(),
-                        database: None,
-                        capabilities: CapabilityFlags::empty(),
-                        tls: false,
-                    },
-                );
-
-                *self = Self::WaitingAuthResult {
-                    config: config_owned,
-                    initial_plugin,
-                    capability_flags: negotiated_caps,
-                };
-
-                Ok(HandshakeResult::InitialHandshake {
-                    initial_handshake: handshake,
-                })
             }
 
-            Self::WaitingAuthResult {
-                config,
-                initial_plugin,
-                capability_flags,
-            } => {
+            HandshakeState::WaitingTlsUpgrade => {
+                // TLS upgrade completed, now send handshake response
+                self.write_handshake_response(buffer_set)?;
+
+                let seq = self.next_sequence_id;
+                self.next_sequence_id = self.next_sequence_id.wrapping_add(1);
+                self.state = HandshakeState::WaitingAuthResult;
+
+                Ok(HandshakeAction::WritePacket { sequence_id: seq })
+            }
+
+            HandshakeState::WaitingAuthResult => {
                 let payload = &buffer_set.read_buffer[..];
                 if payload.is_empty() {
                     return Err(Error::LibraryBug(eyre!(
@@ -552,14 +413,18 @@ impl Handshake {
                     )));
                 }
 
+                // Get initial plugin name from stored handshake
+                let initial_handshake = self.initial_handshake.as_ref().ok_or_else(|| {
+                    Error::LibraryBug(eyre!("initial_handshake not set in WaitingAuthResult"))
+                })?;
+                let initial_plugin =
+                    &buffer_set.initial_handshake[initial_handshake.auth_plugin_name.clone()];
+
                 match payload[0] {
                     0x00 => {
                         // OK packet - authentication succeeded
-                        let result = HandshakeResult::Connected {
-                            capability_flags: *capability_flags,
-                        };
-                        *self = Self::Connected;
-                        Ok(result)
+                        self.state = HandshakeState::Connected;
+                        Ok(HandshakeAction::Finished)
                     }
                     0xFF => {
                         // ERR packet - authentication failed
@@ -573,8 +438,7 @@ impl Handshake {
                             match result {
                                 CachingSha2PasswordFastAuthResult::Success => {
                                     // Need to read final OK packet
-                                    // Stay in same state but expect OK next
-                                    Ok(HandshakeResult::Read)
+                                    Ok(HandshakeAction::ReadPacket(&mut buffer_set.read_buffer))
                                 }
                                 CachingSha2PasswordFastAuthResult::FullAuthRequired => {
                                     Err(Error::Unsupported(
@@ -588,17 +452,16 @@ impl Handshake {
                             let auth_switch = read_auth_switch_request(payload)?;
 
                             // Compute auth response for new plugin
+                            let password = self.opts.password.as_deref().unwrap_or("");
                             let auth_response = match auth_switch.plugin_name {
-                                b"mysql_native_password" => auth_mysql_native_password(
-                                    &config.password,
-                                    auth_switch.plugin_data,
-                                )
-                                .to_vec(),
-                                b"caching_sha2_password" => auth_caching_sha2_password(
-                                    &config.password,
-                                    auth_switch.plugin_data,
-                                )
-                                .to_vec(),
+                                b"mysql_native_password" => {
+                                    auth_mysql_native_password(password, auth_switch.plugin_data)
+                                        .to_vec()
+                                }
+                                b"caching_sha2_password" => {
+                                    auth_caching_sha2_password(password, auth_switch.plugin_data)
+                                        .to_vec()
+                                }
                                 plugin => {
                                     return Err(Error::Unsupported(
                                         String::from_utf8_lossy(plugin).to_string(),
@@ -606,18 +469,16 @@ impl Handshake {
                                 }
                             };
 
-                            // Build auth switch response
                             write_auth_switch_response(
                                 buffer_set.new_write_buffer(),
                                 &auth_response,
                             );
 
-                            // Transition to waiting for final result
-                            *self = Self::WaitingFinalAuthResult {
-                                capability_flags: *capability_flags,
-                            };
+                            let seq = self.next_sequence_id;
+                            self.next_sequence_id = self.next_sequence_id.wrapping_add(1);
+                            self.state = HandshakeState::WaitingFinalAuthResult;
 
-                            Ok(HandshakeResult::Write)
+                            Ok(HandshakeAction::WritePacket { sequence_id: seq })
                         }
                     }
                     header => Err(Error::LibraryBug(eyre!(
@@ -627,7 +488,7 @@ impl Handshake {
                 }
             }
 
-            Self::WaitingFinalAuthResult { capability_flags } => {
+            HandshakeState::WaitingFinalAuthResult => {
                 let payload = &buffer_set.read_buffer[..];
                 if payload.is_empty() {
                     return Err(Error::LibraryBug(eyre!(
@@ -638,11 +499,8 @@ impl Handshake {
                 match payload[0] {
                     0x00 => {
                         // OK packet - authentication succeeded
-                        let result = HandshakeResult::Connected {
-                            capability_flags: *capability_flags,
-                        };
-                        *self = Self::Connected;
-                        Ok(result)
+                        self.state = HandshakeState::Connected;
+                        Ok(HandshakeAction::Finished)
                     }
                     0xFF => {
                         // ERR packet - authentication failed
@@ -655,76 +513,105 @@ impl Handshake {
                 }
             }
 
-            Self::WaitingTlsUpgrade { .. } => {
-                // Should not call drive() in this state - use drive_after_tls() instead
-                Err(Error::LibraryBug(eyre!(
-                    "drive() called while in WaitingTlsUpgrade state - use drive_after_tls() instead"
-                )))
-            }
-
-            Self::Connected => {
-                // Should not receive more data after connected
-                Err(Error::LibraryBug(eyre!("drive() called while already connected")))
-            }
+            HandshakeState::Connected => Err(Error::LibraryBug(eyre!(
+                "step() called after handshake completed"
+            ))),
         }
     }
 
-    /// Continue handshake after TLS upgrade is complete.
-    /// Call this after receiving SslRequest result and upgrading the connection to TLS.
-    /// Writes the handshake response to `buffer_set.write_buffer`.
-    pub fn drive_after_tls(&mut self, buffer_set: &mut BufferSet) -> Result<HandshakeResult> {
-        match std::mem::replace(self, Self::Connected) {
-            Self::WaitingTlsUpgrade {
-                config,
-                auth_plugin_name,
-                auth_plugin_data,
-                capability_flags,
-            } => {
-                let auth_response = match auth_plugin_name.as_slice() {
-                    b"mysql_native_password" => {
-                        auth_mysql_native_password(&config.password, &auth_plugin_data).to_vec()
-                    }
-                    b"caching_sha2_password" => {
-                        auth_caching_sha2_password(&config.password, &auth_plugin_data).to_vec()
-                    }
-                    plugin => {
-                        return Err(Error::Unsupported(
-                            String::from_utf8_lossy(plugin).to_string(),
-                        ));
-                    }
-                };
-
-                let response = HandshakeResponse41 {
-                    capability_flags,
-                    mariadb_capabilities: if capability_flags.is_mysql() {
-                        MariadbCapabilityFlags::empty()
-                    } else {
-                        MARIADB_CAPABILITIES_ENABLED
-                    },
-                    max_packet_size: 0x0100_0000,
-                    charset: 45,
-                    username: &config.username,
-                    auth_response: &auth_response,
-                    database: config.database.as_deref(),
-                    auth_plugin_name: Some(&auth_plugin_name),
-                };
-
-                write_handshake_response(buffer_set.new_write_buffer(), &response);
-
-                *self = Self::WaitingAuthResult {
-                    config,
-                    initial_plugin: auth_plugin_name,
-                    capability_flags,
-                };
-
-                Ok(HandshakeResult::Write)
-            }
-            other => {
-                *self = other;
-                Err(Error::LibraryBug(eyre!(
-                    "drive_after_tls() called in unexpected state"
-                )))
-            }
+    /// Consume the state machine and return the connection info
+    ///
+    /// Returns an error if called before handshake is complete (before Finished action)
+    pub fn finish(self) -> Result<(InitialHandshake, CapabilityFlags, MariadbCapabilityFlags)> {
+        if !matches!(self.state, HandshakeState::Connected) {
+            return Err(Error::LibraryBug(eyre!(
+                "finish() called before handshake completed"
+            )));
         }
+
+        let initial_handshake = self.initial_handshake.ok_or_else(|| {
+            Error::LibraryBug(eyre!("initial_handshake not set in Connected state"))
+        })?;
+        let capability_flags = self.capability_flags.ok_or_else(|| {
+            Error::LibraryBug(eyre!("capability_flags not set in Connected state"))
+        })?;
+        let mariadb_capabilities = self.mariadb_capabilities.ok_or_else(|| {
+            Error::LibraryBug(eyre!("mariadb_capabilities not set in Connected state"))
+        })?;
+
+        Ok((initial_handshake, capability_flags, mariadb_capabilities))
+    }
+
+    /// Write handshake response packet (HandshakeResponse41)
+    fn write_handshake_response(&self, buffer_set: &mut BufferSet) -> Result<()> {
+        buffer_set.new_write_buffer();
+
+        let handshake = self.initial_handshake.as_ref().ok_or_else(|| {
+            Error::LibraryBug(eyre!(
+                "initial_handshake not set in write_handshake_response"
+            ))
+        })?;
+        let capability_flags = self.capability_flags.ok_or_else(|| {
+            Error::LibraryBug(eyre!(
+                "capability_flags not set in write_handshake_response"
+            ))
+        })?;
+        let mariadb_capabilities = self.mariadb_capabilities.ok_or_else(|| {
+            Error::LibraryBug(eyre!(
+                "mariadb_capabilities not set in write_handshake_response"
+            ))
+        })?;
+
+        // Copy auth plugin name before getting mutable borrow
+
+        // Compute auth response based on plugin name
+        let password = self.opts.password.as_deref().unwrap_or("");
+        let auth_plugin_name = &buffer_set.initial_handshake[handshake.auth_plugin_name.clone()];
+        let auth_response = {
+            match auth_plugin_name {
+                b"mysql_native_password" => {
+                    auth_mysql_native_password(password, &handshake.auth_plugin_data).to_vec()
+                }
+                b"caching_sha2_password" => {
+                    auth_caching_sha2_password(password, &handshake.auth_plugin_data).to_vec()
+                }
+                plugin => {
+                    return Err(Error::Unsupported(
+                        String::from_utf8_lossy(plugin).to_string(),
+                    ));
+                }
+            }
+        };
+
+        let out = &mut buffer_set.write_buffer;
+        // capability flags (4 bytes)
+        write_int_4(out, capability_flags.bits());
+        // max packet size (4 bytes)
+        write_int_4(out, 0x0100_0000);
+        // charset (1 byte)
+        write_int_1(out, 45);
+        // reserved (19 bytes) + MariaDB capabilities (4 bytes) = 23 bytes
+        out.extend_from_slice(&[0_u8; 19]);
+        write_int_4(out, mariadb_capabilities.bits());
+        // username (null-terminated)
+        write_string_null(out, self.opts.user.as_bytes());
+        // auth response (length-encoded)
+        if capability_flags.contains(CapabilityFlags::CLIENT_PLUGIN_AUTH_LENENC_CLIENT_DATA) {
+            write_bytes_lenenc(out, &auth_response);
+        } else {
+            write_int_1(out, auth_response.len() as u8);
+            out.extend_from_slice(&auth_response);
+        }
+        // database name (null-terminated, if CLIENT_CONNECT_WITH_DB)
+        if let Some(db) = &self.opts.db {
+            write_string_null(out, db.as_bytes());
+        }
+
+        // auth plugin name (null-terminated, if CLIENT_PLUGIN_AUTH)
+        if capability_flags.contains(CapabilityFlags::CLIENT_PLUGIN_AUTH) {
+            write_string_null(out, &auth_plugin_name);
+        }
+
+        Ok(())
     }
 }
