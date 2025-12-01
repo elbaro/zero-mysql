@@ -5,7 +5,7 @@ use zerocopy::{FromBytes, Immutable, KnownLayout};
 use crate::buffer::BufferSet;
 use crate::constant::{
     CAPABILITIES_ALWAYS_ENABLED, CAPABILITIES_CONFIGURABLE, CapabilityFlags,
-    MARIADB_CAPABILITIES_ENABLED, MariadbCapabilityFlags,
+    MARIADB_CAPABILITIES_ENABLED, MAX_ALLOWED_PACKET, MariadbCapabilityFlags, UTF8MB4_GENERAL_CI,
 };
 use crate::error::{Error, Result, eyre};
 use crate::opts::Opts;
@@ -258,18 +258,28 @@ pub fn read_caching_sha2_password_fast_auth_result(
 // ============================================================================
 
 /// Write SSL request packet (sent before HandshakeResponse when TLS is enabled)
-fn write_ssl_request(out: &mut Vec<u8>, capability_flags: CapabilityFlags, charset: u8) {
+fn write_ssl_request(
+    out: &mut Vec<u8>,
+    capability_flags: CapabilityFlags,
+    mariadb_capabilities: MariadbCapabilityFlags,
+) {
     // capability flags (4 bytes)
     write_int_4(out, capability_flags.bits());
 
     // max packet size (4 bytes)
-    write_int_4(out, 0x0100_0000);
+    write_int_4(out, MAX_ALLOWED_PACKET);
 
     // charset (1 byte)
-    write_int_1(out, charset);
+    write_int_1(out, UTF8MB4_GENERAL_CI);
 
     // reserved (23 bytes of 0x00)
-    out.extend_from_slice(&[0_u8; 23]);
+    out.extend_from_slice(&[0_u8; 19]);
+
+    if capability_flags.is_mariadb() {
+        write_int_4(out, mariadb_capabilities.bits());
+    } else {
+        write_int_4(out, 0);
+    }
 }
 
 /// Action returned by the Handshake state machine indicating what I/O operation is needed next
@@ -369,14 +379,13 @@ impl<'a> Handshake<'a> {
                 };
 
                 // Store capabilities and initial handshake
-                let charset = handshake.charset;
                 self.capability_flags = Some(negotiated_caps);
                 self.mariadb_capabilities = Some(mariadb_caps);
                 self.initial_handshake = Some(handshake);
 
                 // TLS: SSLRequest + HandshakeResponse
                 if self.opts.tls && negotiated_caps.contains(CapabilityFlags::CLIENT_SSL) {
-                    write_ssl_request(buffer_set.new_write_buffer(), negotiated_caps, charset);
+                    write_ssl_request(buffer_set.new_write_buffer(), negotiated_caps, mariadb_caps);
 
                     let seq = self.next_sequence_id;
                     self.next_sequence_id = self.next_sequence_id.wrapping_add(1);
@@ -587,9 +596,9 @@ impl<'a> Handshake<'a> {
         // capability flags (4 bytes)
         write_int_4(out, capability_flags.bits());
         // max packet size (4 bytes)
-        write_int_4(out, 0x0100_0000);
+        write_int_4(out, MAX_ALLOWED_PACKET);
         // charset (1 byte)
-        write_int_1(out, 45);
+        write_int_1(out, UTF8MB4_GENERAL_CI);
         // reserved (19 bytes) + MariaDB capabilities (4 bytes) = 23 bytes
         out.extend_from_slice(&[0_u8; 19]);
         write_int_4(out, mariadb_capabilities.bits());
@@ -609,7 +618,7 @@ impl<'a> Handshake<'a> {
 
         // auth plugin name (null-terminated, if CLIENT_PLUGIN_AUTH)
         if capability_flags.contains(CapabilityFlags::CLIENT_PLUGIN_AUTH) {
-            write_string_null(out, &auth_plugin_name);
+            write_string_null(out, auth_plugin_name);
         }
 
         Ok(())

@@ -33,7 +33,7 @@ fn main() -> Result<()> {
 
     let url =
         std::env::var("DATABASE_URL").expect("DATABASE_URL must be set in order to run tests");
-    let url = format!("{url}?prefer_socket=false");
+    let url = format!("{url}");
     let pool = Pool::new(url.as_str())?;
     let mut conn = pool.get_conn()?;
 

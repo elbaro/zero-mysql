@@ -13,7 +13,7 @@ fn main() -> Result<()> {
 }
 
 async fn async_main() -> Result<()> {
-    let pool = Pool::new("mysql://test:1234@127.0.0.1/test?prefer_socket=false");
+    let pool = Pool::new("mysql://test:1234@127.0.0.1/test");
     let mut conn = pool.get_conn().await?;
 
     {

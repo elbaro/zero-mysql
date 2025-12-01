@@ -1,3 +1,9 @@
+/// client charset and collation
+pub const UTF8MB4_GENERAL_CI: u8 = 45;
+
+/// the max packet (header+payload) size accepted by client
+pub const MAX_ALLOWED_PACKET: u32 = 0x0100_0000;
+
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CommandByte {

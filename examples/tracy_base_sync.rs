@@ -11,7 +11,7 @@ fn main() -> Result<()> {
     // let subscriber = tracing_subscriber::registry().with(tracing_tracy::TracyLayer::default());
     // tracing::subscriber::set_global_default(subscriber).unwrap();
 
-    let pool = Pool::new("mysql://test:1234@localhost/test?prefer_socket=false")?;
+    let pool = Pool::new("mysql://test:1234@localhost/test")?;
     let mut conn = pool.get_conn()?;
 
     {
