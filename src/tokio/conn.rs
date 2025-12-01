@@ -27,7 +27,7 @@ pub struct Conn {
     initial_handshake: InitialHandshake,
     capability_flags: CapabilityFlags,
     mariadb_capabilities: crate::constant::MariadbCapabilityFlags,
-    pub(crate) in_transaction: bool,
+    in_transaction: bool,
 }
 
 impl Conn {
@@ -182,10 +182,14 @@ impl Conn {
         self.initial_handshake.status_flags
     }
 
+    pub(crate) fn set_in_transaction(&mut self, value: bool) {
+        self.in_transaction = value;
+    }
+
     /// Write a MySQL packet from write_buffer asynchronously, splitting it into 16MB chunks if necessary
     #[instrument(skip_all)]
     async fn write_payload(&mut self) -> Result<()> {
-        let mut sequence_id = 0u8;
+        let mut sequence_id = 0_u8;
         let mut buffer = self.buffer_set.write_buffer_mut().as_mut_slice();
 
         loop {
@@ -236,7 +240,8 @@ impl Conn {
 
         // Read and cache column definitions for MARIADB_CLIENT_CACHE_METADATA support
         let column_definitions = if num_columns > 0 {
-            self.read_column_definition_packets(num_columns as usize).await?;
+            self.read_column_definition_packets(num_columns as usize)
+                .await?;
             Some(ColumnDefinitions::new(
                 num_columns as usize,
                 std::mem::take(&mut self.buffer_set.column_definition_buffer),
@@ -268,7 +273,9 @@ impl Conn {
             let spare = out.spare_capacity_mut();
             self.stream.read_buf_exact(&mut spare[..length]).await?;
             // SAFETY: read_buf_exact filled exactly `length` bytes
-            unsafe { out.set_len(out.len() + length) };
+            unsafe {
+                out.set_len(out.len() + length);
+            }
         }
 
         Ok(header.sequence_id)
@@ -462,7 +469,7 @@ impl Conn {
     pub async fn run_transaction<F, Fut, R>(&mut self, f: F) -> Result<R>
     where
         F: FnOnce(&mut Conn, super::transaction::Transaction) -> Fut,
-        Fut: std::future::Future<Output = Result<R>>,
+        Fut: core::future::Future<Output = Result<R>>,
     {
         assert!(
             !self.in_transaction,
@@ -471,9 +478,9 @@ impl Conn {
 
         self.in_transaction = true;
 
-        if let Err(e) = self.query_drop("BEGIN").await {
+        if let Err(err) = self.query_drop("BEGIN").await {
             self.in_transaction = false;
-            return Err(e);
+            return Err(err);
         }
 
         let tx = super::transaction::Transaction::new(self.connection_id());
@@ -512,7 +519,9 @@ async fn read_payload(reader: &mut Stream, buffer: &mut Vec<u8>) -> Result<u8> {
     let spare = buffer.spare_capacity_mut();
     reader.read_buf_exact(&mut spare[..length]).await?;
     // SAFETY: read_buf_exact filled exactly `length` bytes
-    unsafe { buffer.set_len(length) };
+    unsafe {
+        buffer.set_len(length);
+    }
 
     let mut current_length = length;
     while current_length == 0xFFFFFF {
@@ -525,7 +534,9 @@ async fn read_payload(reader: &mut Stream, buffer: &mut Vec<u8>) -> Result<u8> {
         let spare = buffer.spare_capacity_mut();
         reader.read_buf_exact(&mut spare[..current_length]).await?;
         // SAFETY: read_buf_exact filled exactly `current_length` bytes
-        unsafe { buffer.set_len(buffer.len() + current_length) };
+        unsafe {
+            buffer.set_len(buffer.len() + current_length);
+        }
     }
 
     Ok(sequence_id)

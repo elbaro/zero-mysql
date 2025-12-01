@@ -318,8 +318,8 @@ impl<'a> NullBitmap<'a> {
     /// `true` if the column is NULL, `false` otherwise
     pub fn is_null(&self, idx: usize) -> bool {
         let bit_pos = idx + self.offset;
-        let byte_pos = bit_pos / 8;
-        let bit_offset = bit_pos % 8;
+        let byte_pos = bit_pos >> 3;
+        let bit_offset = bit_pos & 7;
 
         if byte_pos >= self.bitmap.len() {
             return false;
@@ -382,7 +382,7 @@ mod tests {
             column_type: ColumnType::MYSQL_TYPE_TINY,
             flags: ColumnFlags::UNSIGNED_FLAG,
         };
-        let data = [200u8];
+        let data = [200_u8];
         let (value, rest) = Value::parse(&type_and_flags, &data).unwrap();
         assert!(matches!(value, Value::UnsignedInt(200)));
         assert_eq!(rest.len(), 0);
@@ -437,7 +437,7 @@ mod tests {
         };
 
         // Timestamp0 (0000-00-00 00:00:00)
-        let data = [0u8]; // length = 0
+        let data = [0_u8]; // length = 0
         let (value, rest) = Value::parse(&type_and_flags, &data).unwrap();
         assert!(matches!(value, Value::Timestamp0));
         assert_eq!(rest.len(), 0);
@@ -487,7 +487,7 @@ mod tests {
         };
 
         // Time0 (00:00:00)
-        let data = [0u8]; // length = 0
+        let data = [0_u8]; // length = 0
         let (value, rest) = Value::parse(&type_and_flags, &data).unwrap();
         assert!(matches!(value, Value::Time0));
         assert_eq!(rest.len(), 0);

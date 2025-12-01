@@ -251,7 +251,7 @@ bitflags::bitflags! {
     }
 }
 
-#[allow(non_camel_case_types)]
+#[expect(non_camel_case_types)]
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ColumnType {

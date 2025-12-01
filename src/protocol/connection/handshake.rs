@@ -107,7 +107,7 @@ pub struct HandshakeResponse41<'a> {
     pub username: &'a str,
     pub auth_response: &'a [u8],
     pub database: Option<&'a str>,
-    pub auth_plugin_name: Option<&'a str>,
+    pub auth_plugin_name: Option<&'a [u8]>,
 }
 
 /// Write handshake response packet (HandshakeResponse41)
@@ -122,13 +122,13 @@ pub fn write_handshake_response(out: &mut Vec<u8>, response: &HandshakeResponse4
     write_int_1(out, response.charset);
 
     // reserved (23 bytes of 0x00)
-    out.extend_from_slice(&[0u8; 19]);
+    out.extend_from_slice(&[0_u8; 19]);
 
     // MariaDB capabilities
     write_int_4(out, response.mariadb_capabilities.bits());
 
     // username (null-terminated)
-    write_string_null(out, response.username);
+    write_string_null(out, response.username.as_bytes());
 
     // auth response - if no password, '\0'
     if response
@@ -146,7 +146,7 @@ pub fn write_handshake_response(out: &mut Vec<u8>, response: &HandshakeResponse4
 
     // database name (null-terminated, if CLIENT_CONNECT_WITH_DB)
     if let Some(db) = response.database {
-        write_string_null(out, db);
+        write_string_null(out, db.as_bytes());
     }
 
     // auth plugin name (null-terminated, if CLIENT_PLUGIN_AUTH)
@@ -168,9 +168,9 @@ pub fn write_handshake_response(out: &mut Vec<u8>, response: &HandshakeResponse4
 
 /// Auth switch request from server
 #[derive(Debug, Clone)]
-pub struct AuthSwitchRequest<'a> {
-    pub plugin_name: &'a [u8],
-    pub plugin_data: &'a [u8],
+pub struct AuthSwitchRequest<'buf> {
+    pub plugin_name: &'buf [u8],
+    pub plugin_data: &'buf [u8],
 }
 
 /// Read auth switch request (0xFE with length >= 9)
@@ -219,18 +219,14 @@ pub fn auth_mysql_native_password(password: &str, challenge: &[u8]) -> [u8; 20] 
     use sha1::{Digest, Sha1};
 
     if password.is_empty() {
-        return [0u8; 20];
+        return [0_u8; 20];
     }
 
     // stage1_hash = SHA1(password)
-    let mut hasher = Sha1::new();
-    hasher.update(password.as_bytes());
-    let stage1_hash = hasher.finalize();
+    let stage1_hash = Sha1::digest(password.as_bytes());
 
     // stage2_hash = SHA1(stage1_hash)
-    let mut hasher = Sha1::new();
-    hasher.update(stage1_hash);
-    let stage2_hash = hasher.finalize();
+    let stage2_hash = Sha1::digest(stage1_hash);
 
     // token_hash = SHA1(challenge + stage2_hash)
     let mut hasher = Sha1::new();
@@ -239,7 +235,7 @@ pub fn auth_mysql_native_password(password: &str, challenge: &[u8]) -> [u8; 20] 
     let token_hash = hasher.finalize();
 
     // result = stage1_hash XOR token_hash
-    let mut result = [0u8; 20];
+    let mut result = [0_u8; 20];
     for i in 0..20 {
         result[i] = stage1_hash[i] ^ token_hash[i];
     }
@@ -263,18 +259,14 @@ pub fn auth_caching_sha2_password(password: &str, challenge: &[u8]) -> [u8; 32] 
     use sha2::{Digest, Sha256};
 
     if password.is_empty() {
-        return [0u8; 32];
+        return [0_u8; 32];
     }
 
     // stage1 = SHA256(password)
-    let mut hasher = Sha256::new();
-    hasher.update(password.as_bytes());
-    let stage1 = hasher.finalize();
+    let stage1 = Sha256::digest(password.as_bytes());
 
     // stage2 = SHA256(stage1)
-    let mut hasher = Sha256::new();
-    hasher.update(stage1);
-    let stage2 = hasher.finalize();
+    let stage2 = Sha256::digest(stage1);
 
     // scramble = SHA256(stage2 + challenge)
     let mut hasher = Sha256::new();
@@ -283,7 +275,7 @@ pub fn auth_caching_sha2_password(password: &str, challenge: &[u8]) -> [u8; 32] 
     let scramble = hasher.finalize();
 
     // result = stage1 XOR scramble
-    let mut result = [0u8; 32];
+    let mut result = [0_u8; 32];
     for i in 0..32 {
         result[i] = stage1[i] ^ scramble[i];
     }
@@ -338,13 +330,13 @@ pub fn write_ssl_request(out: &mut Vec<u8>, capability_flags: CapabilityFlags, c
     write_int_4(out, capability_flags.bits());
 
     // max packet size (4 bytes)
-    write_int_4(out, 16777216);
+    write_int_4(out, 0x0100_0000);
 
     // charset (1 byte)
     write_int_1(out, charset);
 
     // reserved (23 bytes of 0x00)
-    out.extend_from_slice(&[0u8; 23]);
+    out.extend_from_slice(&[0_u8; 23]);
 }
 
 /// Result of driving the handshake state machine
@@ -503,12 +495,12 @@ impl Handshake {
                     } else {
                         MARIADB_CAPABILITIES_ENABLED
                     },
-                    max_packet_size: 16777216,
+                    max_packet_size: 0x0100_0000,
                     charset: 45,
                     username: &config.username,
                     auth_response: &auth_response,
                     database: config.database.as_deref(),
-                    auth_plugin_name: Some(std::str::from_utf8(&auth_plugin_name).unwrap()),
+                    auth_plugin_name: Some(&auth_plugin_name),
                 };
 
                 write_handshake_response(buffer_set.new_write_buffer(), &response);
@@ -685,12 +677,12 @@ impl Handshake {
                     } else {
                         MARIADB_CAPABILITIES_ENABLED
                     },
-                    max_packet_size: 16777216,
+                    max_packet_size: 0x0100_0000,
                     charset: 45,
                     username: &config.username,
                     auth_response: &auth_response,
                     database: config.database.as_deref(),
-                    auth_plugin_name: Some(std::str::from_utf8(&auth_plugin_name).unwrap()),
+                    auth_plugin_name: Some(&auth_plugin_name),
                 };
 
                 write_handshake_response(buffer_set.new_write_buffer(), &response);

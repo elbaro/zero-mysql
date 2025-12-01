@@ -3,12 +3,20 @@ use crate::protocol::value::NullBitmap;
 /// The payload part of a row packet.
 #[derive(Debug, Clone)]
 pub struct BinaryRowPayload<'a> {
-    pub(crate) null_bitmap: NullBitmap<'a>,
-    pub(crate) values: &'a [u8],
-    pub(crate) num_columns: usize,
+    null_bitmap: NullBitmap<'a>,
+    values: &'a [u8],
+    num_columns: usize,
 }
 
 impl<'a> BinaryRowPayload<'a> {
+    pub fn new(null_bitmap: NullBitmap<'a>, values: &'a [u8], num_columns: usize) -> Self {
+        Self {
+            null_bitmap,
+            values,
+            num_columns,
+        }
+    }
+
     pub fn null_bitmap(&self) -> NullBitmap<'_> {
         self.null_bitmap
     }

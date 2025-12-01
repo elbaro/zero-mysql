@@ -1,8 +1,8 @@
 use std::hint::{cold_path, unlikely};
 
 use crate::error::{Error, Result};
-use zerocopy::byteorder::little_endian::{U16 as U16LE, U32 as U32LE, U64 as U64LE};
 use zerocopy::FromBytes;
+use zerocopy::byteorder::little_endian::{U16 as U16LE, U32 as U32LE, U64 as U64LE};
 
 /// Read 1-byte integer
 pub fn read_int_1(data: &[u8]) -> Result<(u8, &[u8])> {
@@ -165,8 +165,8 @@ pub fn write_bytes_fix(out: &mut Vec<u8>, data: &[u8]) {
 
 /// Write null-terminated string
 #[inline]
-pub fn write_string_null(out: &mut Vec<u8>, s: &str) {
-    out.extend_from_slice(s.as_bytes());
+pub fn write_string_null(out: &mut Vec<u8>, bytes: &[u8]) {
+    out.extend_from_slice(bytes);
     out.push(0);
 }
 

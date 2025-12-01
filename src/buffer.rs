@@ -15,7 +15,7 @@ pub struct BufferSet {
     /// It is followed by payload bytes without considering 16MB split.
     /// Layout: [4-byte header space][payload that is possibly larger than 16MB]
     /// Bytes are valid during an operation.
-    write_buffer: Vec<u8>,
+    pub write_buffer: Vec<u8>,
 
     /// ColumnDefinition packets in one buffer
     /// Bytes are valid during an operation.
@@ -47,7 +47,7 @@ impl BufferSet {
     #[inline]
     pub fn new_write_buffer(&mut self) -> &mut Vec<u8> {
         self.write_buffer.clear();
-        self.write_buffer.extend_from_slice(&[0u8; 4]);
+        self.write_buffer.extend_from_slice(&[0_u8; 4]);
         &mut self.write_buffer
     }
 

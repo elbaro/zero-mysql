@@ -1,4 +1,5 @@
-use std::io::{BufReader, BorrowedCursor, Read, Write};
+use core::io::BorrowedCursor;
+use std::io::{BufReader, Read, Write};
 use std::net::TcpStream;
 use std::os::unix::net::UnixStream;
 
@@ -26,19 +27,24 @@ impl Stream {
         let tcp = match self {
             Self::Tcp(buf_reader) => buf_reader.into_inner(),
             #[cfg(feature = "tls")]
-            Self::Tls(_) => return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "Already using TLS",
-            )),
-            Self::Unix(_) => return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "TLS not supported for Unix sockets",
-            )),
+            Self::Tls(_) => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "Already using TLS",
+                ));
+            }
+            Self::Unix(_) => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "TLS not supported for Unix sockets",
+                ));
+            }
         };
 
         let connector = native_tls::TlsConnector::new()
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-        let tls_stream = connector.connect(host, tcp)
+        let tls_stream = connector
+            .connect(host, tcp)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
 
         Ok(Self::Tls(BufReader::new(tls_stream)))

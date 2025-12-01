@@ -18,8 +18,8 @@ use crate::protocol::connection::{Handshake, HandshakeResult, InitialHandshake};
 use crate::protocol::packet::PacketHeader;
 use crate::protocol::response::ErrPayloadBytes;
 use crate::protocol::r#trait::{BinaryResultSetHandler, TextResultSetHandler, param::Params};
-use std::hint::unlikely;
-use std::io::BorrowedBuf;
+use core::hint::unlikely;
+use core::io::BorrowedBuf;
 use std::net::TcpStream;
 use std::os::unix::net::UnixStream;
 use zerocopy::FromZeros;
@@ -33,10 +33,14 @@ pub struct Conn {
     initial_handshake: InitialHandshake,
     capability_flags: CapabilityFlags,
     mariadb_capabilities: crate::constant::MariadbCapabilityFlags,
-    pub(crate) in_transaction: bool,
+    in_transaction: bool,
 }
 
 impl Conn {
+    pub(crate) fn set_in_transaction(&mut self, value: bool) {
+        self.in_transaction = value;
+    }
+
     /// Create a new MySQL connection from connection options
     pub fn new<O: TryInto<crate::opts::Opts>>(opts: O) -> Result<Self>
     where
@@ -185,7 +189,7 @@ impl Conn {
     }
 
     fn write_payload(&mut self) -> Result<()> {
-        let mut sequence_id = 0u8;
+        let mut sequence_id = 0_u8;
         let mut buffer = self.buffer_set.write_buffer_mut().as_mut_slice();
 
         loop {
@@ -379,11 +383,7 @@ impl Conn {
     }
 
     /// Execute a prepared statement and discard all results
-    pub fn exec_drop<P>(
-        &mut self,
-        stmt: &mut PreparedStatement,
-        params: P,
-    ) -> Result<()>
+    pub fn exec_drop<P>(&mut self, stmt: &mut PreparedStatement, params: P) -> Result<()>
     where
         P: Params,
     {
@@ -507,7 +507,9 @@ fn read_payload(reader: &mut Stream, buffer: &mut Vec<u8>) -> Result<u8> {
     let mut buf: BorrowedBuf<'_> = (&mut spare[..length]).into();
     reader.read_buf_exact(buf.unfilled())?;
     // SAFETY: read_buf_exact filled exactly `length` bytes
-    unsafe { buffer.set_len(length) };
+    unsafe {
+        buffer.set_len(length);
+    }
 
     let mut current_length = length;
     while current_length == 0xFFFFFF {
@@ -521,7 +523,9 @@ fn read_payload(reader: &mut Stream, buffer: &mut Vec<u8>) -> Result<u8> {
         let mut buf: BorrowedBuf<'_> = (&mut spare[..current_length]).into();
         reader.read_buf_exact(buf.unfilled())?;
         // SAFETY: read_buf_exact filled exactly `current_length` bytes
-        unsafe { buffer.set_len(buffer.len() + current_length) };
+        unsafe {
+            buffer.set_len(buffer.len() + current_length);
+        }
     }
 
     Ok(sequence_id)
@@ -546,7 +550,9 @@ fn read_column_definition_packets(
         let mut buf: BorrowedBuf<'_> = (&mut spare[..length]).into();
         reader.read_buf_exact(buf.unfilled())?;
         // SAFETY: read_buf_exact filled exactly `length` bytes
-        unsafe { out.set_len(out.len() + length) };
+        unsafe {
+            out.set_len(out.len() + length);
+        }
     }
 
     Ok(header.sequence_id)

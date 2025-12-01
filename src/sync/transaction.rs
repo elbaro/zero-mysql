@@ -32,7 +32,7 @@ impl Transaction {
                 actual,
             });
         }
-        conn.in_transaction = false;
+        conn.set_in_transaction(false);
         conn.query_drop("COMMIT")
     }
 
@@ -53,7 +53,7 @@ impl Transaction {
                 actual,
             });
         }
-        conn.in_transaction = false;
+        conn.set_in_transaction(false);
         conn.query_drop("ROLLBACK")
     }
 }

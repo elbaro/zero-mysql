@@ -94,8 +94,8 @@ impl TryFrom<ErrPayloadBytes<'_>> for ErrPayload {
 #[repr(C, packed)]
 #[derive(Debug, Clone, Copy, FromBytes, KnownLayout, Immutable)]
 pub struct EofPacket {
-    pub(crate) warnings: U16LE,
-    pub(crate) status_flags: U16LE,
+    warnings: U16LE,
+    status_flags: U16LE,
 }
 
 impl EofPacket {

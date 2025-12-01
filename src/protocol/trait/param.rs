@@ -501,8 +501,8 @@ macro_rules! impl_params_for_tuple {
 
                 $(
                     if self.$idx.is_null() {
-                        let byte_pos = start_len + ($idx / 8);
-                        let bit_offset = $idx % 8;
+                        let byte_pos = start_len + ($idx >> 3);
+                        let bit_offset = $idx & 7;
                         out[byte_pos] |= 1 << bit_offset;
                     }
                 )+

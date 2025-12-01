@@ -25,7 +25,7 @@ pub enum Error {
     ConnectionMismatch { expected: u64, actual: u64 },
 }
 
-impl<'a> From<ErrPayloadBytes<'a>> for Error {
+impl<'buf> From<ErrPayloadBytes<'buf>> for Error {
     fn from(value: ErrPayloadBytes) -> Self {
         match ErrPayload::try_from(value) {
             Ok(err_payload) => Error::ServerError(err_payload),
@@ -34,10 +34,10 @@ impl<'a> From<ErrPayloadBytes<'a>> for Error {
     }
 }
 
-impl From<std::convert::Infallible> for Error {
-    fn from(err: std::convert::Infallible) -> Self {
+impl From<core::convert::Infallible> for Error {
+    fn from(err: core::convert::Infallible) -> Self {
         match err {}
     }
 }
 
-pub type Result<T> = std::result::Result<T, Error>;
+pub type Result<T> = core::result::Result<T, Error>;

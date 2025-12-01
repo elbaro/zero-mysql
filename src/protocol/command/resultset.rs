@@ -24,14 +24,14 @@ pub fn read_binary_row<'a>(payload: &'a [u8], num_columns: usize) -> Result<Bina
 
     // NULL bitmap: (num_columns + 7 + 2) / 8 bytes
     // The +2 offset is for binary protocol
-    let null_bitmap_len = (num_columns + 7 + 2) / 8;
+    let null_bitmap_len = (num_columns + 7 + 2) >> 3;
     let (null_bitmap, rest) = read_string_fix(data, null_bitmap_len)?;
     data = rest;
 
     // Remaining data is the values
-    Ok(BinaryRowPayload {
-        null_bitmap: NullBitmap::for_result_set(null_bitmap),
-        values: data,
+    Ok(BinaryRowPayload::new(
+        NullBitmap::for_result_set(null_bitmap),
+        data,
         num_columns,
-    })
+    ))
 }
