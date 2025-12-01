@@ -27,6 +27,9 @@ pub enum Error {
         "Connection mismatch: transaction started on connection {expected}, but commit/rollback called on connection {actual}"
     )]
     ConnectionMismatch { expected: u64, actual: u64 },
+
+    #[error("Cannot nest transactions - a transaction is already active")]
+    NestedTransaction,
 }
 
 impl<'buf> From<ErrPayloadBytes<'buf>> for Error {
@@ -47,5 +50,11 @@ impl From<core::convert::Infallible> for Error {
 impl Error {
     pub fn from_debug(err: impl std::fmt::Debug) -> Self {
         Self::LibraryBug(color_eyre::eyre::eyre!(format!("{:#?}", err)))
+    }
+}
+
+impl<Src, Dst: ?Sized> From<zerocopy::CastError<Src, Dst>> for Error {
+    fn from(err: zerocopy::CastError<Src, Dst>) -> Self {
+        Self::LibraryBug(color_eyre::eyre::eyre!("{:#?}", err))
     }
 }

@@ -34,6 +34,6 @@ impl PacketHeader {
                 data.len()
             )));
         }
-        Self::ref_from_bytes(&data[..4]).map_err(Error::from_debug)
+        Ok(Self::ref_from_bytes(&data[..4])?)
     }
 }

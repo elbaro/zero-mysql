@@ -133,5 +133,5 @@ pub fn read_eof_packet(payload: &[u8]) -> Result<&EofPacket> {
     }
 
     // Zero-copy cast using zerocopy
-    EofPacket::ref_from_bytes(&data[..4]).map_err(Error::from_debug)
+    Ok(EofPacket::ref_from_bytes(&data[..4])?)
 }

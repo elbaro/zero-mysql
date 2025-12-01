@@ -51,7 +51,7 @@ pub fn write_prepare(out: &mut Vec<u8>, sql: &str) {
 pub fn read_prepare_ok(payload: &[u8]) -> Result<&PrepareOk> {
     let (status, data) = read_int_1(payload)?;
     debug_assert_eq!(status, 0x00);
-    PrepareOk::ref_from_bytes(&data[..11]).map_err(Error::from_debug)
+    Ok(PrepareOk::ref_from_bytes(&data[..11])?)
 }
 
 /// Write COM_STMT_EXECUTE command

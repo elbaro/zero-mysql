@@ -197,8 +197,7 @@ impl Conn {
 
         loop {
             let chunk_size = buffer[4..].len().min(0xFFFFFF);
-            PacketHeader::mut_from_bytes(&mut buffer[0..4])
-                .unwrap()
+            PacketHeader::mut_from_bytes(&mut buffer[0..4])?
                 .encode_in_place(chunk_size, sequence_id);
             self.stream.write_all(&buffer[..4 + chunk_size]).await?;
 
@@ -467,17 +466,16 @@ impl Conn {
 
     /// Execute a closure within a transaction (async)
     ///
-    /// # Panics
-    /// Panics if called while already in a transaction (nested transactions are not supported).
+    /// # Errors
+    /// Returns `Error::NestedTransaction` if called while already in a transaction
     pub async fn run_transaction<F, Fut, R>(&mut self, f: F) -> Result<R>
     where
         F: FnOnce(&mut Conn, super::transaction::Transaction) -> Fut,
         Fut: core::future::Future<Output = Result<R>>,
     {
-        assert!(
-            !self.in_transaction,
-            "Cannot nest transactions - a transaction is already active"
-        );
+        if self.in_transaction {
+            return Err(Error::NestedTransaction);
+        }
 
         self.in_transaction = true;
 
@@ -519,11 +517,14 @@ async fn read_payload(reader: &mut Stream, buffer: &mut Vec<u8>) -> Result<u8> {
 
     buffer.reserve(length);
 
-    let spare = buffer.spare_capacity_mut();
-    reader.read_buf_exact(&mut spare[..length]).await?;
-    // SAFETY: read_buf_exact filled exactly `length` bytes
-    unsafe {
-        buffer.set_len(length);
+    // read the first payload
+    {
+        let spare = buffer.spare_capacity_mut();
+        reader.read_buf_exact(&mut spare[..length]).await?;
+        // SAFETY: read_buf_exact filled exactly `length` bytes
+        unsafe {
+            buffer.set_len(length);
+        }
     }
 
     let mut current_length = length;
@@ -555,8 +556,7 @@ async fn write_handshake_payload(
     loop {
         let chunk_size = buffer[4..].len().min(0xFFFFFF);
         *last_sequence_id = last_sequence_id.wrapping_add(1);
-        PacketHeader::mut_from_bytes(&mut buffer[0..4])
-            .unwrap()
+        PacketHeader::mut_from_bytes(&mut buffer[0..4])?
             .encode_in_place(chunk_size, *last_sequence_id);
         stream.write_all(&buffer[..4 + chunk_size]).await?;
 

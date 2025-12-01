@@ -1,23 +1,23 @@
-use crate::PreparedStatement;
 use crate::buffer::BufferSet;
 use crate::buffer_pool::PooledBufferSet;
 use crate::constant::CapabilityFlags;
 use crate::error::{Error, Result};
-use crate::protocol::command::Action;
-use crate::protocol::command::bulk_exec::{BulkExec, BulkFlags, BulkParamsSet, write_bulk_execute};
-use crate::protocol::command::prepared::Exec;
+use crate::protocol::command::bulk_exec::{write_bulk_execute, BulkExec, BulkFlags, BulkParamsSet};
 use crate::protocol::command::prepared::write_execute;
+use crate::protocol::command::prepared::Exec;
 use crate::protocol::command::prepared::{read_prepare_ok, write_prepare};
-use crate::protocol::command::query::Query;
 use crate::protocol::command::query::write_query;
-use crate::protocol::command::utility::DropHandler;
-use crate::protocol::command::utility::FirstRowHandler;
+use crate::protocol::command::query::Query;
 use crate::protocol::command::utility::write_ping;
 use crate::protocol::command::utility::write_reset_connection;
+use crate::protocol::command::utility::DropHandler;
+use crate::protocol::command::utility::FirstRowHandler;
+use crate::protocol::command::Action;
 use crate::protocol::connection::{Handshake, HandshakeResult, InitialHandshake};
 use crate::protocol::packet::PacketHeader;
+use crate::protocol::r#trait::{param::Params, BinaryResultSetHandler, TextResultSetHandler};
 use crate::protocol::response::ErrPayloadBytes;
-use crate::protocol::r#trait::{BinaryResultSetHandler, TextResultSetHandler, param::Params};
+use crate::PreparedStatement;
 use core::hint::unlikely;
 use core::io::BorrowedBuf;
 use std::net::TcpStream;
@@ -197,8 +197,7 @@ impl Conn {
 
         loop {
             let chunk_size = buffer[4..].len().min(0xFFFFFF);
-            PacketHeader::mut_from_bytes(&mut buffer[0..4])
-                .unwrap()
+            PacketHeader::mut_from_bytes(&mut buffer[0..4])?
                 .encode_in_place(chunk_size, sequence_id);
             self.stream.write_all(&buffer[..4 + chunk_size])?;
 
@@ -456,16 +455,15 @@ impl Conn {
 
     /// Execute a closure within a transaction
     ///
-    /// # Panics
-    /// Panics if called while already in a transaction
+    /// # Errors
+    /// Returns `Error::NestedTransaction` if called while already in a transaction
     pub fn run_transaction<F, R>(&mut self, f: F) -> Result<R>
     where
         F: FnOnce(&mut Conn, super::transaction::Transaction) -> Result<R>,
     {
-        assert!(
-            !self.in_transaction,
-            "Cannot nest transactions - a transaction is already active"
-        );
+        if self.in_transaction {
+            return Err(Error::NestedTransaction);
+        }
 
         self.in_transaction = true;
 
@@ -506,12 +504,14 @@ fn read_payload(reader: &mut Stream, buffer: &mut Vec<u8>) -> Result<u8> {
 
     buffer.reserve(length);
 
-    let spare = buffer.spare_capacity_mut();
-    let mut buf: BorrowedBuf<'_> = (&mut spare[..length]).into();
-    reader.read_buf_exact(buf.unfilled())?;
-    // SAFETY: read_buf_exact filled exactly `length` bytes
-    unsafe {
-        buffer.set_len(length);
+    {
+        let spare = buffer.spare_capacity_mut();
+        let mut buf: BorrowedBuf<'_> = (&mut spare[..length]).into();
+        reader.read_buf_exact(buf.unfilled())?;
+        // SAFETY: read_buf_exact filled exactly `length` bytes
+        unsafe {
+            buffer.set_len(length);
+        }
     }
 
     let mut current_length = length;
@@ -571,8 +571,7 @@ fn write_handshake_payload(
     loop {
         let chunk_size = buffer[4..].len().min(0xFFFFFF);
         *last_sequence_id = last_sequence_id.wrapping_add(1);
-        PacketHeader::mut_from_bytes(&mut buffer[0..4])
-            .unwrap()
+        PacketHeader::mut_from_bytes(&mut buffer[0..4])?
             .encode_in_place(chunk_size, *last_sequence_id);
         stream.write_all(&buffer[..4 + chunk_size])?;
 

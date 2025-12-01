@@ -52,7 +52,7 @@ pub fn read_initial_handshake(payload: &[u8]) -> Result<InitialHandshake> {
     let (server_version_bytes, data) = read_string_null(data)?;
     let server_version = server_version_start..server_version_start + server_version_bytes.len();
 
-    let (fixed, data) = HandshakeFixedFields::ref_from_prefix(data).map_err(Error::from_debug)?;
+    let (fixed, data) = HandshakeFixedFields::ref_from_prefix(data)?;
 
     let connection_id = fixed.connection_id.get();
     let charset = fixed.charset;

@@ -1,5 +1,5 @@
 use crate::constant::{ColumnFlags, ColumnType};
-use crate::error::{Error, Result, eyre};
+use crate::error::{eyre, Error, Result};
 use crate::protocol::primitive::*;
 use zerocopy::byteorder::little_endian::{U16 as U16LE, U32 as U32LE};
 use zerocopy::{FromBytes, Immutable, KnownLayout};
@@ -20,7 +20,7 @@ impl<'a> ColumnDefinitionBytes<'a> {
             )));
         }
         let tail_bytes = &self.0[self.0.len() - 12..];
-        ColumnDefinitionTail::ref_from_bytes(tail_bytes).map_err(Error::from_debug)
+        Ok(ColumnDefinitionTail::ref_from_bytes(tail_bytes)?)
     }
 }
 
@@ -52,7 +52,7 @@ impl<'a> TryFrom<ColumnDefinitionBytes<'a>> for ColumnDefinition<'a> {
         // ─── Columndefinitiontail ────────────────────────────────────
         // length is always 0x0c
         let (_length, data) = read_int_lenenc(data)?;
-        let tail = ColumnDefinitionTail::ref_from_bytes(data).map_err(Error::from_debug)?;
+        let tail = ColumnDefinitionTail::ref_from_bytes(data)?;
         Ok(Self {
             // catalog,
             schema,
@@ -95,13 +95,15 @@ impl ColumnDefinitionTail {
 
     /// Returns an error if the column type is unknown
     pub fn column_type(&self) -> Result<ColumnType> {
-        ColumnType::from_u8(self.column_type)
-            .ok_or_else(|| Error::LibraryBug(eyre!("unknown column type: 0x{:02X}", self.column_type)))
+        ColumnType::from_u8(self.column_type).ok_or_else(|| {
+            Error::LibraryBug(eyre!("unknown column type: 0x{:02X}", self.column_type))
+        })
     }
 
     pub fn flags(&self) -> Result<ColumnFlags> {
-        ColumnFlags::from_bits(self.flags.get())
-            .ok_or_else(|| Error::LibraryBug(eyre!("invalid column flags: 0x{:04X}", self.flags.get())))
+        ColumnFlags::from_bits(self.flags.get()).ok_or_else(|| {
+            Error::LibraryBug(eyre!("invalid column flags: 0x{:04X}", self.flags.get()))
+        })
     }
 
     /// A handy function to get `ColumnTypeAndFlags` for decoding a value
@@ -124,12 +126,14 @@ impl ColumnDefinitions {
             let mut buf = packets.as_slice();
             let mut definitions = Vec::with_capacity(num_columns);
             for _ in 0..num_columns {
-                let len = u32::from_ne_bytes(buf[0..4].try_into().unwrap()) as usize;
+                let len = u32::from_ne_bytes([buf[0], buf[1], buf[2], buf[3]]) as usize;
                 definitions.push(ColumnDefinition::try_from(ColumnDefinitionBytes(
                     &buf[4..4 + len],
                 ))?);
                 buf = &buf[4 + len..]; // Advance past the length prefix and payload
             }
+
+            // Safety: borrowed data is valid for 'static because Self holds packets
             unsafe {
                 std::mem::transmute::<Vec<ColumnDefinition<'_>>, Vec<ColumnDefinition<'static>>>(
                     definitions,
@@ -260,11 +264,9 @@ mod tests {
         assert_eq!(type_and_flags.column_type, ColumnType::MYSQL_TYPE_LONG);
         assert!(type_and_flags.flags.contains(ColumnFlags::NOT_NULL_FLAG));
         assert!(type_and_flags.flags.contains(ColumnFlags::PRI_KEY_FLAG));
-        assert!(
-            type_and_flags
-                .flags
-                .contains(ColumnFlags::AUTO_INCREMENT_FLAG)
-        );
+        assert!(type_and_flags
+            .flags
+            .contains(ColumnFlags::AUTO_INCREMENT_FLAG));
         assert!(type_and_flags.flags.contains(ColumnFlags::PART_KEY_FLAG));
     }
 

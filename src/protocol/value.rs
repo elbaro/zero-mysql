@@ -109,18 +109,17 @@ impl<'a> Value<'a> {
                 match len {
                     0 => Ok((Value::Timestamp0, rest)),
                     4 => {
-                        let ts = Timestamp4::ref_from_bytes(&rest[..4]).map_err(Error::from_debug)?;
+                        let ts = Timestamp4::ref_from_bytes(&rest[..4])?;
                         rest = &rest[4..];
                         Ok((Value::Timestamp4(ts), rest))
                     }
                     7 => {
-                        let ts = Timestamp7::ref_from_bytes(&rest[..7]).map_err(Error::from_debug)?;
+                        let ts = Timestamp7::ref_from_bytes(&rest[..7])?;
                         rest = &rest[7..];
                         Ok((Value::Timestamp7(ts), rest))
                     }
                     11 => {
-                        let ts =
-                            Timestamp11::ref_from_bytes(&rest[..11]).map_err(Error::from_debug)?;
+                        let ts = Timestamp11::ref_from_bytes(&rest[..11])?;
                         rest = &rest[11..];
                         Ok((Value::Timestamp11(ts), rest))
                     }
@@ -137,12 +136,12 @@ impl<'a> Value<'a> {
                 match len {
                     0 => Ok((Value::Time0, rest)),
                     8 => {
-                        let time = Time8::ref_from_bytes(&rest[..8]).map_err(Error::from_debug)?;
+                        let time = Time8::ref_from_bytes(&rest[..8])?;
                         rest = &rest[8..];
                         Ok((Value::Time8(time), rest))
                     }
                     12 => {
-                        let time = Time12::ref_from_bytes(&rest[..12]).map_err(Error::from_debug)?;
+                        let time = Time12::ref_from_bytes(&rest[..12])?;
                         rest = &rest[12..];
                         Ok((Value::Time12(time), rest))
                     }

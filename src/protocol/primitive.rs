@@ -20,9 +20,7 @@ pub fn read_int_2(data: &[u8]) -> Result<(u16, &[u8])> {
             data.len()
         )));
     }
-    let value = U16LE::ref_from_bytes(&data[..2])
-        .map_err(Error::from_debug)?
-        .get();
+    let value = U16LE::ref_from_bytes(&data[..2])?.get();
     Ok((value, &data[2..]))
 }
 
@@ -46,9 +44,7 @@ pub fn read_int_4(data: &[u8]) -> Result<(u32, &[u8])> {
             data.len()
         )));
     }
-    let value = U32LE::ref_from_bytes(&data[..4])
-        .map_err(Error::from_debug)?
-        .get();
+    let value = U32LE::ref_from_bytes(&data[..4])?.get();
     Ok((value, &data[4..]))
 }
 
@@ -72,9 +68,7 @@ pub fn read_int_8(data: &[u8]) -> Result<(u64, &[u8])> {
             data.len()
         )));
     }
-    let value = U64LE::ref_from_bytes(&data[..8])
-        .map_err(Error::from_debug)?
-        .get();
+    let value = U64LE::ref_from_bytes(&data[..8])?.get();
     Ok((value, &data[8..]))
 }
 
