@@ -13,6 +13,7 @@ pub mod protocol;
 pub mod sync;
 
 pub use buffer::BufferSet;
+pub use buffer_pool::BufferPool;
 pub use opts::Opts;
 pub use prepared::PreparedStatement;
 

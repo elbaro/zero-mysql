@@ -73,7 +73,7 @@ impl Conn {
         let mut conn_stream = stream;
         let mut buffer_set = opts.buffer_pool.get_buffer_set();
 
-        #[cfg(feature = "tls")]
+        #[cfg(feature = "sync-tls")]
         let host = opts.host.clone().unwrap_or_default();
 
         let mut handshake = Handshake::new(opts);
@@ -89,15 +89,15 @@ impl Conn {
                     buffer_set.read_buffer.clear();
                     read_payload(&mut conn_stream, &mut buffer_set.read_buffer)?;
                 }
-                #[cfg(feature = "tls")]
+                #[cfg(feature = "sync-tls")]
                 HandshakeAction::UpgradeTls { sequence_id } => {
                     write_handshake_payload(&mut conn_stream, &mut buffer_set, sequence_id)?;
                     conn_stream = conn_stream.upgrade_to_tls(&host)?;
                 }
-                #[cfg(not(feature = "tls"))]
+                #[cfg(not(feature = "sync-tls"))]
                 HandshakeAction::UpgradeTls { .. } => {
                     return Err(Error::BadConfigError(
-                        "TLS requested but tls feature is not enabled".to_string(),
+                        "TLS requested but sync-tls feature is not enabled".to_string(),
                     ));
                 }
                 HandshakeAction::Finished => break,

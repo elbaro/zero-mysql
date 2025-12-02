@@ -2,7 +2,8 @@
 name = "zero-mysql"
 version = "0.1.0"
 edition = "2024"
-description = "A high-performance, zero-copy MySQL client library"
+license = "MIT"
+description = "A high-performance MySQL client"
 repository = "https://github.com/elbaro/zero-mysql"
 keywords = ["mysql", "mariadb", "database", "sql", "async"]
 categories = ["database"]
@@ -11,23 +12,24 @@ categories = ["database"]
 default = ["sync", "tokio"]
 sync = []
 tokio = ["dep:tokio"]
-tls = ["dep:native-tls", "dep:tokio-native-tls"]
+sync-tls = ["dep:native-tls"]
+tokio-tls = ["dep:native-tls", "dep:tokio-native-tls"]
 
 [dependencies]
-thiserror = "2.0"
+thiserror = "2"
 tokio = { version = "1", features = ["io-util", "net"], optional = true }
 native-tls = { version = "0.2", optional = true }
 tokio-native-tls = { version = "0.3", optional = true }
 zerocopy = { version = "0.8", features = ["derive"] }
 sha1 = "0.10"
 sha2 = "0.10"
-url = "2.5"
-bitflags = "2.6"
-log = "0.4.28"
-auto_impl = "1.3.0"
+url = "2.5.7"
+bitflags = "2.10"
+log = "0.4"
+auto_impl = "1"
 tracing = { version = "0.1", features = ["release_max_level_warn"] }
-crossbeam-queue = "0.3.12"
-color-eyre = "0.6.5"
+crossbeam-queue = "0.3"
+color-eyre = "0.6"
 
 [lints.clippy]
 all = { level = "deny", priority = -1 }

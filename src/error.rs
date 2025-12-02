@@ -8,26 +8,24 @@ pub type Result<T> = core::result::Result<T, Error>;
 
 #[derive(Debug, Error)]
 pub enum Error {
+    // ─── Server Error ────────────────────────────────────────────────────
     #[error("Server Error: {0}")]
     ServerError(#[from] ErrPayload),
-
-    #[error("IO error: {0}")]
-    IoError(#[from] std::io::Error),
-
-    #[error("Bad config error: {0}")]
-    BadConfigError(String),
-
-    #[error("A bug in zero-mysql: {0}")]
-    LibraryBug(color_eyre::Report),
-
-    #[error("Unsupported authentication plugin: {0}")]
-    Unsupported(String),
-
+    // ─── Incorrect Usage ─────────────────────────────────────────────────
     #[error(
         "Connection mismatch: transaction started on connection {expected}, but commit/rollback called on connection {actual}"
     )]
     ConnectionMismatch { expected: u64, actual: u64 },
-
+    #[error("Bad config error: {0}")]
+    BadConfigError(String),
+    // ─── Temporary Error ─────────────────────────────────────────────────
+    #[error("IO error: {0}")]
+    IoError(#[from] std::io::Error),
+    // ─── Library Error ───────────────────────────────────────────────────
+    #[error("A bug in zero-mysql: {0}")]
+    LibraryBug(#[from] color_eyre::Report),
+    #[error("Unsupported authentication plugin: {0}")]
+    Unsupported(String),
     #[error("Cannot nest transactions - a transaction is already active")]
     NestedTransaction,
 }

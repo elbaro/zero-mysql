@@ -63,7 +63,7 @@ impl Conn {
         let mut conn_stream = stream;
         let mut buffer_set = opts.buffer_pool.get_buffer_set();
 
-        #[cfg(feature = "tls")]
+        #[cfg(feature = "tokio-tls")]
         let host = opts.host.clone().unwrap_or_default();
 
         let mut handshake = Handshake::new(opts);
@@ -79,15 +79,15 @@ impl Conn {
                     buffer_set.read_buffer.clear();
                     read_payload(&mut conn_stream, &mut buffer_set.read_buffer).await?;
                 }
-                #[cfg(feature = "tls")]
+                #[cfg(feature = "tokio-tls")]
                 HandshakeAction::UpgradeTls { sequence_id } => {
                     write_handshake_payload(&mut conn_stream, &mut buffer_set, sequence_id).await?;
                     conn_stream = conn_stream.upgrade_to_tls(&host).await?;
                 }
-                #[cfg(not(feature = "tls"))]
+                #[cfg(not(feature = "tokio-tls"))]
                 HandshakeAction::UpgradeTls { .. } => {
                     return Err(Error::BadConfigError(
-                        "TLS requested but tls feature is not enabled".to_string(),
+                        "TLS requested but tokio-tls feature is not enabled".to_string(),
                     ));
                 }
                 HandshakeAction::Finished => break,
