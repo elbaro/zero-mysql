@@ -1,5 +1,5 @@
-use crate::error::{Error, Result};
 use super::Conn;
+use crate::error::{Error, Result};
 
 /// A MySQL transaction for the asynchronous connection
 ///

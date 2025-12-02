@@ -23,7 +23,7 @@ tokio-native-tls = { version = "0.3", optional = true }
 zerocopy = { version = "0.8", features = ["derive"] }
 sha1 = "0.10"
 sha2 = "0.10"
-url = "2.5.7"
+url = "2.5"
 bitflags = "2.10"
 log = "0.4"
 auto_impl = "1"
@@ -137,9 +137,6 @@ tracing-tracy = "0.11"
 reqray = "0.4"
 
 [profile.bench]
-debug = true
-
-[profile.release]
 debug = true
 
 [[bench]]

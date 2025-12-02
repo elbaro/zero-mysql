@@ -331,9 +331,9 @@ impl<'h, 'stmt, H: BinaryResultSetHandler> Exec<'h, 'stmt, H> {
                 }
             }
 
-            ExecState::Finished => Err(Error::LibraryBug(eyre!(
-                "Exec::step called after finished"
-            ))),
+            ExecState::Finished => {
+                Err(Error::LibraryBug(eyre!("Exec::step called after finished")))
+            }
         }
     }
 }

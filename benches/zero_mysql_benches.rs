@@ -1,9 +1,9 @@
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
-use zero_mysql::protocol::command::ColumnDefinition;
-use zero_mysql::protocol::r#trait::BinaryResultSetHandler;
-use zero_mysql::protocol::response::OkPayloadBytes;
-use zero_mysql::protocol::value::Value;
+use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use zero_mysql::protocol::BinaryRowPayload;
+use zero_mysql::protocol::command::ColumnDefinition;
+use zero_mysql::protocol::response::OkPayloadBytes;
+use zero_mysql::protocol::r#trait::BinaryResultSetHandler;
+use zero_mysql::protocol::value::Value;
 use zero_mysql::sync::Conn;
 
 pub struct User {

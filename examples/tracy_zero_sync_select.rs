@@ -1,9 +1,9 @@
 use zero_mysql::error::Result;
-use zero_mysql::protocol::command::ColumnDefinition;
-use zero_mysql::protocol::r#trait::BinaryResultSetHandler;
-use zero_mysql::protocol::response::OkPayloadBytes;
-use zero_mysql::protocol::value::Value;
 use zero_mysql::protocol::BinaryRowPayload;
+use zero_mysql::protocol::command::ColumnDefinition;
+use zero_mysql::protocol::response::OkPayloadBytes;
+use zero_mysql::protocol::r#trait::BinaryResultSetHandler;
+use zero_mysql::protocol::value::Value;
 use zero_mysql::sync::Conn;
 
 // #[global_allocator]
@@ -39,7 +39,11 @@ impl BinaryResultSetHandler for UsersHandler {
     }
 
     #[inline(always)]
-    fn row(&mut self, cols: &[ColumnDefinition<'_>], row: BinaryRowPayload<'_>) -> zero_mysql::error::Result<()> {
+    fn row(
+        &mut self,
+        cols: &[ColumnDefinition<'_>],
+        row: BinaryRowPayload<'_>,
+    ) -> zero_mysql::error::Result<()> {
         let mut bytes = row.values();
         let mut values: [std::mem::MaybeUninit<Value<'_>>; 3] =
             [const { std::mem::MaybeUninit::uninit() }; 3];

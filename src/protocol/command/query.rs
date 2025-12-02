@@ -22,7 +22,9 @@ pub fn write_query(out: &mut Vec<u8>, sql: &str) {
 /// - Otherwise: Result set (first byte is column count as length-encoded integer)
 pub fn read_query_response(payload: &[u8]) -> Result<QueryResponse<'_>> {
     if payload.is_empty() {
-        return Err(Error::LibraryBug(eyre!("read_query_response: empty payload")));
+        return Err(Error::LibraryBug(eyre!(
+            "read_query_response: empty payload"
+        )));
     }
 
     match payload[0] {

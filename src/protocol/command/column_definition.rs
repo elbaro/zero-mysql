@@ -1,5 +1,5 @@
 use crate::constant::{ColumnFlags, ColumnType};
-use crate::error::{eyre, Error, Result};
+use crate::error::{Error, Result, eyre};
 use crate::protocol::primitive::*;
 use zerocopy::byteorder::little_endian::{U16 as U16LE, U32 as U32LE};
 use zerocopy::{FromBytes, Immutable, KnownLayout};
@@ -264,9 +264,11 @@ mod tests {
         assert_eq!(type_and_flags.column_type, ColumnType::MYSQL_TYPE_LONG);
         assert!(type_and_flags.flags.contains(ColumnFlags::NOT_NULL_FLAG));
         assert!(type_and_flags.flags.contains(ColumnFlags::PRI_KEY_FLAG));
-        assert!(type_and_flags
-            .flags
-            .contains(ColumnFlags::AUTO_INCREMENT_FLAG));
+        assert!(
+            type_and_flags
+                .flags
+                .contains(ColumnFlags::AUTO_INCREMENT_FLAG)
+        );
         assert!(type_and_flags.flags.contains(ColumnFlags::PART_KEY_FLAG));
     }
 

@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::buffer_pool::{BufferPool, GLOBAL_BUFFER_POOL};
-use crate::constant::{CapabilityFlags, CAPABILITIES_ALWAYS_ENABLED};
+use crate::constant::{CAPABILITIES_ALWAYS_ENABLED, CapabilityFlags};
 use crate::error::Error;
 
 /// A configuration for connection

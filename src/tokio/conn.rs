@@ -7,20 +7,20 @@ use crate::buffer::BufferSet;
 use crate::buffer_pool::PooledBufferSet;
 use crate::constant::CapabilityFlags;
 use crate::error::{Error, Result};
+use crate::protocol::TextRowPayload;
 use crate::protocol::command::Action;
+use crate::protocol::command::ColumnDefinition;
 use crate::protocol::command::bulk_exec::{BulkExec, BulkFlags, BulkParamsSet, write_bulk_execute};
 use crate::protocol::command::prepared::{Exec, read_prepare_ok, write_execute, write_prepare};
 use crate::protocol::command::query::{Query, write_query};
 use crate::protocol::command::utility::{
     DropHandler, FirstRowHandler, write_ping, write_reset_connection,
 };
-use crate::protocol::command::ColumnDefinition;
 use crate::protocol::connection::{Handshake, HandshakeAction, InitialHandshake};
 use crate::protocol::packet::PacketHeader;
 use crate::protocol::primitive::read_string_lenenc;
 use crate::protocol::response::{ErrPayloadBytes, OkPayloadBytes};
 use crate::protocol::r#trait::{BinaryResultSetHandler, TextResultSetHandler, param::Params};
-use crate::protocol::TextRowPayload;
 
 use super::stream::Stream;
 
