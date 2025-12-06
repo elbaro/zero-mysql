@@ -17,7 +17,7 @@ tokio-tls = ["dep:native-tls", "dep:tokio-native-tls"]
 
 [dependencies]
 thiserror = "2"
-tokio = { version = "1", features = ["io-util", "net", "rt"], optional = true }
+tokio = { version = "1", features = ["io-util", "net", "rt", "sync"], optional = true }
 native-tls = { version = "0.2", optional = true }
 tokio-native-tls = { version = "0.3", optional = true }
 zerocopy = { version = "0.8", features = ["derive"] }
@@ -29,6 +29,7 @@ log = "0.4"
 auto_impl = "1"
 tracing = { version = "0.1", features = ["release_max_level_warn"] }
 crossbeam-queue = "0.3"
+std-semaphore = "0.1"
 color-eyre = "0.6"
 
 [lints.clippy]

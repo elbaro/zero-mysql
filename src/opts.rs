@@ -54,6 +54,13 @@ pub struct Opts {
     /// Reset connection state when returning to pool
     pub pool_reset_conn: bool,
 
+    /// Maximum number of idle connections in the pool
+    pub pool_max_idle_conn: usize,
+
+    /// Maximum number of concurrent connections (active + idle).
+    /// None means unlimited.
+    pub pool_max_concurrency: Option<usize>,
+
     pub buffer_pool: Arc<BufferPool>,
 }
 
@@ -73,6 +80,8 @@ impl Default for Opts {
             upgrade_to_unix_socket: true,
             init_command: None,
             pool_reset_conn: true,
+            pool_max_idle_conn: 100,
+            pool_max_concurrency: None,
             buffer_pool: Arc::clone(&GLOBAL_BUFFER_POOL),
         }
     }

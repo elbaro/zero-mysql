@@ -3,6 +3,7 @@ use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
 use crossbeam_queue::ArrayQueue;
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 use crate::error::Result;
 use crate::opts::Opts;
@@ -12,17 +13,28 @@ use super::Conn;
 pub struct Pool {
     opts: Opts,
     conns: ArrayQueue<Conn>,
+    semaphore: Option<Arc<Semaphore>>,
 }
 
 impl Pool {
-    pub fn new(opts: Opts, max_size: usize) -> Self {
+    pub fn new(opts: Opts) -> Self {
+        let semaphore = opts
+            .pool_max_concurrency
+            .map(|n| Arc::new(Semaphore::new(n)));
         Self {
+            conns: ArrayQueue::new(opts.pool_max_idle_conn),
             opts,
-            conns: ArrayQueue::new(max_size),
+            semaphore,
         }
     }
 
     pub async fn get(self: &Arc<Self>) -> Result<PooledConn> {
+        let permit = match &self.semaphore {
+            Some(sem) => Some(Arc::clone(sem).acquire_owned().await.map_err(|_| {
+                crate::error::Error::LibraryBug(color_eyre::eyre::eyre!("semaphore closed"))
+            })?),
+            None => None,
+        };
         let mut conn = match self.conns.pop() {
             Some(c) => c,
             None => Conn::new(self.opts.clone()).await?,
@@ -31,6 +43,7 @@ impl Pool {
         Ok(PooledConn {
             conn: ManuallyDrop::new(conn),
             pool: Arc::clone(self),
+            _permit: permit,
         })
     }
 
@@ -57,6 +70,7 @@ impl Pool {
 pub struct PooledConn {
     pool: Arc<Pool>,
     conn: ManuallyDrop<Conn>,
+    _permit: Option<OwnedSemaphorePermit>,
 }
 
 impl Deref for PooledConn {
