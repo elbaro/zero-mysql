@@ -158,7 +158,9 @@ impl Conn {
 
     #[inline]
     fn check_error<T>(&mut self, result: Result<T>) -> Result<T> {
-        if let Err(e) = &result && e.is_conn_broken() {
+        if let Err(e) = &result
+            && e.is_conn_broken()
+        {
             self.is_broken = true;
         }
         result

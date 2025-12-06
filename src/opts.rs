@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use url::Url;
+
 use crate::buffer_pool::{BufferPool, GLOBAL_BUFFER_POOL};
 use crate::constant::{CAPABILITIES_ALWAYS_ENABLED, CapabilityFlags};
 use crate::error::Error;
@@ -87,46 +89,100 @@ impl Default for Opts {
     }
 }
 
-impl TryFrom<&str> for Opts {
+/// Parse a boolean value from a query parameter.
+/// Accepts: "1", "0", "true", "false", "True", "False"
+fn parse_bool(key: &str, value: &str) -> Result<bool, Error> {
+    match value {
+        "1" | "true" | "True" => Ok(true),
+        "0" | "false" | "False" => Ok(false),
+        _ => Err(Error::BadConfigError(format!(
+            "Invalid boolean value '{}' for parameter '{}', expected 1, 0, true, false, True, or False",
+            value, key
+        ))),
+    }
+}
+
+/// Parse a usize value from a query parameter.
+fn parse_usize(key: &str, value: &str) -> Result<usize, Error> {
+    value.parse().map_err(|_| {
+        Error::BadConfigError(format!(
+            "Invalid unsigned integer value '{}' for parameter '{}'",
+            value, key
+        ))
+    })
+}
+
+impl TryFrom<&Url> for Opts {
     type Error = Error;
 
-    fn try_from(url: &str) -> Result<Self, Self::Error> {
-        // Parse URL
-        let parsed = url::Url::parse(url)
-            .map_err(|e| Error::BadConfigError(format!("Failed to parse MySQL URL: {}", e)))?;
-
+    fn try_from(url: &Url) -> Result<Self, Self::Error> {
         // Verify scheme
-        if parsed.scheme() != "mysql" {
+        if url.scheme() != "mysql" {
             return Err(Error::BadConfigError(format!(
                 "Invalid URL scheme '{}', expected 'mysql'",
-                parsed.scheme()
+                url.scheme()
             )));
         }
 
         // Extract host (can be None for socket connections)
-        let host = parsed.host_str().map(ToString::to_string);
-        let port = parsed.port().unwrap_or(3306);
+        let host = url.host_str().map(ToString::to_string);
+        let port = url.port().unwrap_or(3306);
 
         // Extract username (default empty)
-        let user = parsed.username().to_string();
+        let user = url.username().to_string();
 
         // Extract password (default None)
-        let password = parsed.password().map(ToString::to_string);
+        let password = url.password().map(ToString::to_string);
 
         // Extract database from path
-        let db = parsed
+        let db = url
             .path()
             .strip_prefix('/')
             .filter(|db| !db.is_empty())
             .map(ToString::to_string);
 
-        Ok(Self {
+        let mut opts = Self {
             host,
             port,
             user,
             password,
             db,
             ..Default::default()
-        })
+        };
+
+        // Parse query parameters
+        for (key, value) in url.query_pairs() {
+            match key.as_ref() {
+                "socket" => opts.socket = Some(value.into_owned()),
+                "tls" | "ssl" => opts.tls = parse_bool(&key, &value)?,
+                "compress" => opts.compress = parse_bool(&key, &value)?,
+                "tcp_nodelay" => opts.tcp_nodelay = parse_bool(&key, &value)?,
+                "upgrade_to_unix_socket" => opts.upgrade_to_unix_socket = parse_bool(&key, &value)?,
+                "init_command" => opts.init_command = Some(value.into_owned()),
+                "pool_reset_conn" => opts.pool_reset_conn = parse_bool(&key, &value)?,
+                "pool_max_idle_conn" => opts.pool_max_idle_conn = parse_usize(&key, &value)?,
+                "pool_max_concurrency" => {
+                    opts.pool_max_concurrency = Some(parse_usize(&key, &value)?)
+                }
+                _ => {
+                    return Err(Error::BadConfigError(format!(
+                        "Unknown query parameter '{}'",
+                        key
+                    )));
+                }
+            }
+        }
+
+        Ok(opts)
+    }
+}
+
+impl TryFrom<&str> for Opts {
+    type Error = Error;
+
+    fn try_from(url: &str) -> Result<Self, Self::Error> {
+        let parsed = Url::parse(url)
+            .map_err(|e| Error::BadConfigError(format!("Failed to parse MySQL URL: {}", e)))?;
+        Self::try_from(&parsed)
     }
 }
