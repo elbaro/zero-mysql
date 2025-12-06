@@ -51,6 +51,9 @@ pub struct Opts {
     /// SQL command to execute after connection is established
     pub init_command: Option<String>,
 
+    /// Reset connection state when returning to pool
+    pub pool_reset_conn: bool,
+
     pub buffer_pool: Arc<BufferPool>,
 }
 
@@ -69,6 +72,7 @@ impl Default for Opts {
             tls: false,
             upgrade_to_unix_socket: true,
             init_command: None,
+            pool_reset_conn: true,
             buffer_pool: Arc::clone(&GLOBAL_BUFFER_POOL),
         }
     }

@@ -49,6 +49,30 @@ impl Error {
     pub fn from_debug(err: impl std::fmt::Debug) -> Self {
         Self::LibraryBug(color_eyre::eyre::eyre!(format!("{:#?}", err)))
     }
+
+    /// Returns true if the error indicates the connection is broken and cannot be reused.
+    ///
+    /// This is conservative - returns true (broken) when in doubt.
+    pub fn is_conn_broken(&self) -> bool {
+        match self {
+            Error::ServerError(err_payload) => {
+                match err_payload.sql_state.as_str() {
+                    // Integrity errors - connection still usable
+                    "23000" => false,
+                    // Data errors - connection still usable
+                    "22001" | "22003" | "22007" | "22012" => false,
+                    // Programming errors - connection still usable
+                    "42000" | "42S02" | "42S22" => false,
+                    // Not supported - connection still usable
+                    "0A000" => false,
+                    // Everything else - assume broken
+                    _ => true,
+                }
+            }
+            // All other errors - assume broken
+            _ => true,
+        }
+    }
 }
 
 impl<Src, Dst: ?Sized> From<zerocopy::CastError<Src, Dst>> for Error {

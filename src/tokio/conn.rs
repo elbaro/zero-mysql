@@ -31,6 +31,7 @@ pub struct Conn {
     capability_flags: CapabilityFlags,
     mariadb_capabilities: crate::constant::MariadbCapabilityFlags,
     in_transaction: bool,
+    is_broken: bool,
 }
 
 impl Conn {
@@ -103,6 +104,7 @@ impl Conn {
             capability_flags,
             mariadb_capabilities,
             in_transaction: false,
+            is_broken: false,
         };
 
         // Upgrade to Unix socket if connected via TCP to loopback
@@ -147,6 +149,19 @@ impl Conn {
     /// Get the server status flags from the initial handshake
     pub fn status_flags(&self) -> crate::constant::ServerStatusFlags {
         self.initial_handshake.status_flags
+    }
+
+    /// Check if the connection is broken due to a previous I/O error
+    pub fn is_broken(&self) -> bool {
+        self.is_broken
+    }
+
+    #[inline]
+    fn check_error<T>(&mut self, result: Result<T>) -> Result<T> {
+        if let Err(e) = &result && e.is_conn_broken() {
+            self.is_broken = true;
+        }
+        result
     }
 
     pub(crate) fn set_in_transaction(&mut self, value: bool) {
@@ -212,6 +227,11 @@ impl Conn {
     ///
     /// Returns `Ok(PreparedStatement)` on success.
     pub async fn prepare(&mut self, sql: &str) -> Result<PreparedStatement> {
+        let result = self.prepare_inner(sql).await;
+        self.check_error(result)
+    }
+
+    async fn prepare_inner(&mut self, sql: &str) -> Result<PreparedStatement> {
         use crate::protocol::command::ColumnDefinitions;
 
         self.buffer_set.read_buffer.clear();
@@ -331,6 +351,20 @@ impl Conn {
         P: Params,
         H: BinaryResultSetHandler,
     {
+        let result = self.exec_inner(stmt, params, handler).await;
+        self.check_error(result)
+    }
+
+    async fn exec_inner<P, H>(
+        &mut self,
+        stmt: &mut PreparedStatement,
+        params: P,
+        handler: &mut H,
+    ) -> Result<()>
+    where
+        P: Params,
+        H: BinaryResultSetHandler,
+    {
         write_execute(self.buffer_set.new_write_buffer(), stmt.id(), params)?;
         self.write_payload().await?;
         self.drive_exec(stmt, handler).await
@@ -373,10 +407,27 @@ impl Conn {
         I: Params,
         H: BinaryResultSetHandler,
     {
+        let result = self.exec_bulk_inner(stmt, params, flags, handler).await;
+        self.check_error(result)
+    }
+
+    async fn exec_bulk_inner<P, I, H>(
+        &mut self,
+        stmt: &mut PreparedStatement,
+        params: P,
+        flags: BulkFlags,
+        handler: &mut H,
+    ) -> Result<()>
+    where
+        P: BulkParamsSet + IntoIterator<Item = I>,
+        I: Params,
+        H: BinaryResultSetHandler,
+    {
         if !self.is_mariadb() {
             // Fallback to multiple exec_drop for non-MariaDB servers
             for param in params {
-                self.exec_drop(stmt, param).await?;
+                self.exec_inner(stmt, param, &mut DropHandler::default())
+                    .await?;
             }
             Ok(())
         } else {
@@ -403,6 +454,20 @@ impl Conn {
         P: Params,
         H: BinaryResultSetHandler,
     {
+        let result = self.exec_first_inner(stmt, params, handler).await;
+        self.check_error(result)
+    }
+
+    async fn exec_first_inner<P, H>(
+        &mut self,
+        stmt: &mut PreparedStatement,
+        params: P,
+        handler: &mut H,
+    ) -> Result<bool>
+    where
+        P: Params,
+        H: BinaryResultSetHandler,
+    {
         write_execute(self.buffer_set.new_write_buffer(), stmt.id(), params)?;
         self.write_payload().await?;
         let mut first_row_handler = FirstRowHandler::new(handler);
@@ -416,13 +481,19 @@ impl Conn {
     where
         P: Params,
     {
-        write_execute(self.buffer_set.new_write_buffer(), stmt.id(), params)?;
-        self.write_payload().await?;
-        self.drive_exec(stmt, &mut DropHandler::default()).await
+        self.exec(stmt, params, &mut DropHandler::default()).await
     }
 
     /// Execute a text protocol SQL query (async)
     pub async fn query<H>(&mut self, sql: &str, handler: &mut H) -> Result<()>
+    where
+        H: TextResultSetHandler,
+    {
+        let result = self.query_inner(sql, handler).await;
+        self.check_error(result)
+    }
+
+    async fn query_inner<H>(&mut self, sql: &str, handler: &mut H) -> Result<()>
     where
         H: TextResultSetHandler,
     {
@@ -434,6 +505,11 @@ impl Conn {
     /// Execute a text protocol SQL query and discard all results (async)
     #[instrument(skip_all)]
     pub async fn query_drop(&mut self, sql: &str) -> Result<()> {
+        let result = self.query_drop_inner(sql).await;
+        self.check_error(result)
+    }
+
+    async fn query_drop_inner(&mut self, sql: &str) -> Result<()> {
         write_query(self.buffer_set.new_write_buffer(), sql);
         self.write_payload().await?;
         self.drive_query(&mut DropHandler::default()).await
@@ -443,6 +519,11 @@ impl Conn {
     ///
     /// This sends a COM_PING command to the MySQL server and waits for an OK response.
     pub async fn ping(&mut self) -> Result<()> {
+        let result = self.ping_inner().await;
+        self.check_error(result)
+    }
+
+    async fn ping_inner(&mut self) -> Result<()> {
         write_ping(self.buffer_set.new_write_buffer());
         self.write_payload().await?;
         self.buffer_set.read_buffer.clear();
@@ -452,6 +533,11 @@ impl Conn {
 
     /// Reset the connection to its initial state (async)
     pub async fn reset(&mut self) -> Result<()> {
+        let result = self.reset_inner().await;
+        self.check_error(result)
+    }
+
+    async fn reset_inner(&mut self) -> Result<()> {
         write_reset_connection(self.buffer_set.new_write_buffer());
         self.write_payload().await?;
         self.buffer_set.read_buffer.clear();

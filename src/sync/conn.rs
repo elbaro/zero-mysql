@@ -37,6 +37,7 @@ pub struct Conn {
     capability_flags: CapabilityFlags,
     mariadb_capabilities: crate::constant::MariadbCapabilityFlags,
     in_transaction: bool,
+    is_broken: bool,
 }
 
 impl Conn {
@@ -113,6 +114,7 @@ impl Conn {
             capability_flags,
             mariadb_capabilities,
             in_transaction: false,
+            is_broken: false,
         };
 
         // Upgrade to Unix socket if connected via TCP to loopback
@@ -157,6 +159,21 @@ impl Conn {
     /// Get the server status flags from the initial handshake
     pub fn status_flags(&self) -> crate::constant::ServerStatusFlags {
         self.initial_handshake.status_flags
+    }
+
+    /// Indicates if the connection is broken by errors
+    ///
+    /// This state is used by Pool to decide if this Conn should be recycled or dropped.
+    pub fn is_broken(&self) -> bool {
+        self.is_broken
+    }
+
+    #[inline]
+    fn check_error<T>(&mut self, result: Result<T>) -> Result<T> {
+        if let Err(e) = &result && e.is_conn_broken() {
+            self.is_broken = true;
+        }
+        result
     }
 
     /// Try to upgrade to Unix socket connection.
@@ -214,6 +231,11 @@ impl Conn {
 
     /// Returns `Ok(statement_id) on success
     pub fn prepare(&mut self, sql: &str) -> Result<PreparedStatement> {
+        let result = self.prepare_inner(sql);
+        self.check_error(result)
+    }
+
+    fn prepare_inner(&mut self, sql: &str) -> Result<PreparedStatement> {
         use crate::protocol::command::ColumnDefinitions;
 
         self.buffer_set.read_buffer.clear();
@@ -301,6 +323,20 @@ impl Conn {
         P: Params,
         H: BinaryResultSetHandler,
     {
+        let result = self.exec_inner(stmt, params, handler);
+        self.check_error(result)
+    }
+
+    fn exec_inner<'conn, P, H>(
+        &'conn mut self,
+        stmt: &'conn mut PreparedStatement,
+        params: P,
+        handler: &mut H,
+    ) -> Result<()>
+    where
+        P: Params,
+        H: BinaryResultSetHandler,
+    {
         write_execute(self.buffer_set.new_write_buffer(), stmt.id(), params)?;
         self.write_payload()?;
         self.drive_exec(stmt, handler)
@@ -347,10 +383,26 @@ impl Conn {
         I: Params,
         H: BinaryResultSetHandler,
     {
+        let result = self.exec_bulk_inner(stmt, params, flags, handler);
+        self.check_error(result)
+    }
+
+    fn exec_bulk_inner<P, I, H>(
+        &mut self,
+        stmt: &mut PreparedStatement,
+        params: P,
+        flags: BulkFlags,
+        handler: &mut H,
+    ) -> Result<()>
+    where
+        P: BulkParamsSet + IntoIterator<Item = I>,
+        I: Params,
+        H: BinaryResultSetHandler,
+    {
         if !self.is_mariadb() {
-            // Fallback to multiple exec_drop 'conn, for non-MariaDB servers'conn
+            // Fallback to multiple exec_drop for non-MariaDB servers
             for param in params {
-                self.exec_drop(stmt, param)?;
+                self.exec_inner(stmt, param, &mut DropHandler::default())?;
             }
             Ok(())
         } else {
@@ -377,6 +429,20 @@ impl Conn {
         P: Params,
         H: BinaryResultSetHandler,
     {
+        let result = self.exec_first_inner(stmt, params, handler);
+        self.check_error(result)
+    }
+
+    fn exec_first_inner<'conn, P, H>(
+        &'conn mut self,
+        stmt: &'conn mut PreparedStatement,
+        params: P,
+        handler: &mut H,
+    ) -> Result<bool>
+    where
+        P: Params,
+        H: BinaryResultSetHandler,
+    {
         write_execute(self.buffer_set.new_write_buffer(), stmt.id(), params)?;
         self.write_payload()?;
         let mut first_row_handler = FirstRowHandler::new(handler);
@@ -389,9 +455,7 @@ impl Conn {
     where
         P: Params,
     {
-        write_execute(self.buffer_set.new_write_buffer(), stmt.id(), params)?;
-        self.write_payload()?;
-        self.drive_exec(stmt, &mut DropHandler::default())
+        self.exec(stmt, params, &mut DropHandler::default())
     }
 
     fn drive_query<H: TextResultSetHandler>(&mut self, handler: &mut H) -> Result<()> {
@@ -420,6 +484,14 @@ impl Conn {
     where
         H: TextResultSetHandler,
     {
+        let result = self.query_inner(sql, handler);
+        self.check_error(result)
+    }
+
+    fn query_inner<H>(&mut self, sql: &str, handler: &mut H) -> Result<()>
+    where
+        H: TextResultSetHandler,
+    {
         write_query(self.buffer_set.new_write_buffer(), sql);
         self.write_payload()?;
         self.drive_query(handler)
@@ -427,6 +499,11 @@ impl Conn {
 
     /// Execute a text protocol SQL query and discard the result
     pub fn query_drop(&mut self, sql: &str) -> Result<()> {
+        let result = self.query_drop_inner(sql);
+        self.check_error(result)
+    }
+
+    fn query_drop_inner(&mut self, sql: &str) -> Result<()> {
         write_query(self.buffer_set.new_write_buffer(), sql);
         self.write_payload()?;
         self.drive_query(&mut DropHandler::default())
@@ -436,6 +513,11 @@ impl Conn {
     ///
     /// This sends a COM_PING command to the MySQL server and waits for an OK response.
     pub fn ping(&mut self) -> Result<()> {
+        let result = self.ping_inner();
+        self.check_error(result)
+    }
+
+    fn ping_inner(&mut self) -> Result<()> {
         write_ping(self.buffer_set.new_write_buffer());
         self.write_payload()?;
         self.buffer_set.read_buffer.clear();
@@ -445,6 +527,11 @@ impl Conn {
 
     /// Reset the connection to its initial state
     pub fn reset(&mut self) -> Result<()> {
+        let result = self.reset_inner();
+        self.check_error(result)
+    }
+
+    fn reset_inner(&mut self) -> Result<()> {
         write_reset_connection(self.buffer_set.new_write_buffer());
         self.write_payload()?;
         self.buffer_set.read_buffer.clear();
