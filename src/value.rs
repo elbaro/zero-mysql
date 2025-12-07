@@ -14,14 +14,18 @@ pub enum Value<'a> {
     Float(f32),
     /// DOUBLE - 8-byte floating point
     Double(f64),
-    /// DATE/DATETIME/TIMESTAMP - 0 bytes (0000-00-00 00:00:00)
-    Timestamp0,
-    /// DATE/DATETIME/TIMESTAMP - 4 bytes (ymd)
-    Timestamp4(&'a Timestamp4),
-    /// DATE/DATETIME/TIMESTAMP - 7 bytes (ymd + hms)
-    Timestamp7(&'a Timestamp7),
-    /// DATE/DATETIME/TIMESTAMP - 11 bytes (ymd + hms + microseconds)
-    Timestamp11(&'a Timestamp11),
+    /// DATE - 0 bytes (0000-00-00)
+    Date0,
+    /// DATE - 4 bytes (ymd)
+    Date4(&'a Timestamp4),
+    /// DATETIME/TIMESTAMP - 0 bytes (0000-00-00 00:00:00)
+    Datetime0,
+    /// DATETIME/TIMESTAMP - 4 bytes (ymd)
+    Datetime4(&'a Timestamp4),
+    /// DATETIME/TIMESTAMP - 7 bytes (ymd + hms)
+    Datetime7(&'a Timestamp7),
+    /// DATETIME/TIMESTAMP - 11 bytes (ymd + hms + microseconds)
+    Datetime11(&'a Timestamp11),
     /// TIME - 0 bytes (00:00:00)
     Time0,
     /// TIME - 8 bytes (without microseconds)

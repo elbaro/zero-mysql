@@ -96,28 +96,28 @@ fn test_value_parse_timestamp() {
         flags: ColumnFlags::empty(),
     };
 
-    // Timestamp0 (0000-00-00 00:00:00)
+    // Datetime0 (0000-00-00 00:00:00)
     let data = [0_u8]; // length = 0
     let (value, rest) = Value::parse(&type_and_flags, &data).unwrap();
-    assert!(matches!(value, Value::Timestamp0));
+    assert!(matches!(value, Value::Datetime0));
     assert_eq!(rest.len(), 0);
 
-    // Timestamp4 (2024-12-25)
+    // Datetime4 (2024-12-25)
     let mut data = vec![4u8]; // length = 4
     data.extend_from_slice(&2024u16.to_le_bytes()); // year
     data.push(12); // month
     data.push(25); // day
     let (value, rest) = Value::parse(&type_and_flags, &data).unwrap();
-    if let Value::Timestamp4(ts) = value {
+    if let Value::Datetime4(ts) = value {
         assert_eq!(ts.year(), 2024);
         assert_eq!(ts.month, 12);
         assert_eq!(ts.day, 25);
     } else {
-        panic!("Expected Timestamp4 value");
+        panic!("Expected Datetime4 value");
     }
     assert_eq!(rest.len(), 0);
 
-    // Timestamp7 (2024-12-25 15:30:45)
+    // Datetime7 (2024-12-25 15:30:45)
     let mut data = vec![7u8]; // length = 7
     data.extend_from_slice(&2024u16.to_le_bytes()); // year
     data.push(12); // month
@@ -126,7 +126,7 @@ fn test_value_parse_timestamp() {
     data.push(30); // minute
     data.push(45); // second
     let (value, rest) = Value::parse(&type_and_flags, &data).unwrap();
-    if let Value::Timestamp7(ts) = value {
+    if let Value::Datetime7(ts) = value {
         assert_eq!(ts.year(), 2024);
         assert_eq!(ts.month, 12);
         assert_eq!(ts.day, 25);
@@ -134,7 +134,7 @@ fn test_value_parse_timestamp() {
         assert_eq!(ts.minute, 30);
         assert_eq!(ts.second, 45);
     } else {
-        panic!("Expected Timestamp7 value");
+        panic!("Expected Datetime7 value");
     }
     assert_eq!(rest.len(), 0);
 }

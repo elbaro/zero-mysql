@@ -111,30 +111,51 @@ pub trait FromRawValue<'buf>: Sized {
         )))
     }
 
-    fn from_timestamp0() -> Result<Self> {
+    fn from_decimal(_v: &'buf [u8]) -> Result<Self> {
         Err(Error::BadUsageError(format!(
-            "Cannot decode MySQL type TIMESTAMP to {}",
+            "Cannot decode MySQL type DECIMAL to {}",
             std::any::type_name::<Self>()
         )))
     }
 
-    fn from_timestamp4(_v: &'buf Timestamp4) -> Result<Self> {
+    fn from_date0() -> Result<Self> {
         Err(Error::BadUsageError(format!(
-            "Cannot decode MySQL type TIMESTAMP to {}",
+            "Cannot decode MySQL type DATE to {}",
             std::any::type_name::<Self>()
         )))
     }
 
-    fn from_timestamp7(_v: &'buf Timestamp7) -> Result<Self> {
+    fn from_date4(_v: &'buf Timestamp4) -> Result<Self> {
         Err(Error::BadUsageError(format!(
-            "Cannot decode MySQL type TIMESTAMP to {}",
+            "Cannot decode MySQL type DATE to {}",
             std::any::type_name::<Self>()
         )))
     }
 
-    fn from_timestamp11(_v: &'buf Timestamp11) -> Result<Self> {
+    fn from_datetime0() -> Result<Self> {
         Err(Error::BadUsageError(format!(
-            "Cannot decode MySQL type TIMESTAMP to {}",
+            "Cannot decode MySQL type DATETIME to {}",
+            std::any::type_name::<Self>()
+        )))
+    }
+
+    fn from_datetime4(_v: &'buf Timestamp4) -> Result<Self> {
+        Err(Error::BadUsageError(format!(
+            "Cannot decode MySQL type DATETIME to {}",
+            std::any::type_name::<Self>()
+        )))
+    }
+
+    fn from_datetime7(_v: &'buf Timestamp7) -> Result<Self> {
+        Err(Error::BadUsageError(format!(
+            "Cannot decode MySQL type DATETIME to {}",
+            std::any::type_name::<Self>()
+        )))
+    }
+
+    fn from_datetime11(_v: &'buf Timestamp11) -> Result<Self> {
+        Err(Error::BadUsageError(format!(
+            "Cannot decode MySQL type DATETIME to {}",
             std::any::type_name::<Self>()
         )))
     }
@@ -230,35 +251,44 @@ pub fn parse_value<'buf, T: FromRawValue<'buf>>(
             Ok((T::from_double(f64::from_bits(val))?, rest))
         }
 
-        // Temporal types
-        ColumnType::MYSQL_TYPE_DATE
-        | ColumnType::MYSQL_TYPE_DATETIME
-        | ColumnType::MYSQL_TYPE_TIMESTAMP
-        | ColumnType::MYSQL_TYPE_TIMESTAMP2
-        | ColumnType::MYSQL_TYPE_DATETIME2
-        | ColumnType::MYSQL_TYPE_NEWDATE => {
+        // DATE types
+        ColumnType::MYSQL_TYPE_DATE | ColumnType::MYSQL_TYPE_NEWDATE => {
             let (len, mut rest) = read_int_1(data)?;
             match len {
-                0 => Ok((T::from_timestamp0()?, rest)),
+                0 => Ok((T::from_date0()?, rest)),
                 4 => {
                     let ts = Timestamp4::ref_from_bytes(&rest[..4])?;
                     rest = &rest[4..];
-                    Ok((T::from_timestamp4(ts)?, rest))
+                    Ok((T::from_date4(ts)?, rest))
+                }
+                _ => Err(Error::LibraryBug(eyre!("invalid date length: {}", len))),
+            }
+        }
+
+        // DATETIME/TIMESTAMP types
+        ColumnType::MYSQL_TYPE_DATETIME
+        | ColumnType::MYSQL_TYPE_TIMESTAMP
+        | ColumnType::MYSQL_TYPE_TIMESTAMP2
+        | ColumnType::MYSQL_TYPE_DATETIME2 => {
+            let (len, mut rest) = read_int_1(data)?;
+            match len {
+                0 => Ok((T::from_datetime0()?, rest)),
+                4 => {
+                    let ts = Timestamp4::ref_from_bytes(&rest[..4])?;
+                    rest = &rest[4..];
+                    Ok((T::from_datetime4(ts)?, rest))
                 }
                 7 => {
                     let ts = Timestamp7::ref_from_bytes(&rest[..7])?;
                     rest = &rest[7..];
-                    Ok((T::from_timestamp7(ts)?, rest))
+                    Ok((T::from_datetime7(ts)?, rest))
                 }
                 11 => {
                     let ts = Timestamp11::ref_from_bytes(&rest[..11])?;
                     rest = &rest[11..];
-                    Ok((T::from_timestamp11(ts)?, rest))
+                    Ok((T::from_datetime11(ts)?, rest))
                 }
-                _ => Err(Error::LibraryBug(eyre!(
-                    "invalid timestamp length: {}",
-                    len
-                ))),
+                _ => Err(Error::LibraryBug(eyre!("invalid datetime length: {}", len))),
             }
         }
 
@@ -281,6 +311,12 @@ pub fn parse_value<'buf, T: FromRawValue<'buf>>(
             }
         }
 
+        // DECIMAL types
+        ColumnType::MYSQL_TYPE_DECIMAL | ColumnType::MYSQL_TYPE_NEWDECIMAL => {
+            let (bytes, rest) = read_string_lenenc(data)?;
+            Ok((T::from_decimal(bytes)?, rest))
+        }
+
         // String and BLOB types
         ColumnType::MYSQL_TYPE_VARCHAR
         | ColumnType::MYSQL_TYPE_VAR_STRING
@@ -291,8 +327,6 @@ pub fn parse_value<'buf, T: FromRawValue<'buf>>(
         | ColumnType::MYSQL_TYPE_LONG_BLOB
         | ColumnType::MYSQL_TYPE_GEOMETRY
         | ColumnType::MYSQL_TYPE_JSON
-        | ColumnType::MYSQL_TYPE_DECIMAL
-        | ColumnType::MYSQL_TYPE_NEWDECIMAL
         | ColumnType::MYSQL_TYPE_ENUM
         | ColumnType::MYSQL_TYPE_SET
         | ColumnType::MYSQL_TYPE_BIT
@@ -373,20 +407,32 @@ where
         Ok(Value::Byte(v))
     }
 
-    fn from_timestamp0() -> Result<Self> {
-        Ok(Value::Timestamp0)
+    fn from_decimal(v: &'buf [u8]) -> Result<Self> {
+        Ok(Value::Byte(v))
     }
 
-    fn from_timestamp4(v: &'buf Timestamp4) -> Result<Self> {
-        Ok(Value::Timestamp4(v))
+    fn from_date0() -> Result<Self> {
+        Ok(Value::Date0)
     }
 
-    fn from_timestamp7(v: &'buf Timestamp7) -> Result<Self> {
-        Ok(Value::Timestamp7(v))
+    fn from_date4(v: &'buf Timestamp4) -> Result<Self> {
+        Ok(Value::Date4(v))
     }
 
-    fn from_timestamp11(v: &'buf Timestamp11) -> Result<Self> {
-        Ok(Value::Timestamp11(v))
+    fn from_datetime0() -> Result<Self> {
+        Ok(Value::Datetime0)
+    }
+
+    fn from_datetime4(v: &'buf Timestamp4) -> Result<Self> {
+        Ok(Value::Datetime4(v))
+    }
+
+    fn from_datetime7(v: &'buf Timestamp7) -> Result<Self> {
+        Ok(Value::Datetime7(v))
+    }
+
+    fn from_datetime11(v: &'buf Timestamp11) -> Result<Self> {
+        Ok(Value::Datetime11(v))
     }
 
     fn from_time0() -> Result<Self> {
@@ -609,20 +655,32 @@ impl<'a, T: FromRawValue<'a>> FromRawValue<'a> for Option<T> {
         T::from_str(v).map(Some)
     }
 
-    fn from_timestamp0() -> Result<Self> {
-        T::from_timestamp0().map(Some)
+    fn from_decimal(v: &'a [u8]) -> Result<Self> {
+        T::from_decimal(v).map(Some)
     }
 
-    fn from_timestamp4(v: &'a Timestamp4) -> Result<Self> {
-        T::from_timestamp4(v).map(Some)
+    fn from_date0() -> Result<Self> {
+        T::from_date0().map(Some)
     }
 
-    fn from_timestamp7(v: &'a Timestamp7) -> Result<Self> {
-        T::from_timestamp7(v).map(Some)
+    fn from_date4(v: &'a Timestamp4) -> Result<Self> {
+        T::from_date4(v).map(Some)
     }
 
-    fn from_timestamp11(v: &'a Timestamp11) -> Result<Self> {
-        T::from_timestamp11(v).map(Some)
+    fn from_datetime0() -> Result<Self> {
+        T::from_datetime0().map(Some)
+    }
+
+    fn from_datetime4(v: &'a Timestamp4) -> Result<Self> {
+        T::from_datetime4(v).map(Some)
+    }
+
+    fn from_datetime7(v: &'a Timestamp7) -> Result<Self> {
+        T::from_datetime7(v).map(Some)
+    }
+
+    fn from_datetime11(v: &'a Timestamp11) -> Result<Self> {
+        T::from_datetime11(v).map(Some)
     }
 
     fn from_time0() -> Result<Self> {
