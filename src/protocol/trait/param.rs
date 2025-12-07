@@ -34,6 +34,18 @@ pub trait TypedParam {
     fn encode_value(&self, out: &mut Vec<u8>) -> Result<()>;
 }
 
+impl TypedParam for bool {
+    fn encode_type(out: &mut Vec<u8>) {
+        out.push(ColumnType::MYSQL_TYPE_TINY as u8);
+        out.push(0x00);
+    }
+
+    fn encode_value(&self, out: &mut Vec<u8>) -> Result<()> {
+        write_int_1(out, u8::from(*self));
+        Ok(())
+    }
+}
+
 impl TypedParam for i8 {
     fn encode_type(out: &mut Vec<u8>) {
         out.push(ColumnType::MYSQL_TYPE_TINY as u8);

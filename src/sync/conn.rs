@@ -165,7 +165,7 @@ impl Conn {
 
     /// Indicates if the connection is broken by errors
     ///
-    /// This state is used by Pool to decide if this Conn should be recycled or dropped.
+    /// This state is used by Pool to decide if this Conn can be reset and reused or dropped.
     pub fn is_broken(&self) -> bool {
         self.is_broken
     }
@@ -463,6 +463,21 @@ impl Conn {
         P: Params,
     {
         self.exec(stmt, params, &mut DropHandler::default())
+    }
+
+    /// Execute a prepared statement and collect all rows into a Vec
+    pub fn exec_rows<Row, P>(
+        &mut self,
+        stmt: &mut PreparedStatement,
+        params: P,
+    ) -> Result<Vec<Row>>
+    where
+        Row: for<'buf> crate::raw::FromRawRow<'buf>,
+        P: Params,
+    {
+        let mut handler = crate::handler::CollectHandler::<Row>::default();
+        self.exec(stmt, params, &mut handler)?;
+        Ok(handler.into_rows())
     }
 
     fn drive_query<H: TextResultSetHandler>(&mut self, handler: &mut H) -> Result<()> {

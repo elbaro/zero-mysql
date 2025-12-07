@@ -36,6 +36,8 @@ tracing = { version = "0.1", features = ["release_max_level_warn"] }
 crossbeam-queue = "0.3"
 std-semaphore = "0.1"
 color-eyre = "0.6"
+simdutf8 = "0.1"
+smart-default = "0.7.1"
 
 [lints.clippy]
 all = { level = "deny", priority = -1 }

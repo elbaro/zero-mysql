@@ -4,12 +4,16 @@
 //! without intermediate `Value` allocation.
 
 use crate::constant::{ColumnFlags, ColumnType};
-use crate::error::{eyre, Error, Result};
-use crate::protocol::command::{ColumnDefinition, ColumnTypeAndFlags};
-use crate::protocol::primitive::*;
+use crate::error::{Error, Result, eyre};
 use crate::protocol::BinaryRowPayload;
-use crate::value::{Time12, Time8, Timestamp11, Timestamp4, Timestamp7, Value};
+use crate::protocol::command::{ColumnDefinition, ColumnDefinitionTail};
+use crate::protocol::primitive::*;
+use crate::value::{Time8, Time12, Timestamp4, Timestamp7, Timestamp11, Value};
+use simdutf8::basic::from_utf8;
 use zerocopy::FromBytes;
+
+/// MySQL binary charset number - indicates binary/non-text data
+const BINARY_CHARSET: u16 = 63;
 
 /// Trait for types that can be decoded from MySQL binary protocol values.
 ///
@@ -100,6 +104,13 @@ pub trait FromRawValue<'buf>: Sized {
         )))
     }
 
+    fn from_str(_v: &'buf [u8]) -> Result<Self> {
+        Err(Error::BadUsageError(format!(
+            "Cannot decode MySQL type STRING to {}",
+            std::any::type_name::<Self>()
+        )))
+    }
+
     fn from_timestamp0() -> Result<Self> {
         Err(Error::BadUsageError(format!(
             "Cannot decode MySQL type TIMESTAMP to {}",
@@ -154,12 +165,17 @@ pub trait FromRawValue<'buf>: Sized {
 ///
 /// Returns the parsed value and remaining bytes.
 pub fn parse_value<'buf, T: FromRawValue<'buf>>(
-    type_and_flags: &ColumnTypeAndFlags,
+    col: &ColumnDefinitionTail,
+    is_null: bool,
     data: &'buf [u8],
 ) -> Result<(T, &'buf [u8])> {
-    let is_unsigned = type_and_flags.flags.contains(ColumnFlags::UNSIGNED_FLAG);
+    if is_null {
+        return Ok((T::from_null()?, data));
+    }
+    let is_unsigned = col.flags()?.contains(ColumnFlags::UNSIGNED_FLAG);
+    let is_binary_charset = col.charset() == BINARY_CHARSET;
 
-    match type_and_flags.column_type {
+    match col.column_type()? {
         ColumnType::MYSQL_TYPE_NULL => Ok((T::from_null()?, data)),
 
         // Integer types
@@ -282,7 +298,12 @@ pub fn parse_value<'buf, T: FromRawValue<'buf>>(
         | ColumnType::MYSQL_TYPE_BIT
         | ColumnType::MYSQL_TYPE_TYPED_ARRAY => {
             let (bytes, rest) = read_string_lenenc(data)?;
-            Ok((T::from_bytes(bytes)?, rest))
+            let out = if is_binary_charset {
+                T::from_bytes(bytes)?
+            } else {
+                T::from_str(bytes)?
+            };
+            Ok((out, rest))
         }
     }
 }
@@ -345,6 +366,10 @@ where
     }
 
     fn from_bytes(v: &'buf [u8]) -> Result<Self> {
+        Ok(Value::Byte(v))
+    }
+
+    fn from_str(v: &'buf [u8]) -> Result<Self> {
         Ok(Value::Byte(v))
     }
 
@@ -429,6 +454,16 @@ impl FromRawValue<'_> for i64 {
     }
 }
 
+impl FromRawValue<'_> for bool {
+    fn from_i8(v: i8) -> Result<Self> {
+        Ok(v != 0)
+    }
+
+    fn from_u8(v: u8) -> Result<Self> {
+        Ok(v != 0)
+    }
+}
+
 impl FromRawValue<'_> for u8 {
     fn from_u8(v: u8) -> Result<Self> {
         Ok(v)
@@ -506,17 +541,17 @@ impl FromRawValue<'_> for Vec<u8> {
 }
 
 impl<'a> FromRawValue<'a> for &'a str {
-    fn from_bytes(v: &'a [u8]) -> Result<Self> {
-        std::str::from_utf8(v).map_err(|e| {
-            Error::BadUsageError(format!("Cannot decode MySQL type BYTES to &str: {}", e))
+    fn from_str(v: &'a [u8]) -> Result<Self> {
+        from_utf8(v).map_err(|e| {
+            Error::BadUsageError(format!("Cannot decode MySQL type STRING to &str: {}", e))
         })
     }
 }
 
 impl FromRawValue<'_> for String {
-    fn from_bytes(v: &[u8]) -> Result<Self> {
-        String::from_utf8(v.to_vec()).map_err(|e| {
-            Error::BadUsageError(format!("Cannot decode MySQL type BYTES to String: {}", e))
+    fn from_str(v: &[u8]) -> Result<Self> {
+        from_utf8(v).map(|s| s.to_owned()).map_err(|e| {
+            Error::BadUsageError(format!("Cannot decode MySQL type STRING to String: {}", e))
         })
     }
 }
@@ -570,6 +605,10 @@ impl<'a, T: FromRawValue<'a>> FromRawValue<'a> for Option<T> {
         T::from_bytes(v).map(Some)
     }
 
+    fn from_str(v: &'a [u8]) -> Result<Self> {
+        T::from_str(v).map(Some)
+    }
+
     fn from_timestamp0() -> Result<Self> {
         T::from_timestamp0().map(Some)
     }
@@ -611,14 +650,8 @@ macro_rules! impl_from_raw_row_tuple {
                 let mut data = row.values();
                 let null_bitmap = row.null_bitmap();
                 $(
-                    let $T = if null_bitmap.is_null($idx) {
-                        <$T>::from_null()?
-                    } else {
-                        let type_and_flags = cols[$idx].tail.type_and_flags()?;
-                        let (val, rest) = parse_value::<$T>(&type_and_flags, data)?;
-                        data = rest;
-                        val
-                    };
+                    let ($T, rest) = parse_value::<$T>(&cols[$idx].tail, null_bitmap.is_null($idx), data)?;
+                    data = rest;
                 )+
                 let _ = data; // suppress unused warning for last element
                 Ok(($($T,)+))

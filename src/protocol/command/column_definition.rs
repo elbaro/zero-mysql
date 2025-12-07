@@ -65,13 +65,6 @@ impl<'a> TryFrom<ColumnDefinitionBytes<'a>> for ColumnDefinition<'a> {
     }
 }
 
-/// Combined column type and flags
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ColumnTypeAndFlags {
-    pub column_type: ColumnType,
-    pub flags: ColumnFlags,
-}
-
 /// Fixed-size tail of Column Definition packet (12 bytes)
 #[repr(C, packed)]
 #[derive(Debug, Clone, Copy, FromBytes, KnownLayout, Immutable)]
@@ -93,7 +86,6 @@ impl ColumnDefinitionTail {
         self.column_length.get()
     }
 
-    /// Returns an error if the column type is unknown
     pub fn column_type(&self) -> Result<ColumnType> {
         ColumnType::from_u8(self.column_type).ok_or_else(|| {
             Error::LibraryBug(eyre!("unknown column type: 0x{:02X}", self.column_type))
@@ -103,14 +95,6 @@ impl ColumnDefinitionTail {
     pub fn flags(&self) -> Result<ColumnFlags> {
         ColumnFlags::from_bits(self.flags.get()).ok_or_else(|| {
             Error::LibraryBug(eyre!("invalid column flags: 0x{:04X}", self.flags.get()))
-        })
-    }
-
-    /// A handy function to get `ColumnTypeAndFlags` for decoding a value
-    pub fn type_and_flags(&self) -> Result<ColumnTypeAndFlags> {
-        Ok(ColumnTypeAndFlags {
-            column_type: self.column_type()?,
-            flags: self.flags()?,
         })
     }
 }

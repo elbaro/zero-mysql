@@ -10,7 +10,6 @@ pub use column_definition::ColumnDefinition;
 pub use column_definition::ColumnDefinitionBytes;
 pub use column_definition::ColumnDefinitionTail;
 pub use column_definition::ColumnDefinitions;
-pub use column_definition::ColumnTypeAndFlags;
 
 /// Action returned by state machines indicating what I/O operation is needed next
 pub enum Action<'buf> {

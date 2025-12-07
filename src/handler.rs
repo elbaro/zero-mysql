@@ -1,8 +1,10 @@
 use crate::error::Result;
 use crate::protocol::command::ColumnDefinition;
-use crate::protocol::r#trait::{BinaryResultSetHandler, TextResultSetHandler};
 use crate::protocol::response::{OkPayload, OkPayloadBytes};
+use crate::protocol::r#trait::{BinaryResultSetHandler, TextResultSetHandler};
 use crate::protocol::{BinaryRowPayload, TextRowPayload};
+use crate::raw::FromRawRow;
+use smart_default::SmartDefault;
 
 /// A handler that ignores all result set data but captures affected_rows and last_insert_id
 ///
@@ -110,5 +112,55 @@ impl<'a, H: BinaryResultSetHandler> BinaryResultSetHandler for FirstRowHandler<'
 
     fn resultset_end(&mut self, eof: OkPayloadBytes) -> Result<()> {
         self.inner.resultset_end(eof)
+    }
+}
+
+/// A handler that collects all rows into a Vec<Row>
+///
+/// Useful for `exec()` methods that need to return all rows as a collection.
+#[derive(SmartDefault)]
+pub struct CollectHandler<Row> {
+    rows: Vec<Row>,
+    affected_rows: u64,
+    last_insert_id: u64,
+}
+
+impl<Row> CollectHandler<Row> {
+    pub fn take_rows(&mut self) -> Vec<Row> {
+        std::mem::take(&mut self.rows)
+    }
+    pub fn into_rows(self) -> Vec<Row> {
+        self.rows
+    }
+    pub fn affected_rows(&self) -> u64 {
+        self.affected_rows
+    }
+    pub fn last_insert_id(&self) -> u64 {
+        self.last_insert_id
+    }
+}
+
+impl<Row: for<'buf> FromRawRow<'buf>> BinaryResultSetHandler for CollectHandler<Row> {
+    fn no_result_set(&mut self, ok: OkPayloadBytes) -> Result<()> {
+        let payload = OkPayload::try_from(ok)?;
+        self.affected_rows = payload.affected_rows;
+        self.last_insert_id = payload.last_insert_id;
+        Ok(())
+    }
+
+    fn resultset_start(&mut self, _cols: &[ColumnDefinition<'_>]) -> Result<()> {
+        Ok(())
+    }
+
+    fn row(&mut self, cols: &[ColumnDefinition], row: BinaryRowPayload) -> Result<()> {
+        self.rows.push(Row::from_raw_row(cols, row)?);
+        Ok(())
+    }
+
+    fn resultset_end(&mut self, eof: OkPayloadBytes) -> Result<()> {
+        let payload = OkPayload::try_from(eof)?;
+        self.affected_rows = payload.affected_rows;
+        self.last_insert_id = payload.last_insert_id;
+        Ok(())
     }
 }

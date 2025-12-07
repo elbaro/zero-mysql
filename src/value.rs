@@ -1,8 +1,4 @@
 /// MySQL Binary Protocol Value Types
-use crate::constant::{ColumnFlags, ColumnType};
-use crate::error::{Error, Result, eyre};
-use crate::protocol::command::ColumnTypeAndFlags;
-use crate::protocol::primitive::*;
 use zerocopy::byteorder::little_endian::{U16 as U16LE, U32 as U32LE};
 use zerocopy::{FromBytes, Immutable, KnownLayout};
 
@@ -34,142 +30,6 @@ pub enum Value<'a> {
     Time12(&'a Time12),
     /// BLOB, GEOMETRY, STRING, VARCHAR, VAR_STRING, ..
     Byte(&'a [u8]),
-}
-
-impl<'a> Value<'a> {
-    /// Parse a single binary protocol value based on column type and flags
-    ///
-    /// Returns the parsed value and the remaining bytes
-    pub fn parse(type_and_flags: &ColumnTypeAndFlags, data: &'a [u8]) -> Result<(Self, &'a [u8])> {
-        let is_unsigned = type_and_flags.flags.contains(ColumnFlags::UNSIGNED_FLAG);
-
-        match type_and_flags.column_type {
-            ColumnType::MYSQL_TYPE_NULL => Ok((Value::Null, data)),
-
-            // Integer types
-            ColumnType::MYSQL_TYPE_TINY => {
-                let (val, rest) = read_int_1(data)?;
-                let value = if is_unsigned {
-                    Value::UnsignedInt(val as u64)
-                } else {
-                    Value::SignedInt(val as i8 as i64)
-                };
-                Ok((value, rest))
-            }
-
-            ColumnType::MYSQL_TYPE_SHORT | ColumnType::MYSQL_TYPE_YEAR => {
-                let (val, rest) = read_int_2(data)?;
-                let value = if is_unsigned {
-                    Value::UnsignedInt(val as u64)
-                } else {
-                    Value::SignedInt(val as i16 as i64)
-                };
-                Ok((value, rest))
-            }
-
-            ColumnType::MYSQL_TYPE_INT24 | ColumnType::MYSQL_TYPE_LONG => {
-                let (val, rest) = read_int_4(data)?;
-                let value = if is_unsigned {
-                    Value::UnsignedInt(val as u64)
-                } else {
-                    Value::SignedInt(val as i32 as i64)
-                };
-                Ok((value, rest))
-            }
-
-            ColumnType::MYSQL_TYPE_LONGLONG => {
-                let (val, rest) = read_int_8(data)?;
-                let value = if is_unsigned {
-                    Value::UnsignedInt(val)
-                } else {
-                    Value::SignedInt(val as i64)
-                };
-                Ok((value, rest))
-            }
-
-            // Floating point types
-            ColumnType::MYSQL_TYPE_FLOAT => {
-                let (val, rest) = read_int_4(data)?;
-                Ok((Value::Float(f32::from_bits(val)), rest))
-            }
-
-            ColumnType::MYSQL_TYPE_DOUBLE => {
-                let (val, rest) = read_int_8(data)?;
-                Ok((Value::Double(f64::from_bits(val)), rest))
-            }
-
-            // Temporal types - use length-encoded format
-            ColumnType::MYSQL_TYPE_DATE
-            | ColumnType::MYSQL_TYPE_DATETIME
-            | ColumnType::MYSQL_TYPE_TIMESTAMP
-            | ColumnType::MYSQL_TYPE_TIMESTAMP2
-            | ColumnType::MYSQL_TYPE_DATETIME2
-            | ColumnType::MYSQL_TYPE_NEWDATE => {
-                let (len, mut rest) = read_int_1(data)?;
-                match len {
-                    0 => Ok((Value::Timestamp0, rest)),
-                    4 => {
-                        let ts = Timestamp4::ref_from_bytes(&rest[..4])?;
-                        rest = &rest[4..];
-                        Ok((Value::Timestamp4(ts), rest))
-                    }
-                    7 => {
-                        let ts = Timestamp7::ref_from_bytes(&rest[..7])?;
-                        rest = &rest[7..];
-                        Ok((Value::Timestamp7(ts), rest))
-                    }
-                    11 => {
-                        let ts = Timestamp11::ref_from_bytes(&rest[..11])?;
-                        rest = &rest[11..];
-                        Ok((Value::Timestamp11(ts), rest))
-                    }
-                    _ => Err(Error::LibraryBug(eyre!(
-                        "invalid timestamp length: {}",
-                        len
-                    ))),
-                }
-            }
-
-            // TIME types
-            ColumnType::MYSQL_TYPE_TIME | ColumnType::MYSQL_TYPE_TIME2 => {
-                let (len, mut rest) = read_int_1(data)?;
-                match len {
-                    0 => Ok((Value::Time0, rest)),
-                    8 => {
-                        let time = Time8::ref_from_bytes(&rest[..8])?;
-                        rest = &rest[8..];
-                        Ok((Value::Time8(time), rest))
-                    }
-                    12 => {
-                        let time = Time12::ref_from_bytes(&rest[..12])?;
-                        rest = &rest[12..];
-                        Ok((Value::Time12(time), rest))
-                    }
-                    _ => Err(Error::LibraryBug(eyre!("invalid time length: {}", len))),
-                }
-            }
-
-            // String and BLOB types - length-encoded
-            ColumnType::MYSQL_TYPE_VARCHAR
-            | ColumnType::MYSQL_TYPE_VAR_STRING
-            | ColumnType::MYSQL_TYPE_STRING
-            | ColumnType::MYSQL_TYPE_BLOB
-            | ColumnType::MYSQL_TYPE_TINY_BLOB
-            | ColumnType::MYSQL_TYPE_MEDIUM_BLOB
-            | ColumnType::MYSQL_TYPE_LONG_BLOB
-            | ColumnType::MYSQL_TYPE_GEOMETRY
-            | ColumnType::MYSQL_TYPE_JSON
-            | ColumnType::MYSQL_TYPE_DECIMAL
-            | ColumnType::MYSQL_TYPE_NEWDECIMAL
-            | ColumnType::MYSQL_TYPE_ENUM
-            | ColumnType::MYSQL_TYPE_SET
-            | ColumnType::MYSQL_TYPE_BIT
-            | ColumnType::MYSQL_TYPE_TYPED_ARRAY => {
-                let (bytes, rest) = read_string_lenenc(data)?;
-                Ok((Value::Byte(bytes), rest))
-            }
-        }
-    }
 }
 
 // ============================================================================
@@ -331,4 +191,3 @@ impl<'a> NullBitmap<'a> {
         self.bitmap
     }
 }
-
