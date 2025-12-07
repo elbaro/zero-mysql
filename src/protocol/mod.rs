@@ -5,7 +5,6 @@ pub mod primitive;
 pub mod response;
 mod row;
 pub mod r#trait;
-pub mod value;
 
 pub use row::{BinaryRowPayload, TextRowPayload};
 pub use r#trait::{BinaryResultSetHandler, RowDecoder};

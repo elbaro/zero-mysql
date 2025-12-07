@@ -16,8 +16,8 @@ pub enum Error {
         "Connection mismatch: transaction started on connection {expected}, but commit/rollback called on connection {actual}"
     )]
     ConnectionMismatch { expected: u64, actual: u64 },
-    #[error("Bad config error: {0}")]
-    BadConfigError(String),
+    #[error("Bad usage error: {0}")]
+    BadUsageError(String),
     // ─── Temporary Error ─────────────────────────────────────────────────
     #[error("IO error: {0}")]
     IoError(#[from] std::io::Error),

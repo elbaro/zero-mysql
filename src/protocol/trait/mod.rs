@@ -38,3 +38,6 @@ pub trait TextResultSetHandler {
     fn row(&mut self, cols: &[ColumnDefinition<'_>], row: TextRowPayload<'_>) -> Result<()>;
     fn resultset_end(&mut self, eof: OkPayloadBytes) -> Result<()>;
 }
+
+#[cfg(test)]
+mod param_test;

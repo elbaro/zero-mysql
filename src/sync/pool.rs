@@ -47,10 +47,8 @@ impl Pool {
         if conn.is_broken() {
             return;
         }
-        if self.opts.pool_reset_conn {
-            if conn.reset().is_err() {
-                return;
-            }
+        if self.opts.pool_reset_conn && conn.reset().is_err() {
+            return;
         }
         let _ = self.conns.push(conn);
     }

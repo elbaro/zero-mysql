@@ -1,6 +1,6 @@
 [package]
 name = "zero-mysql"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 license = "MIT"
 description = "A high-performance MySQL client"
@@ -17,7 +17,12 @@ tokio-tls = ["dep:native-tls", "dep:tokio-native-tls"]
 
 [dependencies]
 thiserror = "2"
-tokio = { version = "1", features = ["io-util", "net", "rt", "sync"], optional = true }
+tokio = { version = "1", features = [
+  "io-util",
+  "net",
+  "rt",
+  "sync",
+], optional = true }
 native-tls = { version = "0.2", optional = true }
 tokio-native-tls = { version = "0.3", optional = true }
 zerocopy = { version = "0.8", features = ["derive"] }

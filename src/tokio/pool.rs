@@ -30,7 +30,7 @@ impl Pool {
 
     pub async fn get(self: &Arc<Self>) -> Result<PooledConn> {
         let permit = match &self.semaphore {
-            Some(sem) => Some(Arc::clone(sem).acquire_owned().await.map_err(|_| {
+            Some(sem) => Some(Arc::clone(sem).acquire_owned().await.map_err(|_acquire_err| {
                 crate::error::Error::LibraryBug(color_eyre::eyre::eyre!("semaphore closed"))
             })?),
             None => None,

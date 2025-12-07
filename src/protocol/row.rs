@@ -1,4 +1,4 @@
-use crate::protocol::value::NullBitmap;
+use crate::value::NullBitmap;
 
 /// The payload part of a row packet.
 #[derive(Debug, Clone)]
@@ -21,7 +21,7 @@ impl<'a> BinaryRowPayload<'a> {
         self.null_bitmap
     }
 
-    pub fn values(&self) -> &[u8] {
+    pub fn values(&self) -> &'a [u8] {
         self.values
     }
 

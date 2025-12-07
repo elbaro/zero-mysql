@@ -30,7 +30,7 @@ pub fn read_query_response(payload: &[u8]) -> Result<QueryResponse<'_>> {
     match payload[0] {
         0xFF => Err(ErrPayloadBytes(payload).into()),
         0x00 => Ok(QueryResponse::Ok(OkPayloadBytes(payload))),
-        0xFB => Err(Error::BadConfigError(
+        0xFB => Err(Error::BadUsageError(
             "LOCAL INFILE queries are not yet supported".to_string(),
         )),
         _ => {

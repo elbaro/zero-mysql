@@ -21,3 +21,6 @@ pub enum Action<'buf> {
     /// State machine has finished processing
     Finished,
 }
+
+#[cfg(test)]
+mod column_definition_test;

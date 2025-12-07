@@ -46,11 +46,12 @@ impl Conn {
             let stream = UnixStream::connect(socket_path).await?;
             Stream::unix(stream)
         } else {
-            let host = opts.host.as_ref().ok_or_else(|| {
-                Error::BadConfigError("Missing host in connection options".to_string())
-            })?;
-
-            let addr = format!("{}:{}", host, opts.port);
+            if opts.host.is_empty() {
+                return Err(Error::BadUsageError(
+                    "Missing host in connection options".to_string(),
+                ));
+            }
+            let addr = format!("{}:{}", opts.host, opts.port);
             let stream = TcpStream::connect(&addr).await?;
             stream.set_nodelay(opts.tcp_nodelay)?;
             Stream::tcp(stream)
@@ -65,7 +66,7 @@ impl Conn {
         let mut buffer_set = opts.buffer_pool.get_buffer_set();
 
         #[cfg(feature = "tokio-tls")]
-        let host = opts.host.clone().unwrap_or_default();
+        let host = opts.host.clone();
 
         let mut handshake = Handshake::new(opts);
 
@@ -87,7 +88,7 @@ impl Conn {
                 }
                 #[cfg(not(feature = "tokio-tls"))]
                 HandshakeAction::UpgradeTls { .. } => {
-                    return Err(Error::BadConfigError(
+                    return Err(Error::BadUsageError(
                         "TLS requested but tokio-tls feature is not enabled".to_string(),
                     ));
                 }

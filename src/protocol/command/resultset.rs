@@ -1,7 +1,7 @@
 use crate::error::Result;
 use crate::protocol::BinaryRowPayload;
 use crate::protocol::primitive::*;
-use crate::protocol::value::NullBitmap;
+use crate::value::NullBitmap;
 
 /// Result set metadata header
 #[derive(Debug, Clone)]

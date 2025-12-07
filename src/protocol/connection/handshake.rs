@@ -461,16 +461,17 @@ impl<'a> Handshake<'a> {
                             let auth_switch = read_auth_switch_request(payload)?;
 
                             // Compute auth response for new plugin
-                            let password = self.opts.password.as_deref().unwrap_or("");
                             let auth_response = match auth_switch.plugin_name {
-                                b"mysql_native_password" => {
-                                    auth_mysql_native_password(password, auth_switch.plugin_data)
-                                        .to_vec()
-                                }
-                                b"caching_sha2_password" => {
-                                    auth_caching_sha2_password(password, auth_switch.plugin_data)
-                                        .to_vec()
-                                }
+                                b"mysql_native_password" => auth_mysql_native_password(
+                                    &self.opts.password,
+                                    auth_switch.plugin_data,
+                                )
+                                .to_vec(),
+                                b"caching_sha2_password" => auth_caching_sha2_password(
+                                    &self.opts.password,
+                                    auth_switch.plugin_data,
+                                )
+                                .to_vec(),
                                 plugin => {
                                     return Err(Error::Unsupported(
                                         String::from_utf8_lossy(plugin).to_string(),
@@ -571,18 +572,17 @@ impl<'a> Handshake<'a> {
             ))
         })?;
 
-        // Copy auth plugin name before getting mutable borrow
-
         // Compute auth response based on plugin name
-        let password = self.opts.password.as_deref().unwrap_or("");
         let auth_plugin_name = &buffer_set.initial_handshake[handshake.auth_plugin_name.clone()];
         let auth_response = {
             match auth_plugin_name {
                 b"mysql_native_password" => {
-                    auth_mysql_native_password(password, &handshake.auth_plugin_data).to_vec()
+                    auth_mysql_native_password(&self.opts.password, &handshake.auth_plugin_data)
+                        .to_vec()
                 }
                 b"caching_sha2_password" => {
-                    auth_caching_sha2_password(password, &handshake.auth_plugin_data).to_vec()
+                    auth_caching_sha2_password(&self.opts.password, &handshake.auth_plugin_data)
+                        .to_vec()
                 }
                 plugin => {
                     return Err(Error::Unsupported(

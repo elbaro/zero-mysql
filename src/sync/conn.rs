@@ -56,11 +56,12 @@ impl Conn {
             let stream = UnixStream::connect(socket_path)?;
             Stream::unix(stream)
         } else {
-            let host = opts.host.as_ref().ok_or_else(|| {
-                Error::BadConfigError("Missing host in connection options".to_string())
-            })?;
-
-            let addr = format!("{}:{}", host, opts.port);
+            if opts.host.is_empty() {
+                return Err(Error::BadUsageError(
+                    "Missing host in connection options".to_string(),
+                ));
+            }
+            let addr = format!("{}:{}", opts.host, opts.port);
             let stream = TcpStream::connect(&addr)?;
             stream.set_nodelay(opts.tcp_nodelay)?;
             Stream::tcp(stream)
@@ -75,7 +76,7 @@ impl Conn {
         let mut buffer_set = opts.buffer_pool.get_buffer_set();
 
         #[cfg(feature = "sync-tls")]
-        let host = opts.host.clone().unwrap_or_default();
+        let host = opts.host.clone();
 
         let mut handshake = Handshake::new(opts);
 
@@ -97,7 +98,7 @@ impl Conn {
                 }
                 #[cfg(not(feature = "sync-tls"))]
                 HandshakeAction::UpgradeTls { .. } => {
-                    return Err(Error::BadConfigError(
+                    return Err(Error::BadUsageError(
                         "TLS requested but sync-tls feature is not enabled".to_string(),
                     ));
                 }
@@ -132,6 +133,7 @@ impl Conn {
         Ok(conn)
     }
 
+    /// Example: `"11.4.8-MariaDB"`
     pub fn server_version(&self) -> &[u8] {
         &self.buffer_set.initial_handshake[self.initial_handshake.server_version.clone()]
     }
@@ -231,7 +233,7 @@ impl Conn {
         Ok(())
     }
 
-    /// Returns `Ok(statement_id) on success
+    /// Returns `Ok(statement_id)` on success
     pub fn prepare(&mut self, sql: &str) -> Result<PreparedStatement> {
         let result = self.prepare_inner(sql);
         self.check_error(result)
@@ -315,6 +317,9 @@ impl Conn {
         }
     }
 
+    /// Executes a prepared statement with parameters.
+    ///
+    /// This is the most general version of exec_*() methods.
     pub fn exec<'conn, P, H>(
         &'conn mut self,
         stmt: &'conn mut PreparedStatement,
