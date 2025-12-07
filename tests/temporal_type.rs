@@ -1,36 +1,36 @@
-//! Integration tests for TIMESTAMP column types
+//! Integration tests for DATETIME column types
 //!
 //! Tests how DATETIME(6) column handles different input formats
-//! and what binary representations (Timestamp4/7/11) are returned.
+//! and what binary representations (Datetime4/7/11) are returned.
 
 use zero_mysql::error::Result;
+use zero_mysql::protocol::BinaryRowPayload;
 use zero_mysql::protocol::command::ColumnDefinition;
 use zero_mysql::protocol::response::OkPayloadBytes;
 use zero_mysql::protocol::r#trait::BinaryResultSetHandler;
-use zero_mysql::protocol::BinaryRowPayload;
 use zero_mysql::raw::parse_value;
 use zero_mysql::value::Value;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum TimestampType {
-    Timestamp0,
-    Timestamp4,
-    Timestamp7,
-    Timestamp11,
+enum DatetimeType {
+    Datetime0,
+    Datetime4,
+    Datetime7,
+    Datetime11,
     Other,
 }
 
-struct TimestampTypeCollector {
-    types: Vec<TimestampType>,
+struct DatetimeTypeCollector {
+    types: Vec<DatetimeType>,
 }
 
-impl TimestampTypeCollector {
+impl DatetimeTypeCollector {
     fn new() -> Self {
         Self { types: Vec::new() }
     }
 }
 
-impl BinaryResultSetHandler for TimestampTypeCollector {
+impl BinaryResultSetHandler for DatetimeTypeCollector {
     fn no_result_set(&mut self, _ok: OkPayloadBytes) -> Result<()> {
         Ok(())
     }
@@ -46,17 +46,17 @@ impl BinaryResultSetHandler for TimestampTypeCollector {
         // Parse the first column (id INT) to skip it
         let (_id, rest): (i32, _) = parse_value(&cols[0].tail, null_bitmap.is_null(0), data)?;
 
-        // Parse the timestamp column (second column, index 1)
+        // Parse the datetime column (second column, index 1)
         let (value, _): (Value<'_>, _) = parse_value(&cols[1].tail, null_bitmap.is_null(1), rest)?;
 
-        let ts_type = match value {
-            Value::Timestamp0 => TimestampType::Timestamp0,
-            Value::Timestamp4(_) => TimestampType::Timestamp4,
-            Value::Timestamp7(_) => TimestampType::Timestamp7,
-            Value::Timestamp11(_) => TimestampType::Timestamp11,
-            _ => TimestampType::Other,
+        let dt_type = match value {
+            Value::Datetime0 => DatetimeType::Datetime0,
+            Value::Datetime4(_) => DatetimeType::Datetime4,
+            Value::Datetime7(_) => DatetimeType::Datetime7,
+            Value::Datetime11(_) => DatetimeType::Datetime11,
+            _ => DatetimeType::Other,
         };
-        self.types.push(ts_type);
+        self.types.push(dt_type);
         Ok(())
     }
 
@@ -97,50 +97,50 @@ fn test_datetime6_with_different_inputs() {
         .prepare("SELECT id, dt FROM test_datetime6 ORDER BY id")
         .expect("prepare");
 
-    let mut handler = TimestampTypeCollector::new();
+    let mut handler = DatetimeTypeCollector::new();
     conn.exec(&mut stmt, (), &mut handler).expect("exec");
 
     assert_eq!(handler.types.len(), 4);
 
-    // Row 1: zero value '0000-00-00 00:00:00' -> returns Timestamp0 (0 bytes)
+    // Row 1: zero value '0000-00-00 00:00:00' -> returns Datetime0 (0 bytes)
     eprintln!(
         "Row 1 (zero input '0000-00-00 00:00:00'): {:?}",
         handler.types[0]
     );
     assert_eq!(
         handler.types[0],
-        TimestampType::Timestamp0,
-        "zero input returns Timestamp0"
+        DatetimeType::Datetime0,
+        "zero input returns Datetime0"
     );
 
-    // Row 2: ymd only input '2024-01-15' -> returns Timestamp4 (date only, no time)
+    // Row 2: ymd only input '2024-01-15' -> returns Datetime4 (date only, no time)
     eprintln!("Row 2 (ymd input '2024-01-15'): {:?}", handler.types[1]);
     assert_eq!(
         handler.types[1],
-        TimestampType::Timestamp4,
-        "ymd input returns Timestamp4"
+        DatetimeType::Datetime4,
+        "ymd input returns Datetime4"
     );
 
-    // Row 3: ymd-hms input '2024-01-15 12:30:45' -> returns Timestamp7 (date + time)
+    // Row 3: ymd-hms input '2024-01-15 12:30:45' -> returns Datetime7 (date + time)
     eprintln!(
         "Row 3 (ymd-hms input '2024-01-15 12:30:45'): {:?}",
         handler.types[2]
     );
     assert_eq!(
         handler.types[2],
-        TimestampType::Timestamp7,
-        "ymd-hms input returns Timestamp7"
+        DatetimeType::Datetime7,
+        "ymd-hms input returns Datetime7"
     );
 
-    // Row 4: ymd-hms-micro input '2024-01-15 12:30:45.123456' -> returns Timestamp11 (date + time + microseconds)
+    // Row 4: ymd-hms-micro input '2024-01-15 12:30:45.123456' -> returns Datetime11 (date + time + microseconds)
     eprintln!(
         "Row 4 (ymd-hms-micro input '2024-01-15 12:30:45.123456'): {:?}",
         handler.types[3]
     );
     assert_eq!(
         handler.types[3],
-        TimestampType::Timestamp11,
-        "ymd-hms-micro input returns Timestamp11"
+        DatetimeType::Datetime11,
+        "ymd-hms-micro input returns Datetime11"
     );
 }
 
@@ -182,52 +182,52 @@ fn test_datetime6_binary_protocol_insert() {
         .prepare("SELECT id, dt FROM test_datetime6_binary ORDER BY id")
         .expect("prepare select");
 
-    let mut handler = TimestampTypeCollector::new();
+    let mut handler = DatetimeTypeCollector::new();
     conn.exec(&mut select_stmt, (), &mut handler).expect("exec");
 
     assert_eq!(handler.types.len(), 4);
 
-    // Row 1: zero value -> Timestamp0
+    // Row 1: zero value -> Datetime0
     eprintln!(
         "Binary Row 1 (zero input '0000-00-00 00:00:00'): {:?}",
         handler.types[0]
     );
     assert_eq!(
         handler.types[0],
-        TimestampType::Timestamp0,
-        "zero input returns Timestamp0"
+        DatetimeType::Datetime0,
+        "zero input returns Datetime0"
     );
 
-    // Row 2: ymd only -> Timestamp4
+    // Row 2: ymd only -> Datetime4
     eprintln!(
         "Binary Row 2 (ymd input '2024-01-15'): {:?}",
         handler.types[1]
     );
     assert_eq!(
         handler.types[1],
-        TimestampType::Timestamp4,
-        "ymd input returns Timestamp4"
+        DatetimeType::Datetime4,
+        "ymd input returns Datetime4"
     );
 
-    // Row 3: ymd-hms -> Timestamp7
+    // Row 3: ymd-hms -> Datetime7
     eprintln!(
         "Binary Row 3 (ymd-hms input '2024-01-15 12:30:45'): {:?}",
         handler.types[2]
     );
     assert_eq!(
         handler.types[2],
-        TimestampType::Timestamp7,
-        "ymd-hms input returns Timestamp7"
+        DatetimeType::Datetime7,
+        "ymd-hms input returns Datetime7"
     );
 
-    // Row 4: ymd-hms-micro -> Timestamp11
+    // Row 4: ymd-hms-micro -> Datetime11
     eprintln!(
         "Binary Row 4 (ymd-hms-micro input '2024-01-15 12:30:45.123456'): {:?}",
         handler.types[3]
     );
     assert_eq!(
         handler.types[3],
-        TimestampType::Timestamp11,
-        "ymd-hms-micro input returns Timestamp11"
+        DatetimeType::Datetime11,
+        "ymd-hms-micro input returns Datetime11"
     );
 }

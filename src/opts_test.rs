@@ -70,10 +70,7 @@ fn parse_full_url() {
 #[test]
 fn parse_socket_param() {
     let opts = Opts::try_from("mysql://localhost?socket=/var/run/mysqld/mysqld.sock").unwrap();
-    assert_eq!(
-        opts.socket.as_deref(),
-        Some("/var/run/mysqld/mysqld.sock")
-    );
+    assert_eq!(opts.socket.as_deref(), Some("/var/run/mysqld/mysqld.sock"));
 }
 
 #[test]

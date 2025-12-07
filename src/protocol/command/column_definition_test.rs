@@ -3,9 +3,7 @@ use std::mem::size_of;
 use zerocopy::FromBytes;
 
 use crate::constant::{ColumnFlags, ColumnType};
-use crate::protocol::command::{
-    ColumnDefinition, ColumnDefinitionBytes, ColumnDefinitionTail,
-};
+use crate::protocol::command::{ColumnDefinition, ColumnDefinitionBytes, ColumnDefinitionTail};
 
 #[test]
 fn test_column_definition_tail_size() {
@@ -30,20 +28,11 @@ fn test_column_definition_tail_parsing() {
     assert_eq!(tail.charset(), 33);
     assert_eq!(tail.column_length(), 255);
 
-    // Test conversion methods
     let flags = tail.flags().expect("Failed to parse flags");
     assert!(flags.is_empty());
 
     let col_type = tail.column_type().expect("Failed to parse column type");
     assert_eq!(col_type, ColumnType::MYSQL_TYPE_VAR_STRING);
-
-    // Test type_and_flags
-    let type_and_flags = tail.type_and_flags().expect("Failed to get type_and_flags");
-    assert_eq!(
-        type_and_flags.column_type,
-        ColumnType::MYSQL_TYPE_VAR_STRING
-    );
-    assert!(type_and_flags.flags.is_empty());
 }
 
 #[test]
@@ -67,12 +56,6 @@ fn test_column_definition_tail_with_flags() {
 
     let col_type = tail.column_type().expect("Failed to parse column type");
     assert_eq!(col_type, ColumnType::MYSQL_TYPE_TINY);
-
-    // Test type_and_flags
-    let type_and_flags = tail.type_and_flags().expect("Failed to get type_and_flags");
-    assert_eq!(type_and_flags.column_type, ColumnType::MYSQL_TYPE_TINY);
-    assert!(type_and_flags.flags.contains(ColumnFlags::NOT_NULL_FLAG));
-    assert!(type_and_flags.flags.contains(ColumnFlags::UNSIGNED_FLAG));
 }
 
 #[test]
@@ -90,11 +73,9 @@ fn test_column_definition_tail_with_part_key_flag() {
 
     let tail = ColumnDefinitionTail::ref_from_bytes(&data).expect("Failed to parse");
 
-    // Verify the fields
     assert_eq!(tail.charset(), 63);
     assert_eq!(tail.column_length(), 11);
 
-    // Verify flags can be parsed
     let flags = tail
         .flags()
         .expect("Failed to parse flags with PART_KEY_FLAG");
@@ -103,21 +84,8 @@ fn test_column_definition_tail_with_part_key_flag() {
     assert!(flags.contains(ColumnFlags::AUTO_INCREMENT_FLAG));
     assert!(flags.contains(ColumnFlags::PART_KEY_FLAG));
 
-    // Verify column type
     let col_type = tail.column_type().expect("Failed to parse column type");
     assert_eq!(col_type, ColumnType::MYSQL_TYPE_LONG);
-
-    // Test type_and_flags
-    let type_and_flags = tail.type_and_flags().expect("Failed to get type_and_flags");
-    assert_eq!(type_and_flags.column_type, ColumnType::MYSQL_TYPE_LONG);
-    assert!(type_and_flags.flags.contains(ColumnFlags::NOT_NULL_FLAG));
-    assert!(type_and_flags.flags.contains(ColumnFlags::PRI_KEY_FLAG));
-    assert!(
-        type_and_flags
-            .flags
-            .contains(ColumnFlags::AUTO_INCREMENT_FLAG)
-    );
-    assert!(type_and_flags.flags.contains(ColumnFlags::PART_KEY_FLAG));
 }
 
 #[test]
@@ -241,13 +209,4 @@ fn test_column_definition_try_from() {
         .column_type()
         .expect("Failed to parse column type");
     assert_eq!(col_type, ColumnType::MYSQL_TYPE_LONG);
-
-    // Test type_and_flags
-    let type_and_flags = col_def
-        .tail
-        .type_and_flags()
-        .expect("Failed to get type_and_flags");
-    assert_eq!(type_and_flags.column_type, ColumnType::MYSQL_TYPE_LONG);
-    assert!(type_and_flags.flags.contains(ColumnFlags::NOT_NULL_FLAG));
-    assert!(type_and_flags.flags.contains(ColumnFlags::PRI_KEY_FLAG));
 }

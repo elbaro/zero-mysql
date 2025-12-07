@@ -29,12 +29,15 @@ impl Pool {
     }
 
     pub async fn get(self: &Arc<Self>) -> Result<PooledConn> {
-        let permit = match &self.semaphore {
-            Some(sem) => Some(Arc::clone(sem).acquire_owned().await.map_err(|_acquire_err| {
-                crate::error::Error::LibraryBug(color_eyre::eyre::eyre!("semaphore closed"))
-            })?),
-            None => None,
-        };
+        let permit =
+            match &self.semaphore {
+                Some(sem) => Some(Arc::clone(sem).acquire_owned().await.map_err(
+                    |_acquire_err| {
+                        crate::error::Error::LibraryBug(color_eyre::eyre::eyre!("semaphore closed"))
+                    },
+                )?),
+                None => None,
+            };
         let mut conn = match self.conns.pop() {
             Some(c) => c,
             None => Conn::new(self.opts.clone()).await?,

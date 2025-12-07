@@ -3,12 +3,9 @@ use zero_mysql::protocol::BinaryRowPayload;
 use zero_mysql::protocol::command::ColumnDefinition;
 use zero_mysql::protocol::response::OkPayloadBytes;
 use zero_mysql::protocol::r#trait::BinaryResultSetHandler;
-use zero_mysql::protocol::value::Value;
+use zero_mysql::raw::parse_value;
 use zero_mysql::sync::Conn;
-
-// #[global_allocator]
-// static GLOBAL: tracy_client::ProfiledAllocator<std::alloc::System> =
-//     tracy_client::ProfiledAllocator::new(std::alloc::System, 100);
+use zero_mysql::value::Value;
 
 pub struct User {
     pub id: i32,
@@ -16,7 +13,6 @@ pub struct User {
     pub hair_color: Option<String>,
 }
 
-// Handler for collecting users
 struct UsersHandler {
     users: Vec<User>,
 }
@@ -44,48 +40,43 @@ impl BinaryResultSetHandler for UsersHandler {
         cols: &[ColumnDefinition<'_>],
         row: BinaryRowPayload<'_>,
     ) -> zero_mysql::error::Result<()> {
+        let null_bitmap = row.null_bitmap();
         let mut bytes = row.values();
-        let mut values: [std::mem::MaybeUninit<Value<'_>>; 3] =
-            [const { std::mem::MaybeUninit::uninit() }; 3];
 
-        for i in 0..cols.len() {
-            if row.null_bitmap().is_null(i) {
-                values[i].write(Value::Null);
-            } else {
-                let type_and_flags = cols[i].tail.type_and_flags()?;
-                let (value, remaining) = Value::parse(&type_and_flags, bytes)?;
-                values[i].write(value);
-                bytes = remaining;
-            }
-        }
-
-        let values = unsafe {
-            [
-                values[0].assume_init_read(),
-                values[1].assume_init_read(),
-                values[2].assume_init_read(),
-            ]
+        // Parse id (column 0)
+        let (id_value, rest): (Value<'_>, _) =
+            parse_value(cols[0].tail, null_bitmap.is_null(0), bytes)?;
+        bytes = rest;
+        let id = if let Value::SignedInt(id) = id_value {
+            id as i32
+        } else {
+            panic!("Expected SignedInt for id");
         };
 
-        let user = User {
-            id: if let Value::SignedInt(id) = values[0] {
-                id as i32
-            } else {
-                panic!("Expected SignedInt for id");
-            },
-            name: if let Value::Byte(name) = &values[1] {
-                String::from_utf8_lossy(name).to_string()
-            } else {
-                panic!("Expected Byte for name");
-            },
-            hair_color: match &values[2] {
-                Value::Null => None,
-                Value::Byte(s) => Some(String::from_utf8_lossy(s).to_string()),
-                _ => panic!("Expected Byte or Null for hair_color"),
-            },
+        // Parse name (column 1)
+        let (name_value, rest): (Value<'_>, _) =
+            parse_value(cols[1].tail, null_bitmap.is_null(1), bytes)?;
+        bytes = rest;
+        let name = if let Value::Byte(name) = name_value {
+            String::from_utf8_lossy(name).to_string()
+        } else {
+            panic!("Expected Byte for name");
         };
 
-        self.users.push(user);
+        // Parse hair_color (column 2)
+        let (hair_color_value, _rest): (Value<'_>, _) =
+            parse_value(cols[2].tail, null_bitmap.is_null(2), bytes)?;
+        let hair_color = match hair_color_value {
+            Value::Null => None,
+            Value::Byte(s) => Some(String::from_utf8_lossy(s).to_string()),
+            _ => panic!("Expected Byte or Null for hair_color"),
+        };
+
+        self.users.push(User {
+            id,
+            name,
+            hair_color,
+        });
         Ok(())
     }
 
@@ -96,47 +87,27 @@ impl BinaryResultSetHandler for UsersHandler {
 }
 
 fn main() -> Result<()> {
-    // {
-    //     use reqray::CallTreeCollector;
-    //     use tracing_subscriber::{fmt, prelude::*, util::SubscriberInitExt};
-
-    //     let fmt_layer = fmt::layer().with_target(false);
-
-    //     tracing_subscriber::registry()
-    //         // -----------------------------------------------
-    //         .with(CallTreeCollector::default())
-    //         // -----------------------------------------------
-    //         .with(fmt_layer)
-    //         .init();
-    // }
-
-    // tracy_client::Client::start();
-    // use tracing_subscriber::layer::SubscriberExt;
-    // let subscriber = tracing_subscriber::registry().with(tracing_tracy::TracyLayer::default());
-    // tracing::subscriber::set_global_default(subscriber).unwrap();
-
     let connection_url =
         std::env::var("DATABASE_URL").expect("DATABASE_URL must be set in order to run tests");
     let mut conn = Conn::new(connection_url.as_str())?;
 
-    // conn.query_drop("SET FOREIGN_KEY_CHECKS = 0;")?;
-    // conn.query_drop("TRUNCATE TABLE comments")?;
-    // conn.query_drop("TRUNCATE TABLE posts")?;
-    // conn.query_drop("TRUNCATE TABLE users")?;
-    let mut _insert_stmt = conn.prepare("INSERT INTO users (name, hair_color) VALUES (?, ?)")?;
+    conn.query_drop("SET FOREIGN_KEY_CHECKS = 0;")?;
+    conn.query_drop("TRUNCATE TABLE comments")?;
+    conn.query_drop("TRUNCATE TABLE posts")?;
+    conn.query_drop("TRUNCATE TABLE users")?;
+    let mut insert_stmt = conn.prepare("INSERT INTO users (name, hair_color) VALUES (?, ?)")?;
     let mut select_stmt = conn.prepare("SELECT id, name, hair_color FROM users")?;
-    // for i in 0..1 {
-    //     let name = format!("User {}", i);
-    //     let hair_color = if i % 2 == 0 {
-    //         Some("black")
-    //     } else {
-    //         Some("brown")
-    //     };
+    for i in 0..1 {
+        let name = format!("User {}", i);
+        let hair_color = if i % 2 == 0 {
+            Some("black")
+        } else {
+            Some("brown")
+        };
 
-    //     conn.exec_drop(insert_stmt, (name.as_str(), hair_color))?;
-    // }
+        conn.exec_drop(&mut insert_stmt, (name.as_str(), hair_color))?;
+    }
 
-    let mut iteration = 0u64;
     let mut handler = UsersHandler::new();
 
     for iteration in 1.. {

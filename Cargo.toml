@@ -133,6 +133,7 @@ verbose_file_reads = "warn"
 
 
 [dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
 criterion = { version = "0.8", features = ["html_reports"] }
 pretty_assertions = "1.4"
 # tracing = { version = "*" }

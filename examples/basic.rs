@@ -124,7 +124,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     conn.exec(&mut select_positive_stmt, (0_i32,), &mut handler2)?;
 
     let positive_rows = handler2.into_rows();
-    println!("\nRows with positive int_val ({} rows):", positive_rows.len());
+    println!(
+        "\nRows with positive int_val ({} rows):",
+        positive_rows.len()
+    );
     for (id, varchar) in &positive_rows {
         println!("  id={}, varchar={}", id, varchar);
     }

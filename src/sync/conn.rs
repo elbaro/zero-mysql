@@ -466,11 +466,7 @@ impl Conn {
     }
 
     /// Execute a prepared statement and collect all rows into a Vec
-    pub fn exec_rows<Row, P>(
-        &mut self,
-        stmt: &mut PreparedStatement,
-        params: P,
-    ) -> Result<Vec<Row>>
+    pub fn exec_rows<Row, P>(&mut self, stmt: &mut PreparedStatement, params: P) -> Result<Vec<Row>>
     where
         Row: for<'buf> crate::raw::FromRawRow<'buf>,
         P: Params,
