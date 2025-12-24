@@ -1,7 +1,9 @@
+use std::mem::align_of;
+
 use crate::constant::{ColumnFlags, ColumnType};
 use crate::protocol::command::ColumnDefinitionTail;
 use crate::raw::parse_value;
-use crate::value::{NullBitmap, Value};
+use crate::value::{NullBitmap, Time12, Time8, Timestamp11, Timestamp4, Timestamp7, Value};
 use zerocopy::FromBytes;
 
 /// Helper to create a ColumnDefinitionTail for testing
@@ -272,4 +274,13 @@ fn test_null_bitmap_parameters() {
     assert!(!null_bitmap.is_null(1)); // Bit 1
     assert!(null_bitmap.is_null(2)); // Bit 2
     assert!(!null_bitmap.is_null(3)); // Bit 3
+}
+
+#[test]
+fn zerocopy_types_have_alignment_of_1() {
+    assert_eq!(align_of::<Timestamp4>(), 1);
+    assert_eq!(align_of::<Timestamp7>(), 1);
+    assert_eq!(align_of::<Timestamp11>(), 1);
+    assert_eq!(align_of::<Time8>(), 1);
+    assert_eq!(align_of::<Time12>(), 1);
 }

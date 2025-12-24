@@ -37,3 +37,13 @@ impl PacketHeader {
         Ok(Self::ref_from_bytes(&data[..4])?)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn packet_header_has_alignment_of_1() {
+        assert_eq!(std::mem::align_of::<PacketHeader>(), 1);
+    }
+}

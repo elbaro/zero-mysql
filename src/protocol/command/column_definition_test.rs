@@ -1,4 +1,4 @@
-use std::mem::size_of;
+use std::mem::{align_of, size_of};
 
 use zerocopy::FromBytes;
 
@@ -9,6 +9,11 @@ use crate::protocol::command::{ColumnDefinition, ColumnDefinitionBytes, ColumnDe
 fn test_column_definition_tail_size() {
     // Verify the struct is exactly 12 bytes as per MySQL protocol
     assert_eq!(size_of::<ColumnDefinitionTail>(), 12);
+}
+
+#[test]
+fn column_definition_tail_has_alignment_of_1() {
+    assert_eq!(align_of::<ColumnDefinitionTail>(), 1);
 }
 
 #[test]

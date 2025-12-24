@@ -624,3 +624,13 @@ impl<'a> Handshake<'a> {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn handshake_fixed_fields_has_alignment_of_1() {
+        assert_eq!(std::mem::align_of::<HandshakeFixedFields>(), 1);
+    }
+}

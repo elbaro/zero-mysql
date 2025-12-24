@@ -135,3 +135,13 @@ pub fn read_eof_packet(payload: &[u8]) -> Result<&EofPacket> {
     // Zero-copy cast using zerocopy
     Ok(EofPacket::ref_from_bytes(&data[..4])?)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn eof_packet_has_alignment_of_1() {
+        assert_eq!(std::mem::align_of::<EofPacket>(), 1);
+    }
+}

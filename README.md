@@ -2,11 +2,12 @@
 
 `zero-mysql` is a high-performance MySQL library.
 
-- `zero_mysql::protocol`: implements sans I/O for MySQL protocol.
-- `zero_mysql::sync`: implements a synchronous `Conn`.
-- `zero_mysql::tokio`: implements an asynchronous `Conn`.
-
 The test, benchmark and feature development is driven by the need of [pyro-mysql](https://github.com/elbaro/pyro-mysql/).
+
+## Feature Gates
+- `sync`: synchronous API.
+- `tokio`: asynchronous API.
+
 
 ## Features
 - zero-copy whenever possible

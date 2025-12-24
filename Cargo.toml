@@ -37,7 +37,7 @@ crossbeam-queue = "0.3"
 std-semaphore = "0.1"
 color-eyre = "0.6"
 simdutf8 = "0.1"
-smart-default = "0.7.1"
+smart-default = "0.7"
 
 [lints.clippy]
 all = { level = "deny", priority = -1 }
@@ -136,10 +136,7 @@ verbose_file_reads = "warn"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
 criterion = { version = "0.8", features = ["html_reports"] }
 pretty_assertions = "1.4"
-# tracing = { version = "*" }
-tracy-client = { version = "=0.18.0" }
 tracing-subscriber = "0.3"
-# mysql = { path = "../rust-mysql-simple", optional = true }
 mysql = "26"
 mysql_async = "0.36"
 tracing-tracy = "0.11"
