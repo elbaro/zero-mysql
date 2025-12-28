@@ -140,7 +140,6 @@ tracing-subscriber = "0.3"
 mysql = "26"
 mysql_async = "0.36"
 tracing-tracy = "0.11"
-reqray = "0.4"
 
 [profile.bench]
 debug = true
