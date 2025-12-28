@@ -1,3 +1,8 @@
 /target
-.direnv
-/Cargo.lock
+.claude
+/.devenv
+/.devenv.flake.nix
+/devenv.nix
+devenv.lock
+/.direnv/
+/.envrc
