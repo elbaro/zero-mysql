@@ -34,15 +34,21 @@ jobs:
   test:
     name: Test
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@nightly
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo test --all-features
-
-  coverage:
-    name: Coverage
-    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mariadb:11
+        env:
+          MARIADB_USER: test
+          MARIADB_PASSWORD: "1234"
+          MARIADB_DATABASE: test
+          MARIADB_ALLOW_EMPTY_ROOT_PASSWORD: "yes"
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "healthcheck.sh --connect --innodb_initialized"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
@@ -52,6 +58,8 @@ jobs:
       - uses: taiki-e/install-action@cargo-llvm-cov
       - name: Generate coverage report
         run: cargo llvm-cov --all-features --lcov --output-path lcov.info
+        env:
+          DATABASE_URL: mysql://test:1234@localhost/test
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
         with:
