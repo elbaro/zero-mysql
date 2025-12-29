@@ -2,11 +2,13 @@
 
 `zero-mysql` is a high-performance MySQL library.
 
+**Requires Rust nightly.**
+
 The test, benchmark and feature development is driven by the need of [pyro-mysql](https://github.com/elbaro/pyro-mysql/).
 
 ## Feature Gates
-- `sync`: synchronous API.
-- `tokio`: asynchronous API.
+- `sync` (default): synchronous API.
+- `tokio` (default): asynchronous API.
 
 
 ## Features
