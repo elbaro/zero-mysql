@@ -43,7 +43,7 @@ pub struct Opts {
     /// Default: `3306`
     pub port: u16,
 
-    /// Unix socket path.
+    /// Unix socket path. Only supported on Unix platforms.
     /// Default: `None`
     pub socket: Option<String>,
 
@@ -60,6 +60,7 @@ pub struct Opts {
     pub tls: bool,
 
     /// When connected via TCP, read `SELECT @@socket` and reconnect to the unix socket.
+    /// Only has effect on Unix platforms.
     /// Default: `true`
     pub upgrade_to_unix_socket: bool,
 

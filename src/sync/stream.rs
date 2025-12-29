@@ -1,6 +1,7 @@
 use core::io::BorrowedCursor;
 use std::io::{BufReader, Read, Write};
 use std::net::TcpStream;
+#[cfg(unix)]
 use std::os::unix::net::UnixStream;
 
 #[cfg(feature = "sync-tls")]
@@ -10,6 +11,7 @@ pub enum Stream {
     Tcp(BufReader<TcpStream>),
     #[cfg(feature = "sync-tls")]
     Tls(BufReader<TlsStream<TcpStream>>),
+    #[cfg(unix)]
     Unix(BufReader<UnixStream>),
 }
 
@@ -18,6 +20,7 @@ impl Stream {
         Self::Tcp(BufReader::new(stream))
     }
 
+    #[cfg(unix)]
     pub fn unix(stream: UnixStream) -> Self {
         Self::Unix(BufReader::new(stream))
     }
@@ -33,6 +36,7 @@ impl Stream {
                     "Already using TLS",
                 ));
             }
+            #[cfg(unix)]
             Self::Unix(_) => {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::InvalidInput,
@@ -55,6 +59,7 @@ impl Stream {
             Self::Tcp(r) => r.read_exact(buf),
             #[cfg(feature = "sync-tls")]
             Self::Tls(r) => r.read_exact(buf),
+            #[cfg(unix)]
             Self::Unix(r) => r.read_exact(buf),
         }
     }
@@ -64,6 +69,7 @@ impl Stream {
             Self::Tcp(r) => r.read_buf_exact(cursor),
             #[cfg(feature = "sync-tls")]
             Self::Tls(r) => r.read_buf_exact(cursor),
+            #[cfg(unix)]
             Self::Unix(r) => r.read_buf_exact(cursor),
         }
     }
@@ -73,6 +79,7 @@ impl Stream {
             Self::Tcp(r) => r.get_mut().write_all(buf),
             #[cfg(feature = "sync-tls")]
             Self::Tls(r) => r.get_mut().write_all(buf),
+            #[cfg(unix)]
             Self::Unix(r) => r.get_mut().write_all(buf),
         }
     }
@@ -82,6 +89,7 @@ impl Stream {
             Self::Tcp(r) => r.get_mut().flush(),
             #[cfg(feature = "sync-tls")]
             Self::Tls(r) => r.get_mut().flush(),
+            #[cfg(unix)]
             Self::Unix(r) => r.get_mut().flush(),
         }
     }
@@ -101,6 +109,7 @@ impl Stream {
                 .peer_addr()
                 .map(|addr| addr.ip().is_loopback())
                 .unwrap_or(false),
+            #[cfg(unix)]
             Self::Unix(_) => false,
         }
     }

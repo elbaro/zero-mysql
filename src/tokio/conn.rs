@@ -1,4 +1,6 @@
-use tokio::net::{TcpStream, UnixStream};
+use tokio::net::TcpStream;
+#[cfg(unix)]
+use tokio::net::UnixStream;
 use tracing::instrument;
 use zerocopy::{FromBytes, FromZeros, IntoBytes};
 
@@ -42,10 +44,29 @@ impl Conn {
     {
         let opts: crate::opts::Opts = opts.try_into()?;
 
+        #[cfg(unix)]
         let stream = if let Some(socket_path) = &opts.socket {
             let stream = UnixStream::connect(socket_path).await?;
             Stream::unix(stream)
         } else {
+            if opts.host.is_empty() {
+                return Err(Error::BadUsageError(
+                    "Missing host in connection options".to_string(),
+                ));
+            }
+            let addr = format!("{}:{}", opts.host, opts.port);
+            let stream = TcpStream::connect(&addr).await?;
+            stream.set_nodelay(opts.tcp_nodelay)?;
+            Stream::tcp(stream)
+        };
+
+        #[cfg(not(unix))]
+        let stream = {
+            if opts.socket.is_some() {
+                return Err(Error::BadUsageError(
+                    "Unix sockets are not supported on this platform".to_string(),
+                ));
+            }
             if opts.host.is_empty() {
                 return Err(Error::BadUsageError(
                     "Missing host in connection options".to_string(),
@@ -109,11 +130,14 @@ impl Conn {
         };
 
         // Upgrade to Unix socket if connected via TCP to loopback
+        #[cfg(unix)]
         let mut conn = if opts.upgrade_to_unix_socket && conn.stream.is_tcp_loopback() {
             conn.try_upgrade_to_unix_socket(opts).await
         } else {
             conn
         };
+        #[cfg(not(unix))]
+        let mut conn = conn;
 
         // Execute init command if specified
         if let Some(init_command) = &opts.init_command {
@@ -173,6 +197,7 @@ impl Conn {
 
     /// Try to upgrade to Unix socket connection.
     /// Returns upgraded conn on success, original conn on failure.
+    #[cfg(unix)]
     async fn try_upgrade_to_unix_socket(mut self, opts: &crate::opts::Opts) -> Self {
         // Query the server for its Unix socket path
         let mut handler = SocketPathHandler { path: None };
@@ -658,10 +683,12 @@ async fn write_handshake_payload(
 }
 
 /// Handler to capture socket path from SELECT @@socket query
+#[cfg(unix)]
 struct SocketPathHandler {
     path: Option<String>,
 }
 
+#[cfg(unix)]
 impl TextResultSetHandler for SocketPathHandler {
     fn no_result_set(&mut self, _: OkPayloadBytes) -> Result<()> {
         Ok(())

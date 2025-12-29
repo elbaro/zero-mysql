@@ -1,6 +1,8 @@
 use core::mem::MaybeUninit;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader};
-use tokio::net::{TcpStream, UnixStream};
+use tokio::net::TcpStream;
+#[cfg(unix)]
+use tokio::net::UnixStream;
 
 #[cfg(feature = "tokio-tls")]
 use tokio_native_tls::TlsStream;
@@ -9,6 +11,7 @@ pub enum Stream {
     Tcp(BufReader<TcpStream>),
     #[cfg(feature = "tokio-tls")]
     Tls(BufReader<TlsStream<TcpStream>>),
+    #[cfg(unix)]
     Unix(BufReader<UnixStream>),
 }
 
@@ -17,6 +20,7 @@ impl Stream {
         Self::Tcp(BufReader::new(stream))
     }
 
+    #[cfg(unix)]
     pub fn unix(stream: UnixStream) -> Self {
         Self::Unix(BufReader::new(stream))
     }
@@ -32,6 +36,7 @@ impl Stream {
                     "Already using TLS",
                 ));
             }
+            #[cfg(unix)]
             Self::Unix(_) => {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::InvalidInput,
@@ -56,6 +61,7 @@ impl Stream {
             Self::Tcp(reader) => reader.read_exact(buf).await.map(|_| ()),
             #[cfg(feature = "tokio-tls")]
             Self::Tls(reader) => reader.read_exact(buf).await.map(|_| ()),
+            #[cfg(unix)]
             Self::Unix(reader) => reader.read_exact(buf).await.map(|_| ()),
         }
     }
@@ -65,6 +71,7 @@ impl Stream {
             Self::Tcp(reader) => read_buf_exact_impl(reader, buf).await,
             #[cfg(feature = "tokio-tls")]
             Self::Tls(reader) => read_buf_exact_impl(reader, buf).await,
+            #[cfg(unix)]
             Self::Unix(reader) => read_buf_exact_impl(reader, buf).await,
         }
     }
@@ -74,6 +81,7 @@ impl Stream {
             Self::Tcp(reader) => reader.get_mut().write_all(buf).await,
             #[cfg(feature = "tokio-tls")]
             Self::Tls(reader) => reader.get_mut().write_all(buf).await,
+            #[cfg(unix)]
             Self::Unix(reader) => reader.get_mut().write_all(buf).await,
         }
     }
@@ -83,6 +91,7 @@ impl Stream {
             Self::Tcp(reader) => reader.get_mut().flush().await,
             #[cfg(feature = "tokio-tls")]
             Self::Tls(reader) => reader.get_mut().flush().await,
+            #[cfg(unix)]
             Self::Unix(reader) => reader.get_mut().flush().await,
         }
     }
@@ -104,6 +113,7 @@ impl Stream {
                 .peer_addr()
                 .map(|addr| addr.ip().is_loopback())
                 .unwrap_or(false),
+            #[cfg(unix)]
             Self::Unix(_) => false,
         }
     }
