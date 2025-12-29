@@ -22,4 +22,4 @@ The test, benchmark and feature development is driven by the need of [pyro-mysql
 - Prefer MariaDB to MySQL
 - Prefer UnixSocket to TCP
 - Set `Opts.upgrade_to_unix_socket=false` and manually set the socket path
-- Use Conn.exec_bulk to group 2~1000 INSERTs or UPDATEs
+- Use Conn.exec_bulk_insert_or_update to group 2~1000 INSERTTs or UPDATEEs

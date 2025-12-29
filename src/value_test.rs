@@ -3,7 +3,7 @@ use std::mem::align_of;
 use crate::constant::{ColumnFlags, ColumnType};
 use crate::protocol::command::ColumnDefinitionTail;
 use crate::raw::parse_value;
-use crate::value::{NullBitmap, Time12, Time8, Timestamp11, Timestamp4, Timestamp7, Value};
+use crate::value::{NullBitmap, Time8, Time12, Timestamp4, Timestamp7, Timestamp11, Value};
 use zerocopy::FromBytes;
 
 /// Helper to create a ColumnDefinitionTail for testing

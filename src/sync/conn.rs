@@ -378,7 +378,7 @@ impl Conn {
     }
 
     /// Execute a bulk prepared statement with a result set handler
-    pub fn exec_bulk<P, I, H>(
+    pub fn exec_bulk_insert_or_update<P, I, H>(
         &mut self,
         stmt: &mut PreparedStatement,
         params: P,
@@ -390,11 +390,11 @@ impl Conn {
         I: Params,
         H: BinaryResultSetHandler,
     {
-        let result = self.exec_bulk_inner(stmt, params, flags, handler);
+        let result = self.exec_bulk_insert_or_update_inner(stmt, params, flags, handler);
         self.check_error(result)
     }
 
-    fn exec_bulk_inner<P, I, H>(
+    fn exec_bulk_insert_or_update_inner<P, I, H>(
         &mut self,
         stmt: &mut PreparedStatement,
         params: P,
