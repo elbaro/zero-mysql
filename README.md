@@ -6,9 +6,11 @@
 
 The test, benchmark and feature development is driven by the need of [pyro-mysql](https://github.com/elbaro/pyro-mysql/).
 
-## Feature Gates
+## Feature Flags
 - `sync` (default): synchronous API.
 - `tokio` (default): asynchronous API.
+- `sync-tls`: TLS support for synchronous API. (experimental)
+- `tokio-tls`: TLS support for asynchronous API. (experimental)
 
 
 ## Features
