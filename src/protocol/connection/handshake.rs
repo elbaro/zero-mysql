@@ -23,7 +23,7 @@ struct HandshakeFixedFields {
     status_flags: U16LE,
     capability_flags_upper: U16LE,
     auth_data_len: u8,
-    _fillter2: [u8; 6],
+    _filler2: [u8; 6],
     mariadb_capabilities: U32LE,
 }
 

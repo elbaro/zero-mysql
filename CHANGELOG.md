@@ -13,8 +13,8 @@
 - infra: remove reqray
 - infra: release-plz config
 - infra: fix release.yml
-- infra: change relase PR title
+- infra: change release PR title
 - infra: merge test/coverage steps
 - infra: trusted publishing
-- infra: setup releaes-plz
+- infra: setup release-plz
 - ci
