@@ -1,5 +1,11 @@
 # Changelog
 
+## [v0.2.2](https://github.com/elbaro/zero-mysql/compare/v0.2.1...v0.2.2) - 2026-01-01
+
+### <!-- 3 -->Documentation
+- typos
+- add tls feature flags
+
 ## [v0.2.1](https://github.com/elbaro/zero-mysql/compare/v0.2.0...v0.2.1) - 2025-12-29
 
 ### <!-- 1 -->Bug fixes
