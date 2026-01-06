@@ -49,43 +49,9 @@ let mut conn = Conn::new(opts)?;
 
 ## Connection Options
 
-| Field | Description | Default |
-|-------|-------------|---------|
-| `host` | Hostname or IP address | `""` |
-| `port` | TCP port number | `3306` |
-| `socket` | Unix socket path | `None` |
-| `user` | Username | `""` |
-| `password` | Password | `""` |
-| `db` | Database name | `None` |
-| `tcp_nodelay` | Disable Nagle's algorithm | `true` |
-| `compress` | Enable compression | `false` |
-| `tls` | Enable TLS | `false` |
-| `init_command` | SQL to execute on connect | `None` |
-| `buffer_pool` | Custom buffer pool | global pool |
-| `upgrade_to_unix_socket` | Auto-upgrade TCP to Unix socket | `true` |
+See [`Opts`](https://docs.rs/zero-mysql/latest/zero_mysql/struct.Opts.html) for all available connection options and URL query parameters.
 
-## URL Query Parameters
-
-Query parameters can be appended to the URL:
-
-```rust,ignore
-let conn = Conn::new("mysql://localhost?tls=true&compress=true")?;
-```
-
-Supported parameters:
-- `socket`
-- `tls` (or `ssl`)
-- `compress`
-- `tcp_nodelay`
-- `upgrade_to_unix_socket`
-- `init_command`
-- `pool_reset_conn`
-- `pool_max_idle_conn`
-- `pool_max_concurrency`
-
-Boolean values accept: `1`, `0`, `true`, `false`, `True`, `False`
-
-## Advanced: Upgrade to Unix Socket
+## Upgrade to Unix Socket
 
 By default, `upgrade_to_unix_socket` is `true`.
 
