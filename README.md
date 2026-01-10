@@ -18,4 +18,4 @@ Python binding: [pyro-mysql](https://github.com/elbaro/pyro-mysql/)
 - Prefer MariaDB to MySQL
 - Prefer UnixSocket to TCP
 - Set `Opts.upgrade_to_unix_socket=false` and manually set the socket path
-- Use Conn.exec_bulk_insert_or_update to group 2~1000 INSERTs or UPDATEs
+- Use Conn.exec_bulk_insert_or_update to group 2~1000 `INSERT`s or `UPDATE`s

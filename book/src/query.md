@@ -5,6 +5,7 @@ There are two sets of query APIs: Text Protocol and Binary Protocol.
 ## Text Protocol
 
 Text protocol is simple and supports multiple statements separated by `;`, but does not support parameter binding.
+Use binary protocol if you need to send parameters or read typed results.
 
 ```rust,ignore
 impl Conn {
@@ -31,19 +32,21 @@ Binary protocol uses prepared statements with parameter binding. Use `?` as the 
 impl Conn {
     fn prepare(&mut self, sql: &str) -> Result<PreparedStatement>;
     fn exec<P, H>(&mut self, stmt: &mut PreparedStatement, params: P, handler: &mut H) -> Result<()>;
-    fn exec_first<P, H>(&mut self, stmt: &mut PreparedStatement, params: P, handler: &mut H) -> Result<bool>;
     fn exec_drop<P>(&mut self, stmt: &mut PreparedStatement, params: P) -> Result<()>;
-    fn exec_rows<Row, P>(&mut self, stmt: &mut PreparedStatement, params: P) -> Result<Vec<Row>>;
+    fn exec_first<Row, P>(&mut self, stmt: &mut PreparedStatement, params: P) -> Result<Option<Row>>;
+    fn exec_collect<Row, P>(&mut self, stmt: &mut PreparedStatement, params: P) -> Result<Vec<Row>>;
+    fn exec_foreach<Row, P, F>(&mut self, stmt: &mut PreparedStatement, params: P, f: F) -> Result<()>;
     fn exec_bulk_insert_or_update<P, I, H>(...) -> Result<()>;
 }
 ```
 
 - `prepare`: prepare a statement for execution
 - `exec`: execute a prepared statement with a handler
-- `exec_first`: execute and return only the first row
 - `exec_drop`: execute and discard all results
-- `exec_rows`: execute and collect all rows into a Vec
-- `exec_bulk_insert_or_update`: bulk execution (MariaDB only)
+- `exec_first`: execute and return `Option<Row>` for the first row
+- `exec_collect`: execute and collect all rows into a Vec
+- `exec_foreach`: execute and call a closure for each row
+- `exec_bulk_insert_or_update`: bulk execution (uses MariaDB bulk command extension; falls back to multiple `exec()` calls on Oracle MySQL)
 
 ### Example: Basic
 
@@ -58,9 +61,9 @@ conn.exec_drop(&mut stmt, (42,))?;
 conn.exec_drop(&mut stmt, (100,))?;
 ```
 
-### Example: Bulk Execution (MariaDB)
+### Example: Bulk Execution
 
-MariaDB supports bulk execution which sends all parameters in a single packet:
+On MariaDB, bulk execution sends all parameters in a single packet using the bulk command extension. On Oracle MySQL, it falls back to multiple `exec()` calls:
 
 ```rust,ignore
 use zero_mysql::protocol::command::bulk_exec::BulkFlags;
@@ -99,5 +102,6 @@ zero-mysql uses a handler pattern for processing results. Implement `TextResultS
 
 Built-in handlers:
 - `DropHandler`: Discards all results
-- `FirstRowHandler`: Processes only the first row
+- `FirstHandler<Row>`: Stores only the first row
 - `CollectHandler<Row>`: Collects rows into a Vec
+- `ForEachHandler<Row, F>`: Calls a closure for each row

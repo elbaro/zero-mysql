@@ -16,7 +16,7 @@ use crate::protocol::command::bulk_exec::{BulkExec, BulkFlags, BulkParamsSet, wr
 use crate::protocol::command::prepared::{Exec, read_prepare_ok, write_execute, write_prepare};
 use crate::protocol::command::query::{Query, write_query};
 use crate::protocol::command::utility::{
-    DropHandler, FirstRowHandler, write_ping, write_reset_connection,
+    DropHandler, FirstHandler, write_ping, write_reset_connection,
 };
 use crate::protocol::connection::{Handshake, HandshakeAction, InitialHandshake};
 use crate::protocol::packet::PacketHeader;
@@ -468,41 +468,34 @@ impl Conn {
         }
     }
 
-    /// Execute a prepared statement and return only the first row, dropping the rest (async)
-    ///
-    /// # Returns
-    /// * `Ok(true)` - First row was found and processed
-    /// * `Ok(false)` - No rows in result set
-    /// * `Err(Error)` - Query execution or handler callback failed
-    pub async fn exec_first<P, H>(
+    /// Execute a prepared statement and return only the first row, dropping the rest (async).
+    pub async fn exec_first<Row, P>(
         &mut self,
         stmt: &mut PreparedStatement,
         params: P,
-        handler: &mut H,
-    ) -> Result<bool>
+    ) -> Result<Option<Row>>
     where
+        Row: for<'buf> crate::raw::FromRawRow<'buf>,
         P: Params,
-        H: BinaryResultSetHandler,
     {
-        let result = self.exec_first_inner(stmt, params, handler).await;
+        let result = self.exec_first_inner(stmt, params).await;
         self.check_error(result)
     }
 
-    async fn exec_first_inner<P, H>(
+    async fn exec_first_inner<Row, P>(
         &mut self,
         stmt: &mut PreparedStatement,
         params: P,
-        handler: &mut H,
-    ) -> Result<bool>
+    ) -> Result<Option<Row>>
     where
+        Row: for<'buf> crate::raw::FromRawRow<'buf>,
         P: Params,
-        H: BinaryResultSetHandler,
     {
         write_execute(self.buffer_set.new_write_buffer(), stmt.id(), params)?;
         self.write_payload().await?;
-        let mut first_row_handler = FirstRowHandler::new(handler);
-        self.drive_exec(stmt, &mut first_row_handler).await?;
-        Ok(first_row_handler.found_row)
+        let mut handler = FirstHandler::<Row>::default();
+        self.drive_exec(stmt, &mut handler).await?;
+        Ok(handler.take())
     }
 
     /// Execute a prepared statement and discard all results (async)
@@ -512,6 +505,37 @@ impl Conn {
         P: Params,
     {
         self.exec(stmt, params, &mut DropHandler::default()).await
+    }
+
+    /// Execute a prepared statement and collect all rows into a Vec (async).
+    pub async fn exec_collect<Row, P>(
+        &mut self,
+        stmt: &mut PreparedStatement,
+        params: P,
+    ) -> Result<Vec<Row>>
+    where
+        Row: for<'buf> crate::raw::FromRawRow<'buf>,
+        P: Params,
+    {
+        let mut handler = crate::handler::CollectHandler::<Row>::default();
+        self.exec(stmt, params, &mut handler).await?;
+        Ok(handler.into_rows())
+    }
+
+    /// Execute a prepared statement and call a closure for each row (async).
+    pub async fn exec_foreach<Row, P, F>(
+        &mut self,
+        stmt: &mut PreparedStatement,
+        params: P,
+        f: F,
+    ) -> Result<()>
+    where
+        Row: for<'buf> crate::raw::FromRawRow<'buf>,
+        P: Params,
+        F: FnMut(Row),
+    {
+        let mut handler = crate::handler::ForEachHandler::<Row, F>::new(f);
+        self.exec(stmt, params, &mut handler).await
     }
 
     /// Execute a text protocol SQL query (async)

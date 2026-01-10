@@ -13,7 +13,7 @@ use crate::protocol::command::prepared::{read_prepare_ok, write_prepare};
 use crate::protocol::command::query::Query;
 use crate::protocol::command::query::write_query;
 use crate::protocol::command::utility::DropHandler;
-use crate::protocol::command::utility::FirstRowHandler;
+use crate::protocol::command::utility::FirstHandler;
 use crate::protocol::command::utility::write_ping;
 use crate::protocol::command::utility::write_reset_connection;
 use crate::protocol::connection::{Handshake, HandshakeAction, InitialHandshake};
@@ -401,7 +401,10 @@ impl Conn {
         }
     }
 
-    /// Execute a bulk prepared statement with a result set handler
+    /// Execute a bulk prepared statement with a result set handler.
+    ///
+    /// On MariaDB, this sends all parameters in a single packet using the bulk command extension.
+    /// On Oracle MySQL, this falls back to multiple `exec()` calls.
     pub fn exec_bulk_insert_or_update<P, I, H>(
         &mut self,
         stmt: &mut PreparedStatement,
@@ -444,41 +447,34 @@ impl Conn {
         }
     }
 
-    /// Execute a prepared statement and return only the first row, dropping the rest
-    ///
-    /// # Returns
-    /// * `Ok(true)` - First row was found and processed
-    /// * `Ok(false)` - No rows in result set
-    /// * `Err(Error)` - Query execution or handler callback failed
-    pub fn exec_first<'conn, P, H>(
-        &'conn mut self,
-        stmt: &'conn mut PreparedStatement,
+    /// Execute a prepared statement and return only the first row, dropping the rest.
+    pub fn exec_first<Row, P>(
+        &mut self,
+        stmt: &mut PreparedStatement,
         params: P,
-        handler: &mut H,
-    ) -> Result<bool>
+    ) -> Result<Option<Row>>
     where
+        Row: for<'buf> crate::raw::FromRawRow<'buf>,
         P: Params,
-        H: BinaryResultSetHandler,
     {
-        let result = self.exec_first_inner(stmt, params, handler);
+        let result = self.exec_first_inner(stmt, params);
         self.check_error(result)
     }
 
-    fn exec_first_inner<'conn, P, H>(
-        &'conn mut self,
-        stmt: &'conn mut PreparedStatement,
+    fn exec_first_inner<Row, P>(
+        &mut self,
+        stmt: &mut PreparedStatement,
         params: P,
-        handler: &mut H,
-    ) -> Result<bool>
+    ) -> Result<Option<Row>>
     where
+        Row: for<'buf> crate::raw::FromRawRow<'buf>,
         P: Params,
-        H: BinaryResultSetHandler,
     {
         write_execute(self.buffer_set.new_write_buffer(), stmt.id(), params)?;
         self.write_payload()?;
-        let mut first_row_handler = FirstRowHandler::new(handler);
-        self.drive_exec(stmt, &mut first_row_handler)?;
-        Ok(first_row_handler.found_row)
+        let mut handler = FirstHandler::<Row>::default();
+        self.drive_exec(stmt, &mut handler)?;
+        Ok(handler.take())
     }
 
     /// Execute a prepared statement and discard all results
@@ -489,8 +485,12 @@ impl Conn {
         self.exec(stmt, params, &mut DropHandler::default())
     }
 
-    /// Execute a prepared statement and collect all rows into a Vec
-    pub fn exec_rows<Row, P>(&mut self, stmt: &mut PreparedStatement, params: P) -> Result<Vec<Row>>
+    /// Execute a prepared statement and collect all rows into a Vec.
+    pub fn exec_collect<Row, P>(
+        &mut self,
+        stmt: &mut PreparedStatement,
+        params: P,
+    ) -> Result<Vec<Row>>
     where
         Row: for<'buf> crate::raw::FromRawRow<'buf>,
         P: Params,
@@ -498,6 +498,22 @@ impl Conn {
         let mut handler = crate::handler::CollectHandler::<Row>::default();
         self.exec(stmt, params, &mut handler)?;
         Ok(handler.into_rows())
+    }
+
+    /// Execute a prepared statement and call a closure for each row.
+    pub fn exec_foreach<Row, P, F>(
+        &mut self,
+        stmt: &mut PreparedStatement,
+        params: P,
+        f: F,
+    ) -> Result<()>
+    where
+        Row: for<'buf> crate::raw::FromRawRow<'buf>,
+        P: Params,
+        F: FnMut(Row),
+    {
+        let mut handler = crate::handler::ForEachHandler::<Row, F>::new(f);
+        self.exec(stmt, params, &mut handler)
     }
 
     fn drive_query<H: TextResultSetHandler>(&mut self, handler: &mut H) -> Result<()> {

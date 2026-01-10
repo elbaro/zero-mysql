@@ -1,7 +1,0 @@
-[default.extend-identifiers]
-INSERTs = "INSERTs"
-UPDATEs = "UPDATEs"
-
-[default.extend-words]
-INSERTs = "INSERTs"
-UPDATEs = "UPDATEs"

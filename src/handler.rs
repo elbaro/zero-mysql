@@ -75,43 +75,39 @@ impl TextResultSetHandler for DropHandler {
     }
 }
 
-/// A wrapper handler that forwards calls to an inner handler but stops after the first row
+/// A handler that stores only the first row.
 ///
-/// Useful for `exec_first()` methods that only process the first row.
-pub struct FirstRowHandler<'a, H> {
-    pub inner: &'a mut H,
-    pub found_row: bool,
+/// Useful for `exec_first()` methods that return `Option<Row>`.
+#[derive(SmartDefault)]
+pub struct FirstHandler<Row> {
+    row: Option<Row>,
 }
 
-impl<'a, H> FirstRowHandler<'a, H> {
-    pub fn new(inner: &'a mut H) -> Self {
-        Self {
-            inner,
-            found_row: false,
-        }
+impl<Row> FirstHandler<Row> {
+    /// Take the stored row, if any.
+    pub fn take(&mut self) -> Option<Row> {
+        self.row.take()
     }
 }
 
-impl<'a, H: BinaryResultSetHandler> BinaryResultSetHandler for FirstRowHandler<'a, H> {
-    fn no_result_set(&mut self, ok: OkPayloadBytes) -> Result<()> {
-        self.inner.no_result_set(ok)
+impl<Row: for<'buf> FromRawRow<'buf>> BinaryResultSetHandler for FirstHandler<Row> {
+    fn no_result_set(&mut self, _ok: OkPayloadBytes) -> Result<()> {
+        Ok(())
     }
 
-    fn resultset_start(&mut self, cols: &[ColumnDefinition<'_>]) -> Result<()> {
-        self.inner.resultset_start(cols)
+    fn resultset_start(&mut self, _cols: &[ColumnDefinition<'_>]) -> Result<()> {
+        Ok(())
     }
 
     fn row(&mut self, cols: &[ColumnDefinition<'_>], row: BinaryRowPayload<'_>) -> Result<()> {
-        if !self.found_row {
-            self.found_row = true;
-            self.inner.row(cols, row)
-        } else {
-            Ok(()) // Ignore subsequent rows
+        if self.row.is_none() {
+            self.row = Some(Row::from_raw_row(cols, row)?);
         }
+        Ok(())
     }
 
-    fn resultset_end(&mut self, eof: OkPayloadBytes) -> Result<()> {
-        self.inner.resultset_end(eof)
+    fn resultset_end(&mut self, _eof: OkPayloadBytes) -> Result<()> {
+        Ok(())
     }
 }
 
@@ -161,6 +157,47 @@ impl<Row: for<'buf> FromRawRow<'buf>> BinaryResultSetHandler for CollectHandler<
         let payload = OkPayload::try_from(eof)?;
         self.affected_rows = payload.affected_rows;
         self.last_insert_id = payload.last_insert_id;
+        Ok(())
+    }
+}
+
+/// A handler that calls a closure for each row.
+///
+/// Useful for `exec_foreach()` methods that process rows without collecting.
+pub struct ForEachHandler<Row, F> {
+    f: F,
+    _marker: std::marker::PhantomData<Row>,
+}
+
+impl<Row, F> ForEachHandler<Row, F> {
+    pub fn new(f: F) -> Self {
+        Self {
+            f,
+            _marker: std::marker::PhantomData,
+        }
+    }
+}
+
+impl<Row, F> BinaryResultSetHandler for ForEachHandler<Row, F>
+where
+    Row: for<'buf> FromRawRow<'buf>,
+    F: FnMut(Row),
+{
+    fn no_result_set(&mut self, _ok: OkPayloadBytes) -> Result<()> {
+        Ok(())
+    }
+
+    fn resultset_start(&mut self, _cols: &[ColumnDefinition<'_>]) -> Result<()> {
+        Ok(())
+    }
+
+    fn row(&mut self, cols: &[ColumnDefinition], row: BinaryRowPayload) -> Result<()> {
+        let parsed = Row::from_raw_row(cols, row)?;
+        (self.f)(parsed);
+        Ok(())
+    }
+
+    fn resultset_end(&mut self, _eof: OkPayloadBytes) -> Result<()> {
         Ok(())
     }
 }

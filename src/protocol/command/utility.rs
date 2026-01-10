@@ -1,7 +1,7 @@
 use crate::constant::CommandByte;
 use crate::protocol::primitive::*;
 
-pub use crate::handler::{DropHandler, FirstRowHandler};
+pub use crate::handler::{DropHandler, FirstHandler};
 
 /// Write COM_QUIT command
 pub fn write_quit(out: &mut Vec<u8>) {
