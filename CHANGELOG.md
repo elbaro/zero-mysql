@@ -1,5 +1,10 @@
 # Changelog
 
+## [v0.3.1](https://github.com/elbaro/zero-mysql/compare/v0.3.0...v0.3.1) - 2026-01-10
+
+### <!-- 0 -->New features
+- compiles on stable
+
 ## [v0.3.0](https://github.com/elbaro/zero-mysql/compare/v0.2.1...v0.3.0) - 2026-01-10
 
 ### <!-- 0 -->New features
