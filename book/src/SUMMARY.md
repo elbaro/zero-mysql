@@ -20,4 +20,4 @@
 
 # API Reference
 
-- [API Reference](api.md)
+- [docs.rs](https://docs.rs/zero-mysql/)
