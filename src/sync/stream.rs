@@ -1,8 +1,10 @@
-use core::io::BorrowedCursor;
 use std::io::{BufReader, Read, Write};
+use std::mem::MaybeUninit;
 use std::net::TcpStream;
 #[cfg(unix)]
 use std::os::unix::net::UnixStream;
+
+use crate::nightly::read_uninit_exact;
 
 #[cfg(feature = "sync-tls")]
 use native_tls::TlsStream;
@@ -64,13 +66,13 @@ impl Stream {
         }
     }
 
-    pub fn read_buf_exact(&mut self, cursor: BorrowedCursor<'_>) -> std::io::Result<()> {
+    pub fn read_buf_exact(&mut self, buf: &mut [MaybeUninit<u8>]) -> std::io::Result<()> {
         match self {
-            Self::Tcp(r) => r.read_buf_exact(cursor),
+            Self::Tcp(r) => read_uninit_exact(r, buf),
             #[cfg(feature = "sync-tls")]
-            Self::Tls(r) => r.read_buf_exact(cursor),
+            Self::Tls(r) => read_uninit_exact(r, buf),
             #[cfg(unix)]
-            Self::Unix(r) => r.read_buf_exact(cursor),
+            Self::Unix(r) => read_uninit_exact(r, buf),
         }
     }
 

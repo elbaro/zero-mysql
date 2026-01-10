@@ -2,8 +2,6 @@
 
 A high-performance MySQL client library for Rust.
 
-**Requires Rust nightly.**
-
 [API Reference (docs.rs)](https://docs.rs/zero-mysql) | [User Guide](https://elbaro.github.io/zero-mysql/)
 
 Python binding: [pyro-mysql](https://github.com/elbaro/pyro-mysql/)

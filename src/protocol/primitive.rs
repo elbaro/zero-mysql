@@ -1,4 +1,4 @@
-use std::hint::{cold_path, unlikely};
+use crate::nightly::{cold_path, unlikely};
 
 use crate::error::{Error, Result, eyre};
 use zerocopy::FromBytes;

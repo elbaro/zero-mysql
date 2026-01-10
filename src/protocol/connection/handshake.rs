@@ -1,4 +1,4 @@
-use std::hint::cold_path;
+use crate::nightly::cold_path;
 use zerocopy::byteorder::little_endian::{U16 as U16LE, U32 as U32LE};
 use zerocopy::{FromBytes, Immutable, KnownLayout};
 

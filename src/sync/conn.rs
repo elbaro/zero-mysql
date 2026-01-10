@@ -3,6 +3,7 @@ use crate::buffer::BufferSet;
 use crate::buffer_pool::PooledBufferSet;
 use crate::constant::CapabilityFlags;
 use crate::error::{Error, Result};
+use crate::nightly::unlikely;
 use crate::protocol::TextRowPayload;
 use crate::protocol::command::Action;
 use crate::protocol::command::ColumnDefinition;
@@ -21,8 +22,6 @@ use crate::protocol::packet::PacketHeader;
 use crate::protocol::primitive::read_string_lenenc;
 use crate::protocol::response::{ErrPayloadBytes, OkPayloadBytes};
 use crate::protocol::r#trait::{BinaryResultSetHandler, TextResultSetHandler, param::Params};
-use core::hint::unlikely;
-use core::io::BorrowedBuf;
 use std::net::TcpStream;
 #[cfg(unix)]
 use std::os::unix::net::UnixStream;
@@ -653,8 +652,7 @@ fn read_payload(reader: &mut Stream, buffer: &mut Vec<u8>) -> Result<u8> {
 
     {
         let spare = buffer.spare_capacity_mut();
-        let mut buf: BorrowedBuf<'_> = (&mut spare[..length]).into();
-        reader.read_buf_exact(buf.unfilled())?;
+        reader.read_buf_exact(&mut spare[..length])?;
         // SAFETY: read_buf_exact filled exactly `length` bytes
         unsafe {
             buffer.set_len(length);
@@ -670,8 +668,7 @@ fn read_payload(reader: &mut Stream, buffer: &mut Vec<u8>) -> Result<u8> {
 
         buffer.reserve(current_length);
         let spare = buffer.spare_capacity_mut();
-        let mut buf: BorrowedBuf<'_> = (&mut spare[..current_length]).into();
-        reader.read_buf_exact(buf.unfilled())?;
+        reader.read_buf_exact(&mut spare[..current_length])?;
         // SAFETY: read_buf_exact filled exactly `current_length` bytes
         unsafe {
             buffer.set_len(buffer.len() + current_length);
@@ -697,8 +694,7 @@ fn read_column_definition_packets(
 
         out.reserve(length);
         let spare = out.spare_capacity_mut();
-        let mut buf: BorrowedBuf<'_> = (&mut spare[..length]).into();
-        reader.read_buf_exact(buf.unfilled())?;
+        reader.read_buf_exact(&mut spare[..length])?;
         // SAFETY: read_buf_exact filled exactly `length` bytes
         unsafe {
             out.set_len(out.len() + length);
