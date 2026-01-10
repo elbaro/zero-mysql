@@ -17,7 +17,3 @@
 
 - [Zero-Copy Design]()
 - [Protocol]()
-
-# API Reference
-
-- [docs.rs](https://docs.rs/zero-mysql/)
