@@ -39,6 +39,7 @@ git_tag_name = "v{{ version }}"
 [[package]]
 name = "zero-mysql-derive"
 git_tag_name = "derive-v{{ version }}"
+changelog_path = "CHANGELOG.md"
 
 [changelog]
 header = """# Changelog
