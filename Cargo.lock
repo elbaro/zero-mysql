@@ -2306,7 +2306,17 @@ dependencies = [
  "tracing-subscriber",
  "tracing-tracy",
  "url",
+ "zero-mysql-derive",
  "zerocopy",
+]
+
+[[package]]
+name = "zero-mysql-derive"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]

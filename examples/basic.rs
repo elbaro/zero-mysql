@@ -133,15 +133,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Demonstrate exec_first to get only the first row
-    let mut first_handler: zero_mysql::handler::CollectHandler<(u32, String)> =
-        zero_mysql::handler::CollectHandler::default();
-    let found = conn.exec_first(&mut select_positive_stmt, (0_i32,), &mut first_handler)?;
+    let first_row: Option<(u32, String)> = conn.exec_first(&mut select_positive_stmt, (0_i32,))?;
 
-    if found {
-        let first_rows = first_handler.into_rows();
-        if let Some((id, varchar)) = first_rows.first() {
-            println!("\nFirst positive row: id={}, varchar={}", id, varchar);
-        }
+    if let Some((id, varchar)) = first_row {
+        println!("\nFirst positive row: id={}, varchar={}", id, varchar);
     }
 
     println!("\nExample completed successfully!");

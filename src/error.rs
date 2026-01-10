@@ -28,6 +28,10 @@ pub enum Error {
     Unsupported(String),
     #[error("Cannot nest transactions - a transaction is already active")]
     NestedTransaction,
+    #[error("Missing column: {0}")]
+    MissingColumn(&'static str),
+    #[error("Unknown column: {0}")]
+    UnknownColumn(String),
 }
 
 impl<'buf> From<ErrPayloadBytes<'buf>> for Error {
@@ -69,6 +73,8 @@ impl Error {
                     _ => true,
                 }
             }
+            // User errors - connection still usable
+            Error::BadUsageError(_) | Error::MissingColumn(_) | Error::UnknownColumn(_) => false,
             // All other errors - assume broken
             _ => true,
         }

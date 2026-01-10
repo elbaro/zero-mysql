@@ -342,6 +342,64 @@ pub fn parse_value<'buf, T: FromRawValue<'buf>>(
     }
 }
 
+/// Skip a single value in binary data without parsing it.
+///
+/// Returns the remaining bytes after the skipped value.
+pub fn skip_value<'buf>(
+    col: &ColumnDefinitionTail,
+    is_null: bool,
+    data: &'buf [u8],
+) -> Result<((), &'buf [u8])> {
+    if is_null {
+        return Ok(((), data));
+    }
+
+    match col.column_type()? {
+        ColumnType::MYSQL_TYPE_NULL => Ok(((), data)),
+
+        // Fixed-size integer types
+        ColumnType::MYSQL_TYPE_TINY => Ok(((), &data[1..])),
+        ColumnType::MYSQL_TYPE_SHORT | ColumnType::MYSQL_TYPE_YEAR => Ok(((), &data[2..])),
+        ColumnType::MYSQL_TYPE_INT24
+        | ColumnType::MYSQL_TYPE_LONG
+        | ColumnType::MYSQL_TYPE_FLOAT => Ok(((), &data[4..])),
+        ColumnType::MYSQL_TYPE_LONGLONG | ColumnType::MYSQL_TYPE_DOUBLE => Ok(((), &data[8..])),
+
+        // Variable-length date/time types
+        ColumnType::MYSQL_TYPE_DATE
+        | ColumnType::MYSQL_TYPE_NEWDATE
+        | ColumnType::MYSQL_TYPE_DATETIME
+        | ColumnType::MYSQL_TYPE_TIMESTAMP
+        | ColumnType::MYSQL_TYPE_TIMESTAMP2
+        | ColumnType::MYSQL_TYPE_DATETIME2
+        | ColumnType::MYSQL_TYPE_TIME
+        | ColumnType::MYSQL_TYPE_TIME2 => {
+            let (len, rest) = read_int_1(data)?;
+            Ok(((), &rest[len as usize..]))
+        }
+
+        // Length-encoded string types
+        ColumnType::MYSQL_TYPE_DECIMAL
+        | ColumnType::MYSQL_TYPE_NEWDECIMAL
+        | ColumnType::MYSQL_TYPE_VARCHAR
+        | ColumnType::MYSQL_TYPE_VAR_STRING
+        | ColumnType::MYSQL_TYPE_STRING
+        | ColumnType::MYSQL_TYPE_BLOB
+        | ColumnType::MYSQL_TYPE_TINY_BLOB
+        | ColumnType::MYSQL_TYPE_MEDIUM_BLOB
+        | ColumnType::MYSQL_TYPE_LONG_BLOB
+        | ColumnType::MYSQL_TYPE_GEOMETRY
+        | ColumnType::MYSQL_TYPE_JSON
+        | ColumnType::MYSQL_TYPE_ENUM
+        | ColumnType::MYSQL_TYPE_SET
+        | ColumnType::MYSQL_TYPE_BIT
+        | ColumnType::MYSQL_TYPE_TYPED_ARRAY => {
+            let (_, rest) = read_string_lenenc(data)?;
+            Ok(((), rest))
+        }
+    }
+}
+
 /// Trait for types that can be decoded from a MySQL row.
 pub trait FromRawRow<'buf>: Sized {
     fn from_raw_row(cols: &[ColumnDefinition<'_>], row: BinaryRowPayload<'buf>) -> Result<Self>;

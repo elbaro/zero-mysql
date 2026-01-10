@@ -8,12 +8,16 @@ repository = "https://github.com/elbaro/zero-mysql"
 keywords = ["mysql", "mariadb", "database", "sql", "async"]
 categories = ["database"]
 
+[workspace]
+members = ["zero-mysql-derive"]
+
 [features]
-default = ["sync", "tokio"]
+default = ["sync", "tokio", "derive"]
 sync = []
 tokio = ["dep:tokio"]
 sync-tls = ["dep:native-tls"]
 tokio-tls = ["dep:native-tls", "dep:tokio-native-tls"]
+derive = ["dep:zero-mysql-derive"]
 
 [dependencies]
 thiserror = "2"
@@ -38,6 +42,7 @@ std-semaphore = "0.1"
 color-eyre = "0.6"
 simdutf8 = "0.1"
 smart-default = "0.7"
+zero-mysql-derive = { version = "0.1", path = "zero-mysql-derive", optional = true }
 
 [lints.clippy]
 all = { level = "deny", priority = -1 }
@@ -152,3 +157,7 @@ harness = false
 name = "mysql_benches"
 harness = false
 required-features = []
+
+[[test]]
+name = "derive"
+required-features = ["derive"]

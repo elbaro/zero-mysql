@@ -23,6 +23,9 @@ pub use prepared::PreparedStatement;
 #[cfg(feature = "tokio")]
 pub mod tokio;
 
+#[cfg(feature = "derive")]
+pub use zero_mysql_derive as r#macro;
+
 #[cfg(test)]
 mod buffer_test;
 #[cfg(test)]
