@@ -501,6 +501,8 @@ impl Conn {
     }
 
     /// Execute a prepared statement and call a closure for each row.
+    ///
+    /// The closure can return an error to stop iteration early.
     pub fn exec_foreach<Row, P, F>(
         &mut self,
         stmt: &mut PreparedStatement,
@@ -510,7 +512,7 @@ impl Conn {
     where
         Row: for<'buf> crate::raw::FromRawRow<'buf>,
         P: Params,
-        F: FnMut(Row),
+        F: FnMut(Row) -> Result<()>,
     {
         let mut handler = crate::handler::ForEachHandler::<Row, F>::new(f);
         self.exec(stmt, params, &mut handler)

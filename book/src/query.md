@@ -125,6 +125,7 @@ let user: Option<User> = conn.exec_first(&mut stmt, ())?;
 // Process rows one by one
 conn.exec_foreach(&mut stmt, (), |user: User| {
     println!("{}: {}", user.id, user.name);
+    Ok(())
 })?;
 ```
 
@@ -166,6 +167,7 @@ conn.exec_foreach(&mut stmt, (), |row: (i64, String)| {
         display_name: format!("User: {}", row.1),
         name: row.1,
     });
+    Ok(())
 })?;
 ```
 

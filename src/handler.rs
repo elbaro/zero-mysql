@@ -181,7 +181,7 @@ impl<Row, F> ForEachHandler<Row, F> {
 impl<Row, F> BinaryResultSetHandler for ForEachHandler<Row, F>
 where
     Row: for<'buf> FromRawRow<'buf>,
-    F: FnMut(Row),
+    F: FnMut(Row) -> Result<()>,
 {
     fn no_result_set(&mut self, _ok: OkPayloadBytes) -> Result<()> {
         Ok(())
@@ -193,8 +193,7 @@ where
 
     fn row(&mut self, cols: &[ColumnDefinition], row: BinaryRowPayload) -> Result<()> {
         let parsed = Row::from_raw_row(cols, row)?;
-        (self.f)(parsed);
-        Ok(())
+        (self.f)(parsed)
     }
 
     fn resultset_end(&mut self, _eof: OkPayloadBytes) -> Result<()> {

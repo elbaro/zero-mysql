@@ -179,6 +179,7 @@ fn test_exec_foreach() {
     let mut names = Vec::new();
     conn.exec_foreach(&mut stmt, (), |user: User| {
         names.push(user.name);
+        Ok(())
     })
     .expect("foreach");
 
