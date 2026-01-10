@@ -96,6 +96,79 @@ conn.exec_drop(&mut stmt, (2,))?;
 conn.exec_drop(&mut stmt, (3,))?;
 ```
 
+## Struct Mapping
+
+There are two ways to map database rows to Rust structs.
+
+### Using `#[derive(FromRawRow)]`
+
+The `FromRawRow` derive macro automatically maps columns to struct fields by name.
+
+```rust,ignore
+use zero_mysql::r#macro::FromRawRow;
+
+#[derive(FromRawRow)]
+struct User {
+    id: i64,
+    name: String,
+    email: Option<String>,
+}
+
+let mut stmt = conn.prepare("SELECT id, name, email FROM users")?;
+
+// Collect all rows
+let users: Vec<User> = conn.exec_collect(&mut stmt, ())?;
+
+// Get first row only
+let user: Option<User> = conn.exec_first(&mut stmt, ())?;
+
+// Process rows one by one
+conn.exec_foreach(&mut stmt, (), |user: User| {
+    println!("{}: {}", user.id, user.name);
+})?;
+```
+
+Features:
+- **Column order independence**: Columns are matched by name, not position
+- **Optional fields**: Use `Option<T>` for nullable columns
+- **Skip unknown columns**: Extra columns in the result set are ignored by default
+
+Use `#[from_raw_row(strict)]` to error on unknown columns:
+
+```rust,ignore
+#[derive(FromRawRow)]
+#[from_raw_row(strict)]
+struct User {
+    id: i64,
+    name: String,
+}
+
+// Errors if query returns columns other than `id` and `name`
+```
+
+### Manual Construction with `exec_foreach`
+
+For custom logic or computed fields:
+
+```rust,ignore
+struct User {
+    id: i64,
+    name: String,
+    display_name: String, // computed field
+}
+
+let mut stmt = conn.prepare("SELECT id, name FROM users")?;
+let mut users = Vec::new();
+
+conn.exec_foreach(&mut stmt, (), |row: (i64, String)| {
+    users.push(User {
+        id: row.0,
+        display_name: format!("User: {}", row.1),
+        name: row.1,
+    });
+})?;
+```
+
 ## Result Handlers
 
 zero-mysql uses a handler pattern for processing results. Implement `TextResultSetHandler` or `BinaryResultSetHandler` to customize how rows are processed.

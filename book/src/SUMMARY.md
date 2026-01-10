@@ -16,7 +16,6 @@
 # Advanced Topics
 
 - [Zero-Copy Design]()
-- [Custom Deserialization]()
 - [Protocol]()
 
 # API Reference
