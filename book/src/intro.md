@@ -4,7 +4,7 @@ zero-mysql is a high-performance MySQL client library for Rust.
 
 ```toml
 [dependencies]
-zero-mysql = "0.2"
+zero-mysql = "*"
 ```
 
 **Requires Rust nightly.**
