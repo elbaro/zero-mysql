@@ -11,4 +11,8 @@ pkgs.mkShell {
     openssl
     pkg-config
   ];
+
+  shellHook = ''
+    export DATABASE_URL="mysql://test:1234@localhost/test"
+  '';
 }

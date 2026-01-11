@@ -1,3 +1,5 @@
+use std::ops::AsyncFnOnce;
+
 use tokio::net::TcpStream;
 #[cfg(unix)]
 use tokio::net::UnixStream;
@@ -193,6 +195,11 @@ impl Conn {
 
     pub(crate) fn set_in_transaction(&mut self, value: bool) {
         self.in_transaction = value;
+    }
+
+    /// Returns true if the connection is currently in a transaction
+    pub fn in_transaction(&self) -> bool {
+        self.in_transaction
     }
 
     /// Try to upgrade to Unix socket connection.
@@ -606,10 +613,9 @@ impl Conn {
     ///
     /// # Errors
     /// Returns `Error::NestedTransaction` if called while already in a transaction
-    pub async fn run_transaction<F, Fut, R>(&mut self, f: F) -> Result<R>
+    pub async fn transaction<F, R>(&mut self, f: F) -> Result<R>
     where
-        F: FnOnce(&mut Conn, super::transaction::Transaction) -> Fut,
-        Fut: core::future::Future<Output = Result<R>>,
+        F: AsyncFnOnce(&mut Conn, super::transaction::Transaction) -> Result<R>,
     {
         if self.in_transaction {
             return Err(Error::NestedTransaction);
@@ -625,16 +631,15 @@ impl Conn {
         let tx = super::transaction::Transaction::new(self.connection_id());
         let result = f(self, tx).await;
 
-        // If the transaction was not explicitly committed or rolled back, roll it back
+        // If no explicit commit/rollback was called, commit on Ok, rollback on Err
         if self.in_transaction {
-            let rollback_result = self.query_drop("ROLLBACK").await;
             self.in_transaction = false;
-
-            // Return the first error (either from closure or rollback)
-            if let Err(e) = result {
-                return Err(e);
+            match &result {
+                Ok(_) => self.query_drop("COMMIT").await?,
+                Err(_) => {
+                    let _ = self.query_drop("ROLLBACK").await;
+                }
             }
-            rollback_result?;
         }
 
         result

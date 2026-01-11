@@ -24,9 +24,9 @@ let mut stmt = conn.prepare("SELECT * FROM users WHERE id = ?")?;
 conn.exec_drop(&mut stmt, (42,))?;
 
 // Transaction
-conn.run_transaction(|conn, tx| {
+conn.transaction(|conn, _tx| {
     conn.query_drop("INSERT INTO users (name) VALUES ('Bob')")?;
-    tx.commit(conn)
+    Ok(())
 })?;
 ```
 

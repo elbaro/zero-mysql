@@ -7,19 +7,19 @@ Transactions ensure a group of operations either all succeed (commit) or all fai
 ```rust,ignore
 use zero_mysql::sync::Conn;
 
-conn.run_transaction(|conn, tx| {
+conn.transaction(|conn, _tx| {
     conn.query_drop("INSERT INTO users (name) VALUES ('Alice')")?;
     conn.query_drop("INSERT INTO users (name) VALUES ('Bob')")?;
-    tx.commit(conn)
+    Ok(())
 })?;
 ```
 
-## Automatic Rollback
+If the closure returns `Ok`, the transaction is automatically committed. If the closure returns `Err`, the transaction is automatically rolled back.
 
-If neither `commit()` nor `rollback()` is called, the transaction automatically rolls back when the closure returns:
+## Automatic Rollback on Error
 
 ```rust,ignore
-conn.run_transaction(|conn, tx| {
+conn.transaction(|conn, _tx| {
     conn.query_drop("INSERT INTO users (name) VALUES ('Alice')")?;
     // Returns error - transaction will be rolled back
     Err(Error::BadUsageError("oops".to_string()))
@@ -27,10 +27,12 @@ conn.run_transaction(|conn, tx| {
 // No data inserted
 ```
 
-## Explicit Rollback
+## Explicit Commit/Rollback
+
+Use `tx.commit()` or `tx.rollback()` for explicit control:
 
 ```rust,ignore
-conn.run_transaction(|conn, tx| {
+conn.transaction(|conn, tx| {
     conn.query_drop("INSERT INTO users (name) VALUES ('Alice')")?;
 
     if some_condition {
@@ -43,17 +45,17 @@ conn.run_transaction(|conn, tx| {
 
 ## Nested Transactions
 
-Nested transactions are not supported. Calling `run_transaction` while already in a transaction returns `Error::NestedTransaction`.
+Nested transactions are not supported. Calling `transaction` while already in a transaction returns `Error::NestedTransaction`.
 
 ## Async Transactions
 
-For async connections, use the same pattern:
+For async connections, use async closures:
 
 ```rust,ignore
 use zero_mysql::tokio::Conn;
 
-conn.run_transaction(|conn, tx| async move {
+conn.transaction(async |conn, _tx| {
     conn.query_drop("INSERT INTO users (name) VALUES ('Alice')").await?;
-    tx.commit(conn).await
+    Ok(())
 }).await?;
 ```

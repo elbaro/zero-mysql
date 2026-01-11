@@ -45,6 +45,11 @@ impl Conn {
         self.in_transaction = value;
     }
 
+    /// Returns true if the connection is currently in a transaction
+    pub fn in_transaction(&self) -> bool {
+        self.in_transaction
+    }
+
     /// Create a new MySQL connection from connection options
     pub fn new<O: TryInto<crate::opts::Opts>>(opts: O) -> Result<Self>
     where
@@ -603,7 +608,7 @@ impl Conn {
     ///
     /// # Errors
     /// Returns `Error::NestedTransaction` if called while already in a transaction
-    pub fn run_transaction<F, R>(&mut self, f: F) -> Result<R>
+    pub fn transaction<F, R>(&mut self, f: F) -> Result<R>
     where
         F: FnOnce(&mut Conn, super::transaction::Transaction) -> Result<R>,
     {
@@ -621,16 +626,15 @@ impl Conn {
         let tx = super::transaction::Transaction::new(self.connection_id());
         let result = f(self, tx);
 
-        // If the transaction was not explicitly committed or rolled back, roll it back
+        // If no explicit commit/rollback was called, commit on Ok, rollback on Err
         if self.in_transaction {
-            let rollback_result = self.query_drop("ROLLBACK");
             self.in_transaction = false;
-
-            // Return the first error (either from closure or rollback)
-            if let Err(e) = result {
-                return Err(e);
+            match &result {
+                Ok(_) => self.query_drop("COMMIT")?,
+                Err(_) => {
+                    let _ = self.query_drop("ROLLBACK");
+                }
             }
-            rollback_result?;
         }
 
         result
