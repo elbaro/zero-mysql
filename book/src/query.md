@@ -46,7 +46,7 @@ impl Conn {
 - `exec_first`: execute and return `Option<Row>` for the first row
 - `exec_collect`: execute and collect all rows into a Vec
 - `exec_foreach`: execute and call a closure for each row
-- `exec_bulk_insert_or_update`: bulk execution (uses MariaDB bulk command extension; falls back to multiple `exec()` calls on Oracle MySQL)
+- `exec_bulk_insert_or_update`: uses MariaDB's [COM_STMT_BULK_EXECUTE](https://mariadb.com/docs/server/reference/clientserver-protocol/3-binary-protocol-prepared-statements/com_stmt_bulk_execute) to send all parameters in a single packet; falls back to multiple `exec()` calls on Oracle MySQL). This is a huge speedup.
 
 ### Example: Basic
 
