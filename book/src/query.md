@@ -129,11 +129,6 @@ conn.exec_foreach(&mut stmt, (), |user: User| {
 })?;
 ```
 
-Features:
-- **Column order independence**: Columns are matched by name, not position
-- **Optional fields**: Use `Option<T>` for nullable columns
-- **Skip unknown columns**: Extra columns in the result set are ignored by default
-
 Use `#[from_raw_row(strict)]` to error on unknown columns:
 
 ```rust,ignore
@@ -170,13 +165,3 @@ conn.exec_foreach(&mut stmt, (), |row: (i64, String)| {
     Ok(())
 })?;
 ```
-
-## Result Handlers
-
-zero-mysql uses a handler pattern for processing results. Implement `TextResultSetHandler` or `BinaryResultSetHandler` to customize how rows are processed.
-
-Built-in handlers:
-- `DropHandler`: Discards all results
-- `FirstHandler<Row>`: Stores only the first row
-- `CollectHandler<Row>`: Collects rows into a Vec
-- `ForEachHandler<Row, F>`: Calls a closure for each row
