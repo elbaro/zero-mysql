@@ -1,5 +1,15 @@
 # Changelog
 
+## [v0.4.0](https://github.com/elbaro/zero-mysql/compare/v0.3.1...v0.4.0) - 2026-01-11
+
+### <!-- 1 -->Bug fixes
+- [**breaking**] fix async closure API
+
+### <!-- 3 -->Documentation
+- simplification
+- bulk command
+- don't hard-code package version
+
 ## [v0.3.1](https://github.com/elbaro/zero-mysql/compare/v0.3.0...v0.3.1) - 2026-01-10
 
 ### <!-- 0 -->New features
