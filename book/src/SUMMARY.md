@@ -6,6 +6,7 @@
 
 - [Connection](conn.md)
 - [Query](query.md)
+- [Data Type](datatype.md)
 - [Transaction](tx.md)
 - [Logging](log.md)
 - [Performance Tips]()
