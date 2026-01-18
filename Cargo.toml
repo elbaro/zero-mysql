@@ -18,6 +18,10 @@ tokio = ["dep:tokio"]
 sync-tls = ["dep:native-tls"]
 tokio-tls = ["dep:native-tls", "dep:tokio-native-tls"]
 derive = ["dep:zero-mysql-derive"]
+with-uuid = ["dep:uuid"]
+with-chrono = ["dep:chrono"]
+with-time = ["dep:time"]
+with-rust-decimal = ["dep:rust_decimal"]
 
 [dependencies]
 thiserror = "2"
@@ -43,6 +47,10 @@ color-eyre = "0.6"
 simdutf8 = "0.1"
 smart-default = "0.7"
 zero-mysql-derive = { version = "0.1", path = "zero-mysql-derive", optional = true }
+uuid = { version = "1", optional = true }
+chrono = { version = "0.4", default-features = false, optional = true }
+time = { version = "0.3", optional = true }
+rust_decimal = { version = "1", optional = true }
 
 [lints.clippy]
 all = { level = "deny", priority = -1 }

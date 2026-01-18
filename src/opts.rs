@@ -19,69 +19,85 @@ use crate::error::Error;
 pub struct Opts {
     /// Enable TCP_NODELAY socket option to disable Nagle's algorithm.
     /// Unix socket is not affected.
+    ///
     /// Default: `true`
     pub tcp_nodelay: bool,
 
     /// The client capabilities are `CAPABILITIES_ALWAYS_ENABLED | (opts.capabilities & CAPABILITIES_CONFIGURABLE)`.
     /// The final negotiated capabilities are `SERVER_CAPABILITIES & CLIENT_CAPABILITIES`.
+    ///
     /// Default: `CapabilityFlags::empty()`
     pub capabilities: CapabilityFlags,
 
     /// Enable compression for the connection.
+    ///
     /// Default: `false`
     pub compress: bool,
 
     /// Database name to use.
+    ///
     /// Default: `None`
     pub db: Option<String>,
 
     /// Hostname or IP address.
+    ///
     /// Default: `""`
     pub host: String,
 
     /// Port number for the MySQL server.
+    ///
     /// Default: `3306`
     pub port: u16,
 
     /// Unix socket path. Only supported on Unix platforms.
+    ///
     /// Default: `None`
     pub socket: Option<String>,
 
     /// Username for authentication (can be empty for anonymous connections).
+    ///
     /// Default: `""`
     pub user: String,
 
     /// Password for authentication.
+    ///
     /// Default: `""`
     pub password: String,
 
     /// Enable TLS.
+    ///
     /// Default: `false`
     pub tls: bool,
 
     /// When connected via TCP, read `SELECT @@socket` and reconnect to the unix socket.
     /// Only has effect on Unix platforms.
+    ///
     /// Default: `true`
     pub upgrade_to_unix_socket: bool,
 
     /// SQL command to execute after connection is established.
+    ///
     /// Default: `None`
     pub init_command: Option<String>,
 
     /// Reset connection state when returning to pool.
+    ///
     /// Default: `true`
     pub pool_reset_conn: bool,
 
     /// Maximum number of idle connections in the pool.
+    ///
     /// Default: `100`
     pub pool_max_idle_conn: usize,
 
     /// Maximum number of concurrent connections (active + idle).
     /// `None` means unlimited.
+    ///
     /// Default: `None`
     pub pool_max_concurrency: Option<usize>,
 
     /// `BufferPool` to reuse byte buffers (`Vec<u8>`).
+    ///
     /// Default: `GLOBAL_BUFFER_POOL`
     pub buffer_pool: Arc<BufferPool>,
 }

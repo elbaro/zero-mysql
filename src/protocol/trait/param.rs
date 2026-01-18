@@ -416,3 +416,262 @@ impl_params_for_tuple!(T0: 0, T1: 1, T2: 2, T3: 3, T4: 4, T5: 5, T6: 6, T7: 7, T
 impl_params_for_tuple!(T0: 0, T1: 1, T2: 2, T3: 3, T4: 4, T5: 5, T6: 6, T7: 7, T8: 8, T9: 9);
 impl_params_for_tuple!(T0: 0, T1: 1, T2: 2, T3: 3, T4: 4, T5: 5, T6: 6, T7: 7, T8: 8, T9: 9, T10: 10);
 impl_params_for_tuple!(T0: 0, T1: 1, T2: 2, T3: 3, T4: 4, T5: 5, T6: 6, T7: 7, T8: 8, T9: 9, T10: 10, T11: 11);
+
+// ============================================================================
+// UUID support
+// ============================================================================
+
+#[cfg(feature = "with-uuid")]
+impl TypedParam for uuid::Uuid {
+    fn encode_type(out: &mut Vec<u8>) {
+        out.push(ColumnType::MYSQL_TYPE_VAR_STRING as u8);
+        out.push(0x00);
+    }
+
+    fn encode_value(&self, out: &mut Vec<u8>) -> Result<()> {
+        let s = self.as_hyphenated().to_string();
+        write_string_lenenc(out, &s);
+        Ok(())
+    }
+}
+
+#[cfg(feature = "with-uuid")]
+impl TypedParam for &uuid::Uuid {
+    fn encode_type(out: &mut Vec<u8>) {
+        out.push(ColumnType::MYSQL_TYPE_VAR_STRING as u8);
+        out.push(0x00);
+    }
+
+    fn encode_value(&self, out: &mut Vec<u8>) -> Result<()> {
+        let s = self.as_hyphenated().to_string();
+        write_string_lenenc(out, &s);
+        Ok(())
+    }
+}
+
+// ============================================================================
+// chrono support
+// ============================================================================
+
+#[cfg(feature = "with-chrono")]
+use chrono::{Datelike, Timelike};
+
+#[cfg(feature = "with-chrono")]
+impl TypedParam for chrono::NaiveDate {
+    fn encode_type(out: &mut Vec<u8>) {
+        out.push(ColumnType::MYSQL_TYPE_DATE as u8);
+        out.push(0x00);
+    }
+
+    fn encode_value(&self, out: &mut Vec<u8>) -> Result<()> {
+        out.push(4); // length
+        write_int_2(out, u16::try_from(self.year()).unwrap_or(0));
+        out.push(self.month() as u8);
+        out.push(self.day() as u8);
+        Ok(())
+    }
+}
+
+#[cfg(feature = "with-chrono")]
+impl TypedParam for chrono::NaiveTime {
+    fn encode_type(out: &mut Vec<u8>) {
+        out.push(ColumnType::MYSQL_TYPE_TIME as u8);
+        out.push(0x00);
+    }
+
+    fn encode_value(&self, out: &mut Vec<u8>) -> Result<()> {
+        let micros = self.nanosecond() / 1000;
+        if micros > 0 {
+            out.push(12); // length
+            out.push(0); // is_negative
+            write_int_4(out, 0); // days
+            out.push(self.hour() as u8);
+            out.push(self.minute() as u8);
+            out.push(self.second() as u8);
+            write_int_4(out, micros);
+        } else {
+            out.push(8); // length
+            out.push(0); // is_negative
+            write_int_4(out, 0); // days
+            out.push(self.hour() as u8);
+            out.push(self.minute() as u8);
+            out.push(self.second() as u8);
+        }
+        Ok(())
+    }
+}
+
+#[cfg(feature = "with-chrono")]
+impl TypedParam for chrono::NaiveDateTime {
+    fn encode_type(out: &mut Vec<u8>) {
+        out.push(ColumnType::MYSQL_TYPE_DATETIME as u8);
+        out.push(0x00);
+    }
+
+    fn encode_value(&self, out: &mut Vec<u8>) -> Result<()> {
+        let micros = self.and_utc().timestamp_subsec_micros();
+        if micros > 0 {
+            out.push(11); // length
+            write_int_2(out, u16::try_from(self.year()).unwrap_or(0));
+            out.push(self.month() as u8);
+            out.push(self.day() as u8);
+            out.push(self.hour() as u8);
+            out.push(self.minute() as u8);
+            out.push(self.second() as u8);
+            write_int_4(out, micros);
+        } else {
+            out.push(7); // length
+            write_int_2(out, u16::try_from(self.year()).unwrap_or(0));
+            out.push(self.month() as u8);
+            out.push(self.day() as u8);
+            out.push(self.hour() as u8);
+            out.push(self.minute() as u8);
+            out.push(self.second() as u8);
+        }
+        Ok(())
+    }
+}
+
+// ============================================================================
+// time crate support
+// ============================================================================
+
+#[cfg(feature = "with-time")]
+impl TypedParam for time::Date {
+    fn encode_type(out: &mut Vec<u8>) {
+        out.push(ColumnType::MYSQL_TYPE_DATE as u8);
+        out.push(0x00);
+    }
+
+    fn encode_value(&self, out: &mut Vec<u8>) -> Result<()> {
+        out.push(4); // length
+        write_int_2(out, u16::try_from(self.year()).unwrap_or(0));
+        out.push(self.month() as u8);
+        out.push(self.day());
+        Ok(())
+    }
+}
+
+#[cfg(feature = "with-time")]
+impl TypedParam for time::Time {
+    fn encode_type(out: &mut Vec<u8>) {
+        out.push(ColumnType::MYSQL_TYPE_TIME as u8);
+        out.push(0x00);
+    }
+
+    fn encode_value(&self, out: &mut Vec<u8>) -> Result<()> {
+        let micros = self.microsecond();
+        if micros > 0 {
+            out.push(12); // length
+            out.push(0); // is_negative
+            write_int_4(out, 0); // days
+            out.push(self.hour());
+            out.push(self.minute());
+            out.push(self.second());
+            write_int_4(out, micros);
+        } else {
+            out.push(8); // length
+            out.push(0); // is_negative
+            write_int_4(out, 0); // days
+            out.push(self.hour());
+            out.push(self.minute());
+            out.push(self.second());
+        }
+        Ok(())
+    }
+}
+
+#[cfg(feature = "with-time")]
+impl TypedParam for time::PrimitiveDateTime {
+    fn encode_type(out: &mut Vec<u8>) {
+        out.push(ColumnType::MYSQL_TYPE_DATETIME as u8);
+        out.push(0x00);
+    }
+
+    fn encode_value(&self, out: &mut Vec<u8>) -> Result<()> {
+        let micros = self.microsecond();
+        if micros > 0 {
+            out.push(11); // length
+            write_int_2(out, u16::try_from(self.year()).unwrap_or(0));
+            out.push(self.month() as u8);
+            out.push(self.day());
+            out.push(self.hour());
+            out.push(self.minute());
+            out.push(self.second());
+            write_int_4(out, micros);
+        } else {
+            out.push(7); // length
+            write_int_2(out, u16::try_from(self.year()).unwrap_or(0));
+            out.push(self.month() as u8);
+            out.push(self.day());
+            out.push(self.hour());
+            out.push(self.minute());
+            out.push(self.second());
+        }
+        Ok(())
+    }
+}
+
+#[cfg(feature = "with-time")]
+impl TypedParam for time::OffsetDateTime {
+    fn encode_type(out: &mut Vec<u8>) {
+        out.push(ColumnType::MYSQL_TYPE_DATETIME as u8);
+        out.push(0x00);
+    }
+
+    fn encode_value(&self, out: &mut Vec<u8>) -> Result<()> {
+        let utc = self.to_offset(time::UtcOffset::UTC);
+        let micros = utc.microsecond();
+        if micros > 0 {
+            out.push(11); // length
+            write_int_2(out, u16::try_from(utc.year()).unwrap_or(0));
+            out.push(utc.month() as u8);
+            out.push(utc.day());
+            out.push(utc.hour());
+            out.push(utc.minute());
+            out.push(utc.second());
+            write_int_4(out, micros);
+        } else {
+            out.push(7); // length
+            write_int_2(out, u16::try_from(utc.year()).unwrap_or(0));
+            out.push(utc.month() as u8);
+            out.push(utc.day());
+            out.push(utc.hour());
+            out.push(utc.minute());
+            out.push(utc.second());
+        }
+        Ok(())
+    }
+}
+
+// ============================================================================
+// rust_decimal support
+// ============================================================================
+
+#[cfg(feature = "with-rust-decimal")]
+impl TypedParam for rust_decimal::Decimal {
+    fn encode_type(out: &mut Vec<u8>) {
+        out.push(ColumnType::MYSQL_TYPE_NEWDECIMAL as u8);
+        out.push(0x00);
+    }
+
+    fn encode_value(&self, out: &mut Vec<u8>) -> Result<()> {
+        let s = self.to_string();
+        write_string_lenenc(out, &s);
+        Ok(())
+    }
+}
+
+#[cfg(feature = "with-rust-decimal")]
+impl TypedParam for &rust_decimal::Decimal {
+    fn encode_type(out: &mut Vec<u8>) {
+        out.push(ColumnType::MYSQL_TYPE_NEWDECIMAL as u8);
+        out.push(0x00);
+    }
+
+    fn encode_value(&self, out: &mut Vec<u8>) -> Result<()> {
+        let s = self.to_string();
+        write_string_lenenc(out, &s);
+        Ok(())
+    }
+}

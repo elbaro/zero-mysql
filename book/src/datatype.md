@@ -1,22 +1,18 @@
 # Data Type
 
-This section describes the mapping between Rust types and MySQL types.
+The library intentionally rejects conversions that could silently lose data. For example, reading a `BIGINT` column as `i8` will return an error rather than truncating the value. This ensures data integrity and makes bugs easier to catch.
 
-## Design Philosophy
-
-**No lossy conversions are allowed.** The library intentionally rejects conversions that could silently lose data. For example, reading a `BIGINT` column as `u8` will return an error rather than truncating the value. This ensures data integrity and makes bugs easier to catch.
-
-Widening conversions (e.g., reading `TINYINT` as `i64`) are allowed because they never lose data.
+Widening conversions (e.g., reading `TINYINT` as `i64`) are allowed.
 
 ## Parameter Types (Rust to MySQL)
 
 | Rust Type | MySQL Type | Notes |
 |-----------|------------|-------|
 | `bool` | `TINYINT` | Encoded as 0 or 1 |
-| `i8` | `TINYINT` | Signed |
-| `i16` | `SMALLINT` | Signed |
-| `i32` | `INT` | Signed |
-| `i64` | `BIGINT` | Signed |
+| `i8` | `TINYINT` | |
+| `i16` | `SMALLINT` | |
+| `i32` | `INT` | |
+| `i64` | `BIGINT` | |
 | `u8` | `TINYINT UNSIGNED` | |
 | `u16` | `SMALLINT UNSIGNED` | |
 | `u32` | `INT UNSIGNED` | |
@@ -25,19 +21,9 @@ Widening conversions (e.g., reading `TINYINT` as `i64`) are allowed because they
 | `f64` | `DOUBLE` | |
 | `&str` | `VARCHAR` | |
 | `String` | `VARCHAR` | |
-| `&[u8]` | `BLOB` | Binary data |
-| `Vec<u8>` | `BLOB` | Binary data |
+| `&[u8]` | `BLOB` | |
+| `Vec<u8>` | `BLOB` | |
 | `Option<T>` | Same as `T` | `None` encodes as `NULL` |
-
-### Example
-
-```rust,ignore
-let mut stmt = conn.prepare("INSERT INTO users (name, age, active) VALUES (?, ?, ?)")?;
-conn.exec_drop(&mut stmt, ("Alice", 30i32, true))?;
-
-// Using Option for nullable columns
-conn.exec_drop(&mut stmt, ("Bob", 25i32, None::<bool>))?;
-```
 
 ## Result Types (MySQL to Rust)
 
@@ -59,75 +45,53 @@ Signed and unsigned types are strictly separated. You cannot decode a signed col
 | `BLOB`, `BINARY`, `VARBINARY`, etc. | `&[u8]`, `Vec<u8>` |
 | `NULL` | `Option<T>` |
 
-### Example
-
-```rust,ignore
-// Reading exact types
-let (id, name): (i64, String) = conn.exec_first(&mut stmt, ())?.unwrap();
-
-// Widening conversion: TINYINT -> i64 is allowed
-let count: i64 = conn.exec_first(&mut stmt, ())?.unwrap();
-
-// Using Option for nullable columns
-let email: Option<String> = conn.exec_first(&mut stmt, ())?.unwrap();
-```
-
-## Conversion Errors
-
-When a conversion is not allowed, you'll get a clear error message:
-
-```rust,ignore
-// This will fail with an error like:
-// "Cannot decode MySQL type BIGINT (i64) to u8"
-let value: u8 = conn.exec_first(&mut stmt, ())?;
-```
-
-The error message includes both the source MySQL type and the target Rust type, making it easy to diagnose the issue.
-
 ## Date and Time Types
 
-MySQL date/time types are exposed through the `Value` enum for zero-copy access:
+Date/time types are exposed through the `Value` enum:
 
-| MySQL Type | `Value` Variant | Description |
-|------------|-----------------|-------------|
-| `DATE` | `Date0`, `Date4` | Date without time |
-| `DATETIME`, `TIMESTAMP` | `Datetime0`, `Datetime4`, `Datetime7`, `Datetime11` | Date with time |
-| `TIME` | `Time0`, `Time8`, `Time12` | Time or duration |
+| MySQL Type | `Value` Variants |
+|------------|------------------|
+| `DATE` | `Date0`, `Date4` |
+| `DATETIME`, `TIMESTAMP` | `Datetime0`, `Datetime4`, `Datetime7`, `Datetime11` |
+| `TIME` | `Time0`, `Time8`, `Time12` |
 
-The numeric suffix indicates the wire format byte length. Different lengths are used depending on whether the value includes sub-second precision.
-
-### Example: Reading Date/Time
-
-```rust,ignore
-use zero_mysql::value::{Value, Timestamp7};
-
-conn.exec_foreach(&mut stmt, (), |row: (Value,)| {
-    match row.0 {
-        Value::Datetime7(ts) => {
-            println!("{}-{:02}-{:02} {:02}:{:02}:{:02}",
-                ts.year(), ts.month, ts.day,
-                ts.hour, ts.minute, ts.second);
-        }
-        Value::Null => println!("NULL"),
-        _ => println!("Other type"),
-    }
-    Ok(())
-})?;
-```
+The numeric suffix indicates the wire format byte length.
 
 ## DECIMAL Type
 
-`DECIMAL` and `NUMERIC` columns are returned as byte slices containing the string representation. This preserves full precision and allows you to use your preferred decimal library:
+`DECIMAL` and `NUMERIC` columns are returned as `Value::Byte` containing the string representation.
 
-```rust,ignore
-use std::str::from_utf8;
+## Feature-Gated Types
 
-conn.exec_foreach(&mut stmt, (), |row: (Value,)| {
-    if let Value::Byte(bytes) = row.0 {
-        let decimal_str = from_utf8(bytes)?;
-        // Parse with your preferred library
-        // let d: rust_decimal::Decimal = decimal_str.parse()?;
-    }
-    Ok(())
-})?;
-```
+Additional type support for parameters is available through feature flags. Decoding is done through the `Value` enum.
+
+### `with-chrono` (chrono crate)
+
+| Rust Type | MySQL Type |
+|-----------|------------|
+| `chrono::NaiveDate` | `DATE` |
+| `chrono::NaiveTime` | `TIME` |
+| `chrono::NaiveDateTime` | `DATETIME` |
+
+### `with-time` (time crate)
+
+| Rust Type | MySQL Type |
+|-----------|------------|
+| `time::Date` | `DATE` |
+| `time::Time` | `TIME` |
+| `time::PrimitiveDateTime` | `DATETIME` |
+| `time::OffsetDateTime` | `DATETIME` |
+
+### `with-uuid` (uuid crate)
+
+| Rust Type | MySQL Type |
+|-----------|------------|
+| `uuid::Uuid` | `BINARY(16)` |
+
+### `with-rust-decimal` (rust_decimal crate)
+
+`rust_decimal::Decimal` uses 96-bit precision, not arbitrary precision like MySQL's `DECIMAL`.
+
+| Rust Type | MySQL Type |
+|-----------|------------|
+| `rust_decimal::Decimal` | `DECIMAL` |
