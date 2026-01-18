@@ -63,7 +63,18 @@ The numeric suffix indicates the wire format byte length.
 
 ## Feature-Gated Types
 
-Additional type support for parameters is available through feature flags. Decoding is done through the `Value` enum.
+Additional type support is available through feature flags.
+
+### `with-uuid` (uuid crate)
+
+| Rust Type | MySQL Type | Notes |
+|-----------|------------|-------|
+| `uuid::Uuid` | `VARCHAR(36)` | Encoded as hyphenated string |
+
+| MySQL Type | Rust Type | Notes |
+|------------|-----------|-------|
+| `VARCHAR`, `CHAR` | `uuid::Uuid` | Parsed from hyphenated string |
+| `BINARY(16)` | `uuid::Uuid` | Parsed from 16 bytes |
 
 ### `with-chrono` (chrono crate)
 
@@ -73,6 +84,12 @@ Additional type support for parameters is available through feature flags. Decod
 | `chrono::NaiveTime` | `TIME` |
 | `chrono::NaiveDateTime` | `DATETIME` |
 
+| MySQL Type | Rust Type | Notes |
+|------------|-----------|-------|
+| `DATE` | `chrono::NaiveDate` | Zero dates (`0000-00-00`) return an error |
+| `TIME` | `chrono::NaiveTime` | Negative times or times with days return an error |
+| `DATETIME`, `TIMESTAMP` | `chrono::NaiveDateTime` | Zero datetimes return an error |
+
 ### `with-time` (time crate)
 
 | Rust Type | MySQL Type |
@@ -80,18 +97,19 @@ Additional type support for parameters is available through feature flags. Decod
 | `time::Date` | `DATE` |
 | `time::Time` | `TIME` |
 | `time::PrimitiveDateTime` | `DATETIME` |
-| `time::OffsetDateTime` | `DATETIME` |
 
-### `with-uuid` (uuid crate)
-
-| Rust Type | MySQL Type |
-|-----------|------------|
-| `uuid::Uuid` | `BINARY(16)` |
+| MySQL Type | Rust Type | Notes |
+|------------|-----------|-------|
+| `DATE` | `time::Date` | Zero dates return an error |
+| `TIME` | `time::Time` | Negative times or times with days return an error |
+| `DATETIME`, `TIMESTAMP` | `time::PrimitiveDateTime` | Zero datetimes return an error |
 
 ### `with-rust-decimal` (rust_decimal crate)
-
-`rust_decimal::Decimal` uses 96-bit precision, not arbitrary precision like MySQL's `DECIMAL`.
 
 | Rust Type | MySQL Type |
 |-----------|------------|
 | `rust_decimal::Decimal` | `DECIMAL` |
+
+| MySQL Type | Rust Type | Notes |
+|------------|-----------|-------|
+| `DECIMAL` | `rust_decimal::Decimal` | 96-bit precision, not arbitrary like MySQL |

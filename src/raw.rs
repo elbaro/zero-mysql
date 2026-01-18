@@ -788,3 +788,300 @@ impl_from_raw_row_tuple!(0: A, 1: B, 2: C, 3: D, 4: E, 5: F, 6: G, 7: H, 8: I);
 impl_from_raw_row_tuple!(0: A, 1: B, 2: C, 3: D, 4: E, 5: F, 6: G, 7: H, 8: I, 9: J);
 impl_from_raw_row_tuple!(0: A, 1: B, 2: C, 3: D, 4: E, 5: F, 6: G, 7: H, 8: I, 9: J, 10: K);
 impl_from_raw_row_tuple!(0: A, 1: B, 2: C, 3: D, 4: E, 5: F, 6: G, 7: H, 8: I, 9: J, 10: K, 11: L);
+
+// ============================================================================
+// UUID support
+// ============================================================================
+
+#[cfg(feature = "with-uuid")]
+impl FromRawValue<'_> for uuid::Uuid {
+    fn from_str(v: &[u8]) -> Result<Self> {
+        let s = from_utf8(v).map_err(|e| {
+            Error::BadUsageError(format!("Cannot decode MySQL STRING to UUID: {}", e))
+        })?;
+        uuid::Uuid::parse_str(s)
+            .map_err(|e| Error::BadUsageError(format!("Cannot parse UUID from '{}': {}", s, e)))
+    }
+
+    fn from_bytes(v: &[u8]) -> Result<Self> {
+        uuid::Uuid::from_slice(v)
+            .map_err(|e| Error::BadUsageError(format!("Cannot decode MySQL BINARY to UUID: {}", e)))
+    }
+}
+
+// ============================================================================
+// chrono support
+// ============================================================================
+
+#[cfg(feature = "with-chrono")]
+impl FromRawValue<'_> for chrono::NaiveDate {
+    fn from_date0() -> Result<Self> {
+        Err(Error::BadUsageError(
+            "Cannot decode zero DATE to chrono::NaiveDate".to_string(),
+        ))
+    }
+
+    fn from_date4(v: &Timestamp4) -> Result<Self> {
+        chrono::NaiveDate::from_ymd_opt(v.year() as i32, v.month as u32, v.day as u32).ok_or_else(
+            || Error::BadUsageError(format!("Invalid date: {}-{}-{}", v.year(), v.month, v.day)),
+        )
+    }
+}
+
+#[cfg(feature = "with-chrono")]
+impl FromRawValue<'_> for chrono::NaiveTime {
+    fn from_time0() -> Result<Self> {
+        Ok(chrono::NaiveTime::from_hms_opt(0, 0, 0).expect("00:00:00 is valid"))
+    }
+
+    fn from_time8(v: &Time8) -> Result<Self> {
+        if v.is_negative() || v.days() > 0 {
+            return Err(Error::BadUsageError(
+                "Cannot decode TIME with days or negative to chrono::NaiveTime".to_string(),
+            ));
+        }
+        chrono::NaiveTime::from_hms_opt(v.hour as u32, v.minute as u32, v.second as u32).ok_or_else(
+            || {
+                Error::BadUsageError(format!(
+                    "Invalid time: {}:{}:{}",
+                    v.hour, v.minute, v.second
+                ))
+            },
+        )
+    }
+
+    fn from_time12(v: &Time12) -> Result<Self> {
+        if v.is_negative() || v.days() > 0 {
+            return Err(Error::BadUsageError(
+                "Cannot decode TIME with days or negative to chrono::NaiveTime".to_string(),
+            ));
+        }
+        chrono::NaiveTime::from_hms_micro_opt(
+            v.hour as u32,
+            v.minute as u32,
+            v.second as u32,
+            v.microsecond(),
+        )
+        .ok_or_else(|| {
+            Error::BadUsageError(format!(
+                "Invalid time: {}:{}:{}.{}",
+                v.hour,
+                v.minute,
+                v.second,
+                v.microsecond()
+            ))
+        })
+    }
+}
+
+#[cfg(feature = "with-chrono")]
+impl FromRawValue<'_> for chrono::NaiveDateTime {
+    fn from_datetime0() -> Result<Self> {
+        Err(Error::BadUsageError(
+            "Cannot decode zero DATETIME to chrono::NaiveDateTime".to_string(),
+        ))
+    }
+
+    fn from_datetime4(v: &Timestamp4) -> Result<Self> {
+        let date = chrono::NaiveDate::from_ymd_opt(v.year() as i32, v.month as u32, v.day as u32)
+            .ok_or_else(|| {
+            Error::BadUsageError(format!("Invalid date: {}-{}-{}", v.year(), v.month, v.day))
+        })?;
+        Ok(date.and_hms_opt(0, 0, 0).expect("00:00:00 is valid"))
+    }
+
+    fn from_datetime7(v: &Timestamp7) -> Result<Self> {
+        let date = chrono::NaiveDate::from_ymd_opt(v.year() as i32, v.month as u32, v.day as u32)
+            .ok_or_else(|| {
+            Error::BadUsageError(format!("Invalid date: {}-{}-{}", v.year(), v.month, v.day))
+        })?;
+        date.and_hms_opt(v.hour as u32, v.minute as u32, v.second as u32)
+            .ok_or_else(|| {
+                Error::BadUsageError(format!(
+                    "Invalid time: {}:{}:{}",
+                    v.hour, v.minute, v.second
+                ))
+            })
+    }
+
+    fn from_datetime11(v: &Timestamp11) -> Result<Self> {
+        let date = chrono::NaiveDate::from_ymd_opt(v.year() as i32, v.month as u32, v.day as u32)
+            .ok_or_else(|| {
+            Error::BadUsageError(format!("Invalid date: {}-{}-{}", v.year(), v.month, v.day))
+        })?;
+        date.and_hms_micro_opt(
+            v.hour as u32,
+            v.minute as u32,
+            v.second as u32,
+            v.microsecond(),
+        )
+        .ok_or_else(|| {
+            Error::BadUsageError(format!(
+                "Invalid datetime: {}-{}-{} {}:{}:{}.{}",
+                v.year(),
+                v.month,
+                v.day,
+                v.hour,
+                v.minute,
+                v.second,
+                v.microsecond()
+            ))
+        })
+    }
+}
+
+// ============================================================================
+// time crate support
+// ============================================================================
+
+#[cfg(feature = "with-time")]
+impl FromRawValue<'_> for time::Date {
+    fn from_date0() -> Result<Self> {
+        Err(Error::BadUsageError(
+            "Cannot decode zero DATE to time::Date".to_string(),
+        ))
+    }
+
+    fn from_date4(v: &Timestamp4) -> Result<Self> {
+        let month = time::Month::try_from(v.month)
+            .map_err(|e| Error::BadUsageError(format!("Invalid month {}: {}", v.month, e)))?;
+        time::Date::from_calendar_date(v.year() as i32, month, v.day).map_err(|e| {
+            Error::BadUsageError(format!(
+                "Invalid date {}-{}-{}: {}",
+                v.year(),
+                v.month,
+                v.day,
+                e
+            ))
+        })
+    }
+}
+
+#[cfg(feature = "with-time")]
+impl FromRawValue<'_> for time::Time {
+    fn from_time0() -> Result<Self> {
+        Ok(time::Time::MIDNIGHT)
+    }
+
+    fn from_time8(v: &Time8) -> Result<Self> {
+        if v.is_negative() || v.days() > 0 {
+            return Err(Error::BadUsageError(
+                "Cannot decode TIME with days or negative to time::Time".to_string(),
+            ));
+        }
+        time::Time::from_hms(v.hour, v.minute, v.second).map_err(|e| {
+            Error::BadUsageError(format!(
+                "Invalid time {}:{}:{}: {}",
+                v.hour, v.minute, v.second, e
+            ))
+        })
+    }
+
+    fn from_time12(v: &Time12) -> Result<Self> {
+        if v.is_negative() || v.days() > 0 {
+            return Err(Error::BadUsageError(
+                "Cannot decode TIME with days or negative to time::Time".to_string(),
+            ));
+        }
+        time::Time::from_hms_micro(v.hour, v.minute, v.second, v.microsecond()).map_err(|e| {
+            Error::BadUsageError(format!(
+                "Invalid time {}:{}:{}.{}: {}",
+                v.hour,
+                v.minute,
+                v.second,
+                v.microsecond(),
+                e
+            ))
+        })
+    }
+}
+
+#[cfg(feature = "with-time")]
+impl FromRawValue<'_> for time::PrimitiveDateTime {
+    fn from_datetime0() -> Result<Self> {
+        Err(Error::BadUsageError(
+            "Cannot decode zero DATETIME to time::PrimitiveDateTime".to_string(),
+        ))
+    }
+
+    fn from_datetime4(v: &Timestamp4) -> Result<Self> {
+        let month = time::Month::try_from(v.month)
+            .map_err(|e| Error::BadUsageError(format!("Invalid month {}: {}", v.month, e)))?;
+        let date = time::Date::from_calendar_date(v.year() as i32, month, v.day).map_err(|e| {
+            Error::BadUsageError(format!(
+                "Invalid date {}-{}-{}: {}",
+                v.year(),
+                v.month,
+                v.day,
+                e
+            ))
+        })?;
+        Ok(time::PrimitiveDateTime::new(date, time::Time::MIDNIGHT))
+    }
+
+    fn from_datetime7(v: &Timestamp7) -> Result<Self> {
+        let month = time::Month::try_from(v.month)
+            .map_err(|e| Error::BadUsageError(format!("Invalid month {}: {}", v.month, e)))?;
+        let date = time::Date::from_calendar_date(v.year() as i32, month, v.day).map_err(|e| {
+            Error::BadUsageError(format!(
+                "Invalid date {}-{}-{}: {}",
+                v.year(),
+                v.month,
+                v.day,
+                e
+            ))
+        })?;
+        let time = time::Time::from_hms(v.hour, v.minute, v.second).map_err(|e| {
+            Error::BadUsageError(format!(
+                "Invalid time {}:{}:{}: {}",
+                v.hour, v.minute, v.second, e
+            ))
+        })?;
+        Ok(time::PrimitiveDateTime::new(date, time))
+    }
+
+    fn from_datetime11(v: &Timestamp11) -> Result<Self> {
+        let month = time::Month::try_from(v.month)
+            .map_err(|e| Error::BadUsageError(format!("Invalid month {}: {}", v.month, e)))?;
+        let date = time::Date::from_calendar_date(v.year() as i32, month, v.day).map_err(|e| {
+            Error::BadUsageError(format!(
+                "Invalid date {}-{}-{}: {}",
+                v.year(),
+                v.month,
+                v.day,
+                e
+            ))
+        })?;
+        let time = time::Time::from_hms_micro(v.hour, v.minute, v.second, v.microsecond())
+            .map_err(|e| {
+                Error::BadUsageError(format!(
+                    "Invalid time {}:{}:{}.{}: {}",
+                    v.hour,
+                    v.minute,
+                    v.second,
+                    v.microsecond(),
+                    e
+                ))
+            })?;
+        Ok(time::PrimitiveDateTime::new(date, time))
+    }
+}
+
+// ============================================================================
+// rust_decimal support
+// ============================================================================
+
+#[cfg(feature = "with-rust-decimal")]
+impl FromRawValue<'_> for rust_decimal::Decimal {
+    fn from_decimal(v: &[u8]) -> Result<Self> {
+        let s = from_utf8(v).map_err(|e| {
+            Error::BadUsageError(format!("Cannot decode MySQL DECIMAL to string: {}", e))
+        })?;
+        s.parse()
+            .map_err(|e| Error::BadUsageError(format!("Cannot parse Decimal from '{}': {}", s, e)))
+    }
+
+    fn from_str(v: &[u8]) -> Result<Self> {
+        Self::from_decimal(v)
+    }
+}

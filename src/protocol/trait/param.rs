@@ -612,38 +612,6 @@ impl TypedParam for time::PrimitiveDateTime {
     }
 }
 
-#[cfg(feature = "with-time")]
-impl TypedParam for time::OffsetDateTime {
-    fn encode_type(out: &mut Vec<u8>) {
-        out.push(ColumnType::MYSQL_TYPE_DATETIME as u8);
-        out.push(0x00);
-    }
-
-    fn encode_value(&self, out: &mut Vec<u8>) -> Result<()> {
-        let utc = self.to_offset(time::UtcOffset::UTC);
-        let micros = utc.microsecond();
-        if micros > 0 {
-            out.push(11); // length
-            write_int_2(out, u16::try_from(utc.year()).unwrap_or(0));
-            out.push(utc.month() as u8);
-            out.push(utc.day());
-            out.push(utc.hour());
-            out.push(utc.minute());
-            out.push(utc.second());
-            write_int_4(out, micros);
-        } else {
-            out.push(7); // length
-            write_int_2(out, u16::try_from(utc.year()).unwrap_or(0));
-            out.push(utc.month() as u8);
-            out.push(utc.day());
-            out.push(utc.hour());
-            out.push(utc.minute());
-            out.push(utc.second());
-        }
-        Ok(())
-    }
-}
-
 // ============================================================================
 // rust_decimal support
 // ============================================================================
