@@ -418,6 +418,123 @@ impl_params_for_tuple!(T0: 0, T1: 1, T2: 2, T3: 3, T4: 4, T5: 5, T6: 6, T7: 7, T
 impl_params_for_tuple!(T0: 0, T1: 1, T2: 2, T3: 3, T4: 4, T5: 5, T6: 6, T7: 7, T8: 8, T9: 9, T10: 10, T11: 11);
 
 // ============================================================================
+// Slice and Vec implementations
+// ============================================================================
+
+impl<T: TypedParam> Params for [T] {
+    fn len(&self) -> usize {
+        <[T]>::len(self)
+    }
+
+    fn encode_null_bitmap(&self, out: &mut Vec<u8>) {
+        let num_bytes = self.len().div_ceil(8);
+        let start_len = out.len();
+        out.resize(start_len + num_bytes, 0);
+
+        for (idx, item) in self.iter().enumerate() {
+            if item.is_null() {
+                let byte_pos = start_len + (idx >> 3);
+                let bit_offset = idx & 7;
+                out[byte_pos] |= 1 << bit_offset;
+            }
+        }
+    }
+
+    fn encode_types(&self, out: &mut Vec<u8>) {
+        for _ in self {
+            T::encode_type(out);
+        }
+    }
+
+    fn encode_values(&self, out: &mut Vec<u8>) -> Result<()> {
+        for item in self {
+            if !item.is_null() {
+                item.encode_value(out)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn encode_values_for_bulk(&self, out: &mut Vec<u8>) -> Result<()> {
+        for item in self {
+            if item.is_null() {
+                out.push(ParamIndicator::Null as u8);
+            } else {
+                out.push(ParamIndicator::None as u8);
+                item.encode_value(out)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl<T: TypedParam> Params for &[T] {
+    fn len(&self) -> usize {
+        <[T]>::len(self)
+    }
+
+    fn encode_null_bitmap(&self, out: &mut Vec<u8>) {
+        <[T] as Params>::encode_null_bitmap(self, out)
+    }
+
+    fn encode_types(&self, out: &mut Vec<u8>) {
+        <[T] as Params>::encode_types(self, out)
+    }
+
+    fn encode_values(&self, out: &mut Vec<u8>) -> Result<()> {
+        <[T] as Params>::encode_values(self, out)
+    }
+
+    fn encode_values_for_bulk(&self, out: &mut Vec<u8>) -> Result<()> {
+        <[T] as Params>::encode_values_for_bulk(self, out)
+    }
+}
+
+impl<T: TypedParam> Params for Vec<T> {
+    fn len(&self) -> usize {
+        self.as_slice().len()
+    }
+
+    fn encode_null_bitmap(&self, out: &mut Vec<u8>) {
+        self.as_slice().encode_null_bitmap(out)
+    }
+
+    fn encode_types(&self, out: &mut Vec<u8>) {
+        self.as_slice().encode_types(out)
+    }
+
+    fn encode_values(&self, out: &mut Vec<u8>) -> Result<()> {
+        self.as_slice().encode_values(out)
+    }
+
+    fn encode_values_for_bulk(&self, out: &mut Vec<u8>) -> Result<()> {
+        self.as_slice().encode_values_for_bulk(out)
+    }
+}
+
+impl<T: TypedParam> Params for &Vec<T> {
+    fn len(&self) -> usize {
+        self.as_slice().len()
+    }
+
+    fn encode_null_bitmap(&self, out: &mut Vec<u8>) {
+        self.as_slice().encode_null_bitmap(out)
+    }
+
+    fn encode_types(&self, out: &mut Vec<u8>) {
+        self.as_slice().encode_types(out)
+    }
+
+    fn encode_values(&self, out: &mut Vec<u8>) -> Result<()> {
+        self.as_slice().encode_values(out)
+    }
+
+    fn encode_values_for_bulk(&self, out: &mut Vec<u8>) -> Result<()> {
+        self.as_slice().encode_values_for_bulk(out)
+    }
+}
+
+// ============================================================================
 // UUID support
 // ============================================================================
 

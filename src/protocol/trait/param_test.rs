@@ -218,3 +218,93 @@ fn test_params_byte_variants() {
     Params::encode_values(&params, &mut out).unwrap();
     assert_eq!(out.len(), 11);
 }
+
+// ============================================================================
+// Tests for slice and Vec params
+// ============================================================================
+
+#[test]
+fn test_params_slice() {
+    let values: &[i32] = &[1, 2, 3];
+    assert_eq!(Params::len(&values), 3);
+
+    let mut null_bitmap = Vec::new();
+    Params::encode_null_bitmap(&values, &mut null_bitmap);
+    assert_eq!(null_bitmap, vec![0]);
+
+    let mut types = Vec::new();
+    Params::encode_types(&values, &mut types);
+    assert_eq!(types.len(), 6); // 3 params * 2 bytes
+
+    let mut out = Vec::new();
+    Params::encode_values(&values, &mut out).unwrap();
+    assert_eq!(out.len(), 12); // 3 * 4 bytes for i32
+}
+
+#[test]
+fn test_params_vec() {
+    let values: Vec<i32> = vec![1, 2, 3];
+    assert_eq!(Params::len(&values), 3);
+
+    let mut types = Vec::new();
+    Params::encode_types(&values, &mut types);
+    assert_eq!(types.len(), 6);
+
+    let mut out = Vec::new();
+    Params::encode_values(&values, &mut out).unwrap();
+    assert_eq!(out.len(), 12);
+}
+
+#[test]
+fn test_params_vec_ref() {
+    let values: Vec<i32> = vec![1, 2, 3];
+    let values_ref = &values;
+    assert_eq!(Params::len(&values_ref), 3);
+
+    let mut types = Vec::new();
+    Params::encode_types(&values_ref, &mut types);
+    assert_eq!(types.len(), 6);
+}
+
+#[test]
+fn test_params_slice_with_options() {
+    let values: &[Option<i32>] = &[Some(1), None, Some(3)];
+    assert_eq!(Params::len(&values), 3);
+
+    let mut null_bitmap = Vec::new();
+    Params::encode_null_bitmap(&values, &mut null_bitmap);
+    assert_eq!(null_bitmap, vec![0b00000010]); // bit 1 set for None
+
+    let mut out = Vec::new();
+    Params::encode_values(&values, &mut out).unwrap();
+    assert_eq!(out.len(), 8); // 2 * 4 bytes (None is skipped)
+}
+
+#[test]
+fn test_params_empty_slice() {
+    let values: &[i32] = &[];
+    assert_eq!(Params::len(&values), 0);
+
+    let mut null_bitmap = Vec::new();
+    Params::encode_null_bitmap(&values, &mut null_bitmap);
+    assert_eq!(null_bitmap, vec![]);
+
+    let mut types = Vec::new();
+    Params::encode_types(&values, &mut types);
+    assert_eq!(types.len(), 0);
+}
+
+#[test]
+fn test_params_slice_strings() {
+    let values: Vec<&str> = vec!["hello", "world"];
+    assert_eq!(Params::len(&values), 2);
+
+    let mut types = Vec::new();
+    Params::encode_types(&values, &mut types);
+    assert_eq!(types.len(), 4); // 2 params * 2 bytes
+
+    let mut out = Vec::new();
+    Params::encode_values(&values, &mut out).unwrap();
+    // "hello" = 1 (len) + 5 (data), "world" = 1 (len) + 5 (data)
+    assert_eq!(out.len(), 12);
+}
