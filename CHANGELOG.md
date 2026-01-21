@@ -1,5 +1,15 @@
 # Changelog
 
+## [v0.4.1](https://github.com/elbaro/zero-mysql/compare/v0.4.0...v0.4.1) - 2026-01-21
+
+### <!-- 0 -->New features
+- support [T], Vec<T> as params
+- add support for common external crate types
+
+### <!-- 3 -->Documentation
+- revise datatype page
+- add data type conversion
+
 ## [v0.4.0](https://github.com/elbaro/zero-mysql/compare/v0.3.1...v0.4.0) - 2026-01-11
 
 ### <!-- 1 -->Bug fixes
