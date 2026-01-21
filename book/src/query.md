@@ -100,14 +100,14 @@ conn.exec_drop(&mut stmt, (3,))?;
 
 There are two ways to map database rows to Rust structs.
 
-### Using `#[derive(FromRawRow)]`
+### Using `#[derive(FromRow)]`
 
-The `FromRawRow` derive macro automatically maps columns to struct fields by name.
+The `FromRow` derive macro automatically maps columns to struct fields by name.
 
 ```rust,ignore
-use zero_mysql::r#macro::FromRawRow;
+use zero_mysql::r#macro::FromRow;
 
-#[derive(FromRawRow)]
+#[derive(FromRow)]
 struct User {
     id: i64,
     name: String,
@@ -129,11 +129,11 @@ conn.exec_foreach(&mut stmt, (), |user: User| {
 })?;
 ```
 
-Use `#[from_raw_row(strict)]` to error on unknown columns:
+Use `#[from_row(strict)]` to error on unknown columns:
 
 ```rust,ignore
-#[derive(FromRawRow)]
-#[from_raw_row(strict)]
+#[derive(FromRow)]
+#[from_row(strict)]
 struct User {
     id: i64,
     name: String,

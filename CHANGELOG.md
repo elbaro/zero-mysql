@@ -28,7 +28,7 @@
 ## [v0.3.0](https://github.com/elbaro/zero-mysql/compare/v0.2.1...v0.3.0) - 2026-01-10
 
 ### <!-- 0 -->New features
-- #[derive(FromRawRow)]
+- #[derive(FromRow)]
 - exec_foreach() which is useful for mapping tuples to structs
 
 ### <!-- 1 -->Bug fixes

@@ -3,7 +3,7 @@ use crate::protocol::command::ColumnDefinition;
 use crate::protocol::response::{OkPayload, OkPayloadBytes};
 use crate::protocol::r#trait::{BinaryResultSetHandler, TextResultSetHandler};
 use crate::protocol::{BinaryRowPayload, TextRowPayload};
-use crate::raw::FromRawRow;
+use crate::raw::FromRow;
 use smart_default::SmartDefault;
 
 /// A handler that ignores all result set data but captures affected_rows and last_insert_id
@@ -90,7 +90,7 @@ impl<Row> FirstHandler<Row> {
     }
 }
 
-impl<Row: for<'buf> FromRawRow<'buf>> BinaryResultSetHandler for FirstHandler<Row> {
+impl<Row: for<'buf> FromRow<'buf>> BinaryResultSetHandler for FirstHandler<Row> {
     fn no_result_set(&mut self, _ok: OkPayloadBytes) -> Result<()> {
         Ok(())
     }
@@ -101,7 +101,7 @@ impl<Row: for<'buf> FromRawRow<'buf>> BinaryResultSetHandler for FirstHandler<Ro
 
     fn row(&mut self, cols: &[ColumnDefinition<'_>], row: BinaryRowPayload<'_>) -> Result<()> {
         if self.row.is_none() {
-            self.row = Some(Row::from_raw_row(cols, row)?);
+            self.row = Some(Row::from_row(cols, row)?);
         }
         Ok(())
     }
@@ -136,7 +136,7 @@ impl<Row> CollectHandler<Row> {
     }
 }
 
-impl<Row: for<'buf> FromRawRow<'buf>> BinaryResultSetHandler for CollectHandler<Row> {
+impl<Row: for<'buf> FromRow<'buf>> BinaryResultSetHandler for CollectHandler<Row> {
     fn no_result_set(&mut self, ok: OkPayloadBytes) -> Result<()> {
         let payload = OkPayload::try_from(ok)?;
         self.affected_rows = payload.affected_rows;
@@ -149,7 +149,7 @@ impl<Row: for<'buf> FromRawRow<'buf>> BinaryResultSetHandler for CollectHandler<
     }
 
     fn row(&mut self, cols: &[ColumnDefinition], row: BinaryRowPayload) -> Result<()> {
-        self.rows.push(Row::from_raw_row(cols, row)?);
+        self.rows.push(Row::from_row(cols, row)?);
         Ok(())
     }
 
@@ -180,7 +180,7 @@ impl<Row, F> ForEachHandler<Row, F> {
 
 impl<Row, F> BinaryResultSetHandler for ForEachHandler<Row, F>
 where
-    Row: for<'buf> FromRawRow<'buf>,
+    Row: for<'buf> FromRow<'buf>,
     F: FnMut(Row) -> Result<()>,
 {
     fn no_result_set(&mut self, _ok: OkPayloadBytes) -> Result<()> {
@@ -192,7 +192,7 @@ where
     }
 
     fn row(&mut self, cols: &[ColumnDefinition], row: BinaryRowPayload) -> Result<()> {
-        let parsed = Row::from_raw_row(cols, row)?;
+        let parsed = Row::from_row(cols, row)?;
         (self.f)(parsed)
     }
 

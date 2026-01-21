@@ -401,8 +401,8 @@ pub fn skip_value<'buf>(
 }
 
 /// Trait for types that can be decoded from a MySQL row.
-pub trait FromRawRow<'buf>: Sized {
-    fn from_raw_row(cols: &[ColumnDefinition<'_>], row: BinaryRowPayload<'buf>) -> Result<Self>;
+pub trait FromRow<'buf>: Sized {
+    fn from_row(cols: &[ColumnDefinition<'_>], row: BinaryRowPayload<'buf>) -> Result<Self>;
 }
 
 // ============================================================================
@@ -755,14 +755,14 @@ impl<'a, T: FromRawValue<'a>> FromRawValue<'a> for Option<T> {
 }
 
 // ============================================================================
-// FromRawRow implementations for tuples
+// FromRow implementations for tuples
 // ============================================================================
 
-macro_rules! impl_from_raw_row_tuple {
+macro_rules! impl_from_row_tuple {
     ($($idx:tt: $T:ident),+) => {
-        impl<'buf, 'value, $($T: FromRawValue<'buf>),+> FromRawRow<'buf> for ($($T,)+) {
+        impl<'buf, 'value, $($T: FromRawValue<'buf>),+> FromRow<'buf> for ($($T,)+) {
             #[expect(non_snake_case)]
-            fn from_raw_row(cols: &[ColumnDefinition<'_>], row: BinaryRowPayload<'buf>) -> Result<Self> {
+            fn from_row(cols: &[ColumnDefinition<'_>], row: BinaryRowPayload<'buf>) -> Result<Self> {
                 let mut data = row.values();
                 let null_bitmap = row.null_bitmap();
                 $(
@@ -776,18 +776,18 @@ macro_rules! impl_from_raw_row_tuple {
     };
 }
 
-impl_from_raw_row_tuple!(0: A);
-impl_from_raw_row_tuple!(0: A, 1: B);
-impl_from_raw_row_tuple!(0: A, 1: B, 2: C);
-impl_from_raw_row_tuple!(0: A, 1: B, 2: C, 3: D);
-impl_from_raw_row_tuple!(0: A, 1: B, 2: C, 3: D, 4: E);
-impl_from_raw_row_tuple!(0: A, 1: B, 2: C, 3: D, 4: E, 5: F);
-impl_from_raw_row_tuple!(0: A, 1: B, 2: C, 3: D, 4: E, 5: F, 6: G);
-impl_from_raw_row_tuple!(0: A, 1: B, 2: C, 3: D, 4: E, 5: F, 6: G, 7: H);
-impl_from_raw_row_tuple!(0: A, 1: B, 2: C, 3: D, 4: E, 5: F, 6: G, 7: H, 8: I);
-impl_from_raw_row_tuple!(0: A, 1: B, 2: C, 3: D, 4: E, 5: F, 6: G, 7: H, 8: I, 9: J);
-impl_from_raw_row_tuple!(0: A, 1: B, 2: C, 3: D, 4: E, 5: F, 6: G, 7: H, 8: I, 9: J, 10: K);
-impl_from_raw_row_tuple!(0: A, 1: B, 2: C, 3: D, 4: E, 5: F, 6: G, 7: H, 8: I, 9: J, 10: K, 11: L);
+impl_from_row_tuple!(0: A);
+impl_from_row_tuple!(0: A, 1: B);
+impl_from_row_tuple!(0: A, 1: B, 2: C);
+impl_from_row_tuple!(0: A, 1: B, 2: C, 3: D);
+impl_from_row_tuple!(0: A, 1: B, 2: C, 3: D, 4: E);
+impl_from_row_tuple!(0: A, 1: B, 2: C, 3: D, 4: E, 5: F);
+impl_from_row_tuple!(0: A, 1: B, 2: C, 3: D, 4: E, 5: F, 6: G);
+impl_from_row_tuple!(0: A, 1: B, 2: C, 3: D, 4: E, 5: F, 6: G, 7: H);
+impl_from_row_tuple!(0: A, 1: B, 2: C, 3: D, 4: E, 5: F, 6: G, 7: H, 8: I);
+impl_from_row_tuple!(0: A, 1: B, 2: C, 3: D, 4: E, 5: F, 6: G, 7: H, 8: I, 9: J);
+impl_from_row_tuple!(0: A, 1: B, 2: C, 3: D, 4: E, 5: F, 6: G, 7: H, 8: I, 9: J, 10: K);
+impl_from_row_tuple!(0: A, 1: B, 2: C, 3: D, 4: E, 5: F, 6: G, 7: H, 8: I, 9: J, 10: K, 11: L);
 
 // ============================================================================
 // UUID support

@@ -1,11 +1,11 @@
-//! Tests for FromRawRow derive macro.
+//! Tests for FromRow derive macro.
 //!
 //! Run with: cargo test --features derive --test derive
 
 #![allow(dead_code)]
 
 use zero_mysql::Opts;
-use zero_mysql::r#macro::FromRawRow;
+use zero_mysql::r#macro::FromRow;
 use zero_mysql::sync::Conn;
 
 const TEST_URL: &str = "mysql://test:1234@localhost:3306/test";
@@ -19,28 +19,28 @@ fn get_conn() -> Conn {
 // Struct definitions
 // ============================================================================
 
-#[derive(Debug, PartialEq, FromRawRow)]
+#[derive(Debug, PartialEq, FromRow)]
 struct User {
     id: i64,
     name: String,
     age: u8,
 }
 
-#[derive(Debug, PartialEq, FromRawRow)]
+#[derive(Debug, PartialEq, FromRow)]
 struct UserWithOptional {
     id: i64,
     name: String,
     email: Option<String>,
 }
 
-#[derive(Debug, PartialEq, FromRawRow)]
-#[from_raw_row(strict)]
+#[derive(Debug, PartialEq, FromRow)]
+#[from_row(strict)]
 struct StrictUser {
     id: i64,
     name: String,
 }
 
-#[derive(Debug, PartialEq, FromRawRow)]
+#[derive(Debug, PartialEq, FromRow)]
 struct IntTypes {
     tiny: i8,
     small: i16,
@@ -48,13 +48,13 @@ struct IntTypes {
     big: i64,
 }
 
-#[derive(Debug, PartialEq, FromRawRow)]
+#[derive(Debug, PartialEq, FromRow)]
 struct FloatTypes {
     float_val: f32,
     double_val: f64,
 }
 
-#[derive(Debug, PartialEq, FromRawRow)]
+#[derive(Debug, PartialEq, FromRow)]
 struct PartialUser {
     name: String,
 }

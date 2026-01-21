@@ -458,7 +458,7 @@ impl Conn {
         params: P,
     ) -> Result<Option<Row>>
     where
-        Row: for<'buf> crate::raw::FromRawRow<'buf>,
+        Row: for<'buf> crate::raw::FromRow<'buf>,
         P: Params,
     {
         let result = self.exec_first_inner(stmt, params);
@@ -471,7 +471,7 @@ impl Conn {
         params: P,
     ) -> Result<Option<Row>>
     where
-        Row: for<'buf> crate::raw::FromRawRow<'buf>,
+        Row: for<'buf> crate::raw::FromRow<'buf>,
         P: Params,
     {
         write_execute(self.buffer_set.new_write_buffer(), stmt.id(), params)?;
@@ -496,7 +496,7 @@ impl Conn {
         params: P,
     ) -> Result<Vec<Row>>
     where
-        Row: for<'buf> crate::raw::FromRawRow<'buf>,
+        Row: for<'buf> crate::raw::FromRow<'buf>,
         P: Params,
     {
         let mut handler = crate::handler::CollectHandler::<Row>::default();
@@ -514,7 +514,7 @@ impl Conn {
         f: F,
     ) -> Result<()>
     where
-        Row: for<'buf> crate::raw::FromRawRow<'buf>,
+        Row: for<'buf> crate::raw::FromRow<'buf>,
         P: Params,
         F: FnMut(Row) -> Result<()>,
     {

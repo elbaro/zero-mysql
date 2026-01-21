@@ -2,14 +2,14 @@ use proc_macro::TokenStream;
 use quote::quote;
 use syn::{Data, DeriveInput, Fields, Meta, parse_macro_input};
 
-/// Derive macro for `FromRawRow` trait.
+/// Derive macro for `FromRow` trait.
 ///
 /// Generates an implementation that matches column names to struct fields.
 ///
 /// # Example
 ///
 /// ```ignore
-/// #[derive(FromRawRow)]
+/// #[derive(FromRow)]
 /// struct User {
 ///     name: String,
 ///     age: u8,
@@ -18,28 +18,28 @@ use syn::{Data, DeriveInput, Fields, Meta, parse_macro_input};
 ///
 /// # Strict Mode
 ///
-/// By default, unknown columns are silently skipped. Use `#[from_raw_row(strict)]`
+/// By default, unknown columns are silently skipped. Use `#[from_row(strict)]`
 /// to error on unknown columns:
 ///
 /// ```ignore
-/// #[derive(FromRawRow)]
-/// #[from_raw_row(strict)]
+/// #[derive(FromRow)]
+/// #[from_row(strict)]
 /// struct User {
 ///     name: String,
 ///     age: u8,
 /// }
 /// ```
-#[proc_macro_derive(FromRawRow, attributes(from_raw_row))]
-pub fn derive_from_raw_row(input: TokenStream) -> TokenStream {
+#[proc_macro_derive(FromRow, attributes(from_row))]
+pub fn derive_from_row(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
 
     let name = &input.ident;
     let generics = &input.generics;
     let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
 
-    // Check for #[from_raw_row(strict)]
+    // Check for #[from_row(strict)]
     let strict = input.attrs.iter().any(|attr| {
-        if !attr.path().is_ident("from_raw_row") {
+        if !attr.path().is_ident("from_row") {
             return false;
         }
         match &attr.meta {
@@ -51,9 +51,9 @@ pub fn derive_from_raw_row(input: TokenStream) -> TokenStream {
     let fields = match &input.data {
         Data::Struct(data) => match &data.fields {
             Fields::Named(fields) => &fields.named,
-            _ => panic!("FromRawRow only supports structs with named fields"),
+            _ => panic!("FromRow only supports structs with named fields"),
         },
-        _ => panic!("FromRawRow only supports structs"),
+        _ => panic!("FromRow only supports structs"),
     };
 
     let field_names: Vec<_> = fields.iter().map(|f| f.ident.as_ref().unwrap()).collect();
@@ -130,8 +130,8 @@ pub fn derive_from_raw_row(input: TokenStream) -> TokenStream {
     });
 
     let expanded = quote! {
-        impl #impl_generics ::zero_mysql::raw::FromRawRow<'_> for #name #ty_generics #where_clause {
-            fn from_raw_row(
+        impl #impl_generics ::zero_mysql::raw::FromRow<'_> for #name #ty_generics #where_clause {
+            fn from_row(
                 __cols: &[::zero_mysql::protocol::command::ColumnDefinition<'_>],
                 __row: ::zero_mysql::protocol::BinaryRowPayload<'_>,
             ) -> ::zero_mysql::error::Result<Self> {
