@@ -16,5 +16,5 @@
 
 # Advanced Topics
 
-- [Zero-Copy Design]()
+- [Zero-Copy Decoding](zerocopy.md)
 - [Protocol]()

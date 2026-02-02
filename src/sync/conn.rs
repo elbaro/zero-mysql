@@ -522,6 +522,51 @@ impl Conn {
         self.exec(stmt, params, &mut handler)
     }
 
+    /// Execute a prepared statement and call a closure for each row using zero-copy decoding.
+    ///
+    /// Unlike `exec_foreach`, this method uses `RefFromRow` to decode rows as zero-copy
+    /// references directly into the buffer. The closure receives a reference to the
+    /// decoded struct.
+    ///
+    /// # Requirements
+    ///
+    /// - The row type must derive `RefFromRow`
+    /// - The struct must have `#[repr(C, packed)]`
+    /// - All fields must use fixed-size little-endian types (e.g., `I64LE`)
+    /// - All columns must be `NOT NULL`
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use zero_mysql::ref_row::{RefFromRow, I64LE, I32LE};
+    ///
+    /// #[derive(RefFromRow)]
+    /// #[repr(C, packed)]
+    /// struct UserStats {
+    ///     user_id: I64LE,
+    ///     login_count: I32LE,
+    /// }
+    ///
+    /// conn.exec_foreach_ref::<UserStats, _, _>(&mut stmt, (), |row| {
+    ///     println!("user_id: {}", row.user_id.get());
+    ///     Ok(())
+    /// })?;
+    /// ```
+    pub fn exec_foreach_ref<Row, P, F>(
+        &mut self,
+        stmt: &mut PreparedStatement,
+        params: P,
+        f: F,
+    ) -> Result<()>
+    where
+        Row: for<'buf> crate::ref_row::RefFromRow<'buf>,
+        P: Params,
+        F: for<'buf> FnMut(&'buf Row) -> Result<()>,
+    {
+        let mut handler = crate::handler::ForEachRefHandler::<Row, F>::new(f);
+        self.exec(stmt, params, &mut handler)
+    }
+
     fn drive_query<H: TextResultSetHandler>(&mut self, handler: &mut H) -> Result<()> {
         let mut query = Query::new(handler);
 

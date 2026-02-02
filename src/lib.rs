@@ -8,6 +8,7 @@ mod opts;
 mod prepared;
 pub mod protocol;
 pub mod raw;
+pub mod ref_row;
 pub mod sync;
 pub mod value;
 

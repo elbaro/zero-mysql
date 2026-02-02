@@ -200,3 +200,51 @@ where
         Ok(())
     }
 }
+
+/// A handler that calls a closure for each row using zero-copy RefFromRow.
+///
+/// Unlike `ForEachHandler`, this handler uses `RefFromRow` to decode rows
+/// as zero-copy references into the buffer. The closure receives a reference
+/// to the decoded struct.
+///
+/// # Requirements
+///
+/// - The row type must implement `RefFromRow`
+/// - All struct fields must use fixed-size endian-aware types (e.g., `I64LE`)
+/// - All columns must be `NOT NULL`
+pub struct ForEachRefHandler<Row, F> {
+    f: F,
+    _marker: std::marker::PhantomData<Row>,
+}
+
+impl<Row, F> ForEachRefHandler<Row, F> {
+    pub fn new(f: F) -> Self {
+        Self {
+            f,
+            _marker: std::marker::PhantomData,
+        }
+    }
+}
+
+impl<Row, F> BinaryResultSetHandler for ForEachRefHandler<Row, F>
+where
+    Row: for<'buf> crate::ref_row::RefFromRow<'buf>,
+    F: for<'buf> FnMut(&'buf Row) -> Result<()>,
+{
+    fn no_result_set(&mut self, _ok: OkPayloadBytes) -> Result<()> {
+        Ok(())
+    }
+
+    fn resultset_start(&mut self, _cols: &[ColumnDefinition<'_>]) -> Result<()> {
+        Ok(())
+    }
+
+    fn row(&mut self, cols: &[ColumnDefinition], row: BinaryRowPayload) -> Result<()> {
+        let parsed = Row::ref_from_row(cols, row)?;
+        (self.f)(parsed)
+    }
+
+    fn resultset_end(&mut self, _eof: OkPayloadBytes) -> Result<()> {
+        Ok(())
+    }
+}
