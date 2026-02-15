@@ -20,6 +20,12 @@ pub use prepared::PreparedStatement;
 #[cfg(feature = "tokio")]
 pub mod tokio;
 
+#[cfg(feature = "experimental-compio")]
+pub mod compio;
+
+#[cfg(feature = "experimental-diesel")]
+pub mod diesel;
+
 #[cfg(feature = "derive")]
 pub use zero_mysql_derive as r#macro;
 

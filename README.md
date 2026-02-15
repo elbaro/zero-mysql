@@ -11,6 +11,9 @@ Python binding: [pyro-mysql](https://github.com/elbaro/pyro-mysql/)
 - `tokio` (default): asynchronous API
 - `sync-tls`: TLS support for synchronous API (experimental)
 - `tokio-tls`: TLS support for asynchronous API (experimental)
+- `experimental-compio`: asynchronous API using compio (io_uring)
+- `compio-tls`: TLS support for compio API
+- `experimental-diesel`: Diesel ORM backend using zero-mysql as the underlying connection
 
 ## Perf Notes
 - Prefer MariaDB to MySQL

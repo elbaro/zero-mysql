@@ -22,6 +22,9 @@ with-uuid = ["dep:uuid"]
 with-chrono = ["dep:chrono"]
 with-time = ["dep:time"]
 with-rust-decimal = ["dep:rust_decimal"]
+experimental-compio = ["dep:compio"]
+compio-tls = ["compio/native-tls"]
+experimental-diesel = ["dep:diesel", "sync"]
 
 [dependencies]
 thiserror = "2"
@@ -33,6 +36,11 @@ tokio = { version = "1", features = [
 ], optional = true }
 native-tls = { version = "0.2", optional = true }
 tokio-native-tls = { version = "0.3", optional = true }
+compio = { version = "0.18", features = ["io", "net", "runtime", "macros"], optional = true }
+diesel = { version = "2.2", features = [
+  "mysql_backend",
+  "i-implement-a-third-party-backend-and-opt-into-breaking-changes",
+], optional = true }
 zerocopy = { version = "0.8", features = ["derive"] }
 sha1 = "0.10"
 sha2 = "0.10"
@@ -169,3 +177,15 @@ required-features = []
 [[test]]
 name = "derive"
 required-features = ["derive"]
+
+[[test]]
+name = "compio_transaction"
+required-features = ["experimental-compio"]
+
+[[test]]
+name = "diesel_crud"
+required-features = ["experimental-diesel"]
+
+[[example]]
+name = "bench_zero_compio"
+required-features = ["experimental-compio"]
