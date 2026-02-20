@@ -9,11 +9,19 @@ Python binding: [pyro-mysql](https://github.com/elbaro/pyro-mysql/)
 ## Feature Flags
 - `sync` (default): synchronous API
 - `tokio` (default): asynchronous API
+- `compio`: asynchronous API using compio (experimental)
 - `sync-tls`: TLS support for synchronous API (experimental)
 - `tokio-tls`: TLS support for asynchronous API (experimental)
-- `experimental-compio`: asynchronous API using compio (io_uring)
-- `compio-tls`: TLS support for compio API
-- `experimental-diesel`: Diesel ORM backend using zero-mysql as the underlying connection
+- `compio-tls`: TLS support for compio API (experimental)
+- `diesel`: Diesel support (experimental)
+
+TLS flags use `native-tls`.
+
+[External type supports](https://elbaro.github.io/zero-mysql/datatype.html#feature-gated-types):
+- `with-chrono` - Support [chrono](https://crates.io/crates/chrono) date/time types
+- `with-time` - Support [time](https://crates.io/crates/time) date/time types
+- `with-uuid` - Support [uuid](https://crates.io/crates/uuid) types
+- `with-rust-decimal` - Support [rust_decimal](https://crates.io/crates/rust_decimal) types
 
 ## Perf Notes
 - Prefer MariaDB to MySQL
