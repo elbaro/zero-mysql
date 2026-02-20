@@ -1,6 +1,6 @@
 //! Tests for diesel MySQL backend
 
-#![cfg(feature = "experimental-diesel")]
+#![cfg(feature = "diesel")]
 
 use diesel::connection::SimpleConnection;
 use diesel::prelude::*;

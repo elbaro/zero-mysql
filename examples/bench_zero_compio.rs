@@ -1,7 +1,7 @@
 //! Benchmark: zero-mysql async (compio)
 //!
 //! Usage:
-//!   DATABASE_URL=mysql://user:pass@localhost/test cargo run --example bench_zero_compio --release --features experimental-compio
+//!   DATABASE_URL=mysql://user:pass@localhost/test cargo run --example bench_zero_compio --release --features compio
 
 use std::env;
 use zero_mysql::compio::Conn;

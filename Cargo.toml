@@ -22,9 +22,7 @@ with-uuid = ["dep:uuid"]
 with-chrono = ["dep:chrono"]
 with-time = ["dep:time"]
 with-rust-decimal = ["dep:rust_decimal"]
-experimental-compio = ["dep:compio"]
 compio-tls = ["compio/native-tls"]
-experimental-diesel = ["dep:diesel", "sync"]
 
 [dependencies]
 thiserror = "2"
@@ -180,12 +178,12 @@ required-features = ["derive"]
 
 [[test]]
 name = "compio_transaction"
-required-features = ["experimental-compio"]
+required-features = ["compio"]
 
 [[test]]
 name = "diesel_crud"
-required-features = ["experimental-diesel"]
+required-features = ["diesel"]
 
 [[example]]
 name = "bench_zero_compio"
-required-features = ["experimental-compio"]
+required-features = ["compio"]

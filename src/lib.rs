@@ -20,10 +20,10 @@ pub use prepared::PreparedStatement;
 #[cfg(feature = "tokio")]
 pub mod tokio;
 
-#[cfg(feature = "experimental-compio")]
+#[cfg(feature = "compio")]
 pub mod compio;
 
-#[cfg(feature = "experimental-diesel")]
+#[cfg(all(feature = "diesel", feature = "sync"))]
 pub mod diesel;
 
 #[cfg(feature = "derive")]
