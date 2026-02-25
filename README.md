@@ -7,9 +7,10 @@ A high-performance MySQL client library for Rust.
 Python binding: [pyro-mysql](https://github.com/elbaro/pyro-mysql/)
 
 ## Feature Flags
+
+- `derive` (default): `#[derive(FromRow)]` and `#[derive(RefFromRow)]` macros
 - `sync` (default): synchronous API
 - `tokio` (default): asynchronous API
-- `derive` (default): `#[derive(FromRow)]` and `#[derive(RefFromRow)]` macros
 - `compio`: asynchronous API using compio (experimental)
 - `sync-tls`: TLS support for synchronous API (experimental)
 - `tokio-tls`: TLS support for tokio (experimental)

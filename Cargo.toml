@@ -34,7 +34,12 @@ tokio = { version = "1", features = [
 ], optional = true }
 native-tls = { version = "0.2", optional = true }
 tokio-native-tls = { version = "0.3", optional = true }
-compio = { version = "0.18", features = ["io", "net", "runtime", "macros"], optional = true }
+compio = { version = "0.18", features = [
+  "io",
+  "net",
+  "runtime",
+  "macros",
+], optional = true }
 diesel = { version = "2.2", features = [
   "mysql_backend",
   "i-implement-a-third-party-backend-and-opt-into-breaking-changes",
@@ -159,7 +164,6 @@ pretty_assertions = "1.4"
 tracing-subscriber = "0.3"
 mysql = "26"
 mysql_async = "0.36"
-tracing-tracy = "0.11"
 
 [profile.bench]
 debug = true

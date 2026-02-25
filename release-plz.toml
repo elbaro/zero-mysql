@@ -41,6 +41,9 @@ name = "zero-mysql-derive"
 git_tag_name = "derive-v{{ version }}"
 changelog_path = "CHANGELOG.md"
 
+[workspace.dependencies_update]
+enabled = true
+
 [changelog]
 header = """# Changelog
 
