@@ -1,4 +1,5 @@
 [workspace]
+dependencies_update = true
 pr_name = "release: {{ package }} v{{ version }}"
 pr_labels = ["release"]
 pr_body = """
@@ -40,9 +41,6 @@ git_tag_name = "v{{ version }}"
 name = "zero-mysql-derive"
 git_tag_name = "derive-v{{ version }}"
 changelog_path = "CHANGELOG.md"
-
-[workspace.dependencies_update]
-enabled = true
 
 [changelog]
 header = """# Changelog
