@@ -42,6 +42,7 @@ diesel = { version = "2.2", features = [
 zerocopy = { version = "0.8", features = ["derive"] }
 sha1 = "0.10"
 sha2 = "0.10"
+rsa = "0.9"
 url = "2.5"
 bitflags = "2.10"
 log = "0.4"

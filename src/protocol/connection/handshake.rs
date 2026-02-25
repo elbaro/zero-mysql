@@ -253,6 +253,36 @@ pub fn read_caching_sha2_password_fast_auth_result(
     }
 }
 
+/// Encrypt password for caching_sha2_password full auth via RSA.
+///
+/// XORs the null-terminated password with the scramble (cyclically),
+/// then RSA-OAEP-SHA1 encrypts with the server's public key.
+fn rsa_encrypt_password(password: &str, scramble: &[u8], pem: &str) -> Result<Vec<u8>> {
+    use rsa::pkcs8::DecodePublicKey;
+    use rsa::{Oaep, RsaPublicKey};
+
+    let public_key = RsaPublicKey::from_public_key_pem(pem)
+        .map_err(|e| Error::LibraryBug(eyre!("failed to parse RSA public key: {}", e)))?;
+
+    if scramble.is_empty() {
+        return Err(Error::LibraryBug(eyre!("empty scramble in rsa_encrypt_password")));
+    }
+
+    // XOR (password + '\0') with scramble repeated cyclically
+    let mut buf = Vec::with_capacity(password.len() + 1);
+    buf.extend_from_slice(password.as_bytes());
+    buf.push(0);
+
+    for (byte, key) in buf.iter_mut().zip(scramble.iter().cycle()) {
+        *byte ^= key;
+    }
+
+    let padding = Oaep::new::<sha1::Sha1>();
+    public_key
+        .encrypt(&mut rsa::rand_core::OsRng, padding, &buf)
+        .map_err(|e| Error::LibraryBug(eyre!("RSA encryption failed: {}", e)))
+}
+
 // ============================================================================
 // State Machine API for Handshake
 // ============================================================================
@@ -307,8 +337,12 @@ enum HandshakeState {
     WaitingTlsUpgrade,
     /// Handshake response written, waiting for auth result
     WaitingAuthResult,
-    /// Auth switch response written, waiting for final result
-    WaitingFinalAuthResult,
+    /// After auth switch response. `caching_sha2` = whether we might receive AuthMoreData (0x01).
+    WaitingFinalAuthResult { caching_sha2: bool },
+    /// After caching_sha2 fast auth success (0x03) — waiting for the OK packet.
+    WaitingCachingSha2FastAuthOk,
+    /// After requesting RSA public key (0x02) — waiting for AuthMoreData with PEM key.
+    WaitingRsaPublicKey,
     /// Connected (terminal state)
     Connected,
 }
@@ -396,7 +430,7 @@ impl<'a> Handshake<'a> {
                     // No TLS: HandshakeResponse
                     self.write_handshake_response(buffer_set)?;
                     let seq = self.next_sequence_id;
-                    self.next_sequence_id = self.next_sequence_id.wrapping_add(1);
+                    self.next_sequence_id = self.next_sequence_id.wrapping_add(2);
                     self.state = HandshakeState::WaitingAuthResult;
 
                     Ok(HandshakeAction::WritePacket { sequence_id: seq })
@@ -408,7 +442,7 @@ impl<'a> Handshake<'a> {
                 self.write_handshake_response(buffer_set)?;
 
                 let seq = self.next_sequence_id;
-                self.next_sequence_id = self.next_sequence_id.wrapping_add(1);
+                self.next_sequence_id = self.next_sequence_id.wrapping_add(2);
                 self.state = HandshakeState::WaitingAuthResult;
 
                 Ok(HandshakeAction::WritePacket { sequence_id: seq })
@@ -439,57 +473,56 @@ impl<'a> Handshake<'a> {
                         // ERR packet - authentication failed
                         Err(ErrPayloadBytes(payload).into())
                     }
-                    0xFE => {
-                        // Could be auth switch or fast auth result
-                        if initial_plugin == b"caching_sha2_password" && payload.len() == 2 {
-                            // Fast auth result
-                            let result = read_caching_sha2_password_fast_auth_result(payload)?;
-                            match result {
-                                CachingSha2PasswordFastAuthResult::Success => {
-                                    // Need to read final OK packet
-                                    Ok(HandshakeAction::ReadPacket(&mut buffer_set.read_buffer))
-                                }
-                                CachingSha2PasswordFastAuthResult::FullAuthRequired => {
-                                    Err(Error::Unsupported(
-                                        "caching_sha2_password full auth (requires SSL/RSA)"
-                                            .to_string(),
-                                    ))
-                                }
-                            }
+                    0x01 => {
+                        // AuthMoreData — caching_sha2_password fast auth result
+                        if initial_plugin == b"caching_sha2_password" {
+                            self.handle_auth_more_data(buffer_set)
                         } else {
-                            // Auth switch request
-                            let auth_switch = read_auth_switch_request(payload)?;
-
-                            // Compute auth response for new plugin
-                            let auth_response = match auth_switch.plugin_name {
-                                b"mysql_native_password" => auth_mysql_native_password(
-                                    &self.opts.password,
-                                    auth_switch.plugin_data,
-                                )
-                                .to_vec(),
-                                b"caching_sha2_password" => auth_caching_sha2_password(
-                                    &self.opts.password,
-                                    auth_switch.plugin_data,
-                                )
-                                .to_vec(),
-                                plugin => {
-                                    return Err(Error::Unsupported(
-                                        String::from_utf8_lossy(plugin).to_string(),
-                                    ));
-                                }
-                            };
-
-                            write_auth_switch_response(
-                                buffer_set.new_write_buffer(),
-                                &auth_response,
-                            );
-
-                            let seq = self.next_sequence_id;
-                            self.next_sequence_id = self.next_sequence_id.wrapping_add(1);
-                            self.state = HandshakeState::WaitingFinalAuthResult;
-
-                            Ok(HandshakeAction::WritePacket { sequence_id: seq })
+                            Err(Error::LibraryBug(eyre!(
+                                "unexpected AuthMoreData (0x01) for plugin {:?}",
+                                String::from_utf8_lossy(initial_plugin)
+                            )))
                         }
+                    }
+                    0xFE => {
+                        // Auth switch request
+                        let auth_switch = read_auth_switch_request(payload)?;
+
+                        // Compute auth response for new plugin
+                        let (auth_response, is_caching_sha2) = match auth_switch.plugin_name {
+                            b"mysql_native_password" => (
+                                auth_mysql_native_password(
+                                    &self.opts.password,
+                                    auth_switch.plugin_data,
+                                )
+                                .to_vec(),
+                                false,
+                            ),
+                            b"caching_sha2_password" => (
+                                auth_caching_sha2_password(
+                                    &self.opts.password,
+                                    auth_switch.plugin_data,
+                                )
+                                .to_vec(),
+                                true,
+                            ),
+                            plugin => {
+                                return Err(Error::Unsupported(
+                                    String::from_utf8_lossy(plugin).to_string(),
+                                ));
+                            }
+                        };
+
+                        write_auth_switch_response(
+                            buffer_set.new_write_buffer(),
+                            &auth_response,
+                        );
+
+                        let seq = self.next_sequence_id;
+                        self.next_sequence_id = self.next_sequence_id.wrapping_add(2);
+                        self.state = HandshakeState::WaitingFinalAuthResult { caching_sha2: is_caching_sha2 };
+
+                        Ok(HandshakeAction::WritePacket { sequence_id: seq })
                     }
                     header => Err(Error::LibraryBug(eyre!(
                         "unexpected packet header 0x{:02X} while waiting for auth result",
@@ -498,7 +531,7 @@ impl<'a> Handshake<'a> {
                 }
             }
 
-            HandshakeState::WaitingFinalAuthResult => {
+            HandshakeState::WaitingFinalAuthResult { caching_sha2 } => {
                 let payload = &buffer_set.read_buffer[..];
                 if payload.is_empty() {
                     return Err(Error::LibraryBug(eyre!(
@@ -516,11 +549,80 @@ impl<'a> Handshake<'a> {
                         // ERR packet - authentication failed
                         Err(ErrPayloadBytes(payload).into())
                     }
+                    0x01 if *caching_sha2 => {
+                        self.handle_auth_more_data(buffer_set)
+                    }
                     header => Err(Error::LibraryBug(eyre!(
                         "unexpected packet header 0x{:02X} while waiting for final auth result",
                         header
                     ))),
                 }
+            }
+
+            HandshakeState::WaitingCachingSha2FastAuthOk => {
+                let payload = &buffer_set.read_buffer[..];
+                if payload.is_empty() {
+                    return Err(Error::LibraryBug(eyre!(
+                        "empty payload while waiting for caching_sha2 OK"
+                    )));
+                }
+
+                match payload[0] {
+                    0x00 => {
+                        self.state = HandshakeState::Connected;
+                        Ok(HandshakeAction::Finished)
+                    }
+                    0xFF => {
+                        Err(ErrPayloadBytes(payload).into())
+                    }
+                    header => Err(Error::LibraryBug(eyre!(
+                        "unexpected packet header 0x{:02X} while waiting for caching_sha2 OK",
+                        header
+                    ))),
+                }
+            }
+
+            HandshakeState::WaitingRsaPublicKey => {
+                let payload = &buffer_set.read_buffer[..];
+                if payload.is_empty() {
+                    return Err(Error::LibraryBug(eyre!(
+                        "empty payload while waiting for RSA public key"
+                    )));
+                }
+
+                match payload[0] {
+                    0xFF => return Err(ErrPayloadBytes(payload).into()),
+                    0x01 if payload.len() >= 2 => {}
+                    header => {
+                        return Err(Error::LibraryBug(eyre!(
+                            "expected AuthMoreData (0x01) with RSA public key, got 0x{:02X}",
+                            header
+                        )));
+                    }
+                }
+
+                let pem = std::str::from_utf8(&payload[1..]).map_err(|e| {
+                    Error::LibraryBug(eyre!("RSA public key is not valid UTF-8: {}", e))
+                })?;
+
+                let handshake = self.initial_handshake.as_ref().ok_or_else(|| {
+                    Error::LibraryBug(eyre!("initial_handshake not set"))
+                })?;
+
+                let encrypted = rsa_encrypt_password(
+                    &self.opts.password,
+                    &handshake.auth_plugin_data,
+                    pem,
+                )?;
+
+                let out = buffer_set.new_write_buffer();
+                out.extend_from_slice(&encrypted);
+
+                let seq = self.next_sequence_id;
+                self.next_sequence_id = self.next_sequence_id.wrapping_add(2);
+                self.state = HandshakeState::WaitingFinalAuthResult { caching_sha2: false };
+
+                Ok(HandshakeAction::WritePacket { sequence_id: seq })
             }
 
             HandshakeState::Connected => Err(Error::LibraryBug(eyre!(
@@ -623,6 +725,60 @@ impl<'a> Handshake<'a> {
 
         Ok(())
     }
+
+    /// Handle AuthMoreData (0x01) packet for caching_sha2_password.
+    ///
+    /// Called from both `WaitingAuthResult` and `WaitingFinalAuthResult { caching_sha2: true }`.
+    fn handle_auth_more_data<'buf>(
+        &mut self,
+        buffer_set: &'buf mut BufferSet,
+    ) -> Result<HandshakeAction<'buf>> {
+        let payload = &buffer_set.read_buffer[..];
+        if payload.len() < 2 {
+            return Err(Error::LibraryBug(eyre!(
+                "AuthMoreData packet too short: {} bytes",
+                payload.len()
+            )));
+        }
+
+        let result = read_caching_sha2_password_fast_auth_result(&payload[1..])?;
+
+        match result {
+            CachingSha2PasswordFastAuthResult::Success => {
+                // Fast auth succeeded — server will send OK next
+                self.state = HandshakeState::WaitingCachingSha2FastAuthOk;
+                Ok(HandshakeAction::ReadPacket(&mut buffer_set.read_buffer))
+            }
+            CachingSha2PasswordFastAuthResult::FullAuthRequired => {
+                let capability_flags = self.capability_flags.ok_or_else(|| {
+                    Error::LibraryBug(eyre!("capability_flags not set"))
+                })?;
+
+                if capability_flags.contains(CapabilityFlags::CLIENT_SSL) {
+                    // TLS is active — send cleartext password (null-terminated)
+                    let out = buffer_set.new_write_buffer();
+                    out.extend_from_slice(self.opts.password.as_bytes());
+                    out.push(0);
+
+                    let seq = self.next_sequence_id;
+                    self.next_sequence_id = self.next_sequence_id.wrapping_add(2);
+                    self.state = HandshakeState::WaitingFinalAuthResult { caching_sha2: false };
+
+                    Ok(HandshakeAction::WritePacket { sequence_id: seq })
+                } else {
+                    // No TLS — request server's RSA public key
+                    let out = buffer_set.new_write_buffer();
+                    out.push(0x02);
+
+                    let seq = self.next_sequence_id;
+                    self.next_sequence_id = self.next_sequence_id.wrapping_add(2);
+                    self.state = HandshakeState::WaitingRsaPublicKey;
+
+                    Ok(HandshakeAction::WritePacket { sequence_id: seq })
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -632,5 +788,49 @@ mod tests {
     #[test]
     fn handshake_fixed_fields_has_alignment_of_1() {
         assert_eq!(std::mem::align_of::<HandshakeFixedFields>(), 1);
+    }
+
+    #[test]
+    #[allow(clippy::unwrap_used)]
+    fn rsa_encrypt_password_xors_and_encrypts() {
+        use rsa::pkcs8::{EncodePublicKey, LineEnding};
+        use rsa::RsaPrivateKey;
+
+        let mut rng = rsa::rand_core::OsRng;
+        let private_key = RsaPrivateKey::new(&mut rng, 2048).unwrap();
+        let public_key = rsa::RsaPublicKey::from(&private_key);
+        let pem = public_key.to_public_key_pem(LineEnding::LF).unwrap();
+
+        let password = "test_password";
+        let scramble = b"01234567890123456789";
+
+        let encrypted = super::rsa_encrypt_password(password, scramble, &pem).unwrap();
+
+        // Decrypt and verify
+        use rsa::Oaep;
+        let padding = Oaep::new::<sha1::Sha1>();
+        let decrypted = private_key.decrypt(padding, &encrypted).unwrap();
+
+        // Decrypted should be XOR(password + '\0', scramble)
+        let mut expected = password.as_bytes().to_vec();
+        expected.push(0);
+        for (byte, key) in expected.iter_mut().zip(scramble.iter().cycle()) {
+            *byte ^= key;
+        }
+        assert_eq!(decrypted, expected);
+    }
+
+    #[test]
+    fn fast_auth_result_parsing() {
+        assert_eq!(
+            read_caching_sha2_password_fast_auth_result(&[0x03]).unwrap(),
+            CachingSha2PasswordFastAuthResult::Success,
+        );
+        assert_eq!(
+            read_caching_sha2_password_fast_auth_result(&[0x04]).unwrap(),
+            CachingSha2PasswordFastAuthResult::FullAuthRequired,
+        );
+        assert!(read_caching_sha2_password_fast_auth_result(&[0x05]).is_err());
+        assert!(read_caching_sha2_password_fast_auth_result(&[]).is_err());
     }
 }
