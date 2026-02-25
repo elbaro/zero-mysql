@@ -221,13 +221,13 @@ pub fn derive_ref_from_row(input: TokenStream) -> TokenStream {
                     "RefFromRow only supports structs with named fields",
                 )
                 .to_compile_error()
-                .into()
+                .into();
             }
         },
         _ => {
             return syn::Error::new(input.ident.span(), "RefFromRow only supports structs")
                 .to_compile_error()
-                .into()
+                .into();
         }
     };
 
