@@ -89,6 +89,52 @@ pub use zerocopy::little_endian::{
 /// 3. Struct has `#[repr(C, packed)]` layout
 ///
 /// The derive macro generates zerocopy trait implementations automatically.
+///
+/// # Compile-fail tests
+///
+/// Missing `#[repr(C, packed)]`:
+/// ```compile_fail
+/// use zero_mysql::ref_row::I32LE;
+/// use zero_mysql_derive::RefFromRow;
+///
+/// #[derive(RefFromRow)]
+/// struct Invalid {
+///     value: I32LE,
+/// }
+/// ```
+///
+/// Native integer types (must use little-endian wrappers):
+/// ```compile_fail
+/// use zero_mysql_derive::RefFromRow;
+///
+/// #[derive(RefFromRow)]
+/// #[repr(C, packed)]
+/// struct Invalid {
+///     value: i64,
+/// }
+/// ```
+///
+/// `String` fields are not allowed:
+/// ```compile_fail
+/// use zero_mysql_derive::RefFromRow;
+///
+/// #[derive(RefFromRow)]
+/// #[repr(C, packed)]
+/// struct Invalid {
+///     name: String,
+/// }
+/// ```
+///
+/// `Vec` fields are not allowed:
+/// ```compile_fail
+/// use zero_mysql_derive::RefFromRow;
+///
+/// #[derive(RefFromRow)]
+/// #[repr(C, packed)]
+/// struct Invalid {
+///     data: Vec<u8>,
+/// }
+/// ```
 pub trait RefFromRow<'buf>: Sized {
     /// Decode a row as a zero-copy reference.
     ///
