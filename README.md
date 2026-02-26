@@ -1,4 +1,4 @@
- zero-mysql
+# zero-mysql
 
 A high-performance MySQL client library for Rust.
 
