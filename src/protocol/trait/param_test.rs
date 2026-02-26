@@ -287,7 +287,7 @@ fn test_params_empty_slice() {
 
     let mut null_bitmap = Vec::new();
     Params::encode_null_bitmap(&values, &mut null_bitmap);
-    assert_eq!(null_bitmap, vec![]);
+    assert_eq!(null_bitmap, Vec::<u8>::new());
 
     let mut types = Vec::new();
     Params::encode_types(&values, &mut types);
