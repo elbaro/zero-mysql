@@ -10,7 +10,7 @@ use std::mem::MaybeUninit;
 pub const fn cold_path() {}
 
 /// Hints to the compiler that the condition is likely to be true.
-#[allow(dead_code)]
+#[expect(dead_code)]
 #[inline(always)]
 pub const fn likely(b: bool) -> bool {
     if !b {
@@ -42,9 +42,9 @@ pub fn read_uninit_exact<R: Read>(
     reader: &mut R,
     buf: &mut [MaybeUninit<u8>],
 ) -> std::io::Result<()> {
+    let buf_ptr = buf.as_mut_ptr() as *mut u8;
     // SAFETY: MaybeUninit<u8> has the same layout as u8.
     // We rely on the assumption that `Read::read_exact` only writes to the buffer.
-    let buf_ptr = buf.as_mut_ptr() as *mut u8;
     let buf_slice = unsafe { std::slice::from_raw_parts_mut(buf_ptr, buf.len()) };
 
     reader.read_exact(buf_slice)
