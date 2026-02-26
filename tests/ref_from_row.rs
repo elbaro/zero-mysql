@@ -1,7 +1,7 @@
 //! Tests for RefFromRow zero-copy row decoding.
 
-use zerocopy::{FromBytes, Immutable, KnownLayout};
 use zero_mysql::ref_row::{FixedWireSize, I16LE, I32LE, I64LE, U16LE, U32LE, U64LE};
+use zerocopy::{FromBytes, Immutable, KnownLayout};
 
 /// Test that FixedWireSize is implemented for all expected types.
 #[test]

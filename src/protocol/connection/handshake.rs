@@ -265,7 +265,9 @@ fn rsa_encrypt_password(password: &str, scramble: &[u8], pem: &str) -> Result<Ve
         .map_err(|e| Error::LibraryBug(eyre!("failed to parse RSA public key: {}", e)))?;
 
     if scramble.is_empty() {
-        return Err(Error::LibraryBug(eyre!("empty scramble in rsa_encrypt_password")));
+        return Err(Error::LibraryBug(eyre!(
+            "empty scramble in rsa_encrypt_password"
+        )));
     }
 
     // XOR (password + '\0') with scramble repeated cyclically
@@ -513,14 +515,13 @@ impl<'a> Handshake<'a> {
                             }
                         };
 
-                        write_auth_switch_response(
-                            buffer_set.new_write_buffer(),
-                            &auth_response,
-                        );
+                        write_auth_switch_response(buffer_set.new_write_buffer(), &auth_response);
 
                         let seq = self.next_sequence_id;
                         self.next_sequence_id = self.next_sequence_id.wrapping_add(2);
-                        self.state = HandshakeState::WaitingFinalAuthResult { caching_sha2: is_caching_sha2 };
+                        self.state = HandshakeState::WaitingFinalAuthResult {
+                            caching_sha2: is_caching_sha2,
+                        };
 
                         Ok(HandshakeAction::WritePacket { sequence_id: seq })
                     }
@@ -549,9 +550,7 @@ impl<'a> Handshake<'a> {
                         // ERR packet - authentication failed
                         Err(ErrPayloadBytes(payload).into())
                     }
-                    0x01 if *caching_sha2 => {
-                        self.handle_auth_more_data(buffer_set)
-                    }
+                    0x01 if *caching_sha2 => self.handle_auth_more_data(buffer_set),
                     header => Err(Error::LibraryBug(eyre!(
                         "unexpected packet header 0x{:02X} while waiting for final auth result",
                         header
@@ -572,9 +571,7 @@ impl<'a> Handshake<'a> {
                         self.state = HandshakeState::Connected;
                         Ok(HandshakeAction::Finished)
                     }
-                    0xFF => {
-                        Err(ErrPayloadBytes(payload).into())
-                    }
+                    0xFF => Err(ErrPayloadBytes(payload).into()),
                     header => Err(Error::LibraryBug(eyre!(
                         "unexpected packet header 0x{:02X} while waiting for caching_sha2 OK",
                         header
@@ -605,22 +602,22 @@ impl<'a> Handshake<'a> {
                     Error::LibraryBug(eyre!("RSA public key is not valid UTF-8: {}", e))
                 })?;
 
-                let handshake = self.initial_handshake.as_ref().ok_or_else(|| {
-                    Error::LibraryBug(eyre!("initial_handshake not set"))
-                })?;
+                let handshake = self
+                    .initial_handshake
+                    .as_ref()
+                    .ok_or_else(|| Error::LibraryBug(eyre!("initial_handshake not set")))?;
 
-                let encrypted = rsa_encrypt_password(
-                    &self.opts.password,
-                    &handshake.auth_plugin_data,
-                    pem,
-                )?;
+                let encrypted =
+                    rsa_encrypt_password(&self.opts.password, &handshake.auth_plugin_data, pem)?;
 
                 let out = buffer_set.new_write_buffer();
                 out.extend_from_slice(&encrypted);
 
                 let seq = self.next_sequence_id;
                 self.next_sequence_id = self.next_sequence_id.wrapping_add(2);
-                self.state = HandshakeState::WaitingFinalAuthResult { caching_sha2: false };
+                self.state = HandshakeState::WaitingFinalAuthResult {
+                    caching_sha2: false,
+                };
 
                 Ok(HandshakeAction::WritePacket { sequence_id: seq })
             }
@@ -750,9 +747,9 @@ impl<'a> Handshake<'a> {
                 Ok(HandshakeAction::ReadPacket(&mut buffer_set.read_buffer))
             }
             CachingSha2PasswordFastAuthResult::FullAuthRequired => {
-                let capability_flags = self.capability_flags.ok_or_else(|| {
-                    Error::LibraryBug(eyre!("capability_flags not set"))
-                })?;
+                let capability_flags = self
+                    .capability_flags
+                    .ok_or_else(|| Error::LibraryBug(eyre!("capability_flags not set")))?;
 
                 if capability_flags.contains(CapabilityFlags::CLIENT_SSL) {
                     // TLS is active — send cleartext password (null-terminated)
@@ -762,7 +759,9 @@ impl<'a> Handshake<'a> {
 
                     let seq = self.next_sequence_id;
                     self.next_sequence_id = self.next_sequence_id.wrapping_add(2);
-                    self.state = HandshakeState::WaitingFinalAuthResult { caching_sha2: false };
+                    self.state = HandshakeState::WaitingFinalAuthResult {
+                        caching_sha2: false,
+                    };
 
                     Ok(HandshakeAction::WritePacket { sequence_id: seq })
                 } else {
@@ -793,8 +792,8 @@ mod tests {
     #[test]
     #[allow(clippy::unwrap_used)]
     fn rsa_encrypt_password_xors_and_encrypts() {
-        use rsa::pkcs8::{EncodePublicKey, LineEnding};
         use rsa::RsaPrivateKey;
+        use rsa::pkcs8::{EncodePublicKey, LineEnding};
 
         let mut rng = rsa::rand_core::OsRng;
         let private_key = RsaPrivateKey::new(&mut rng, 2048).unwrap();

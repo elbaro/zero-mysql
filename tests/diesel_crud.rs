@@ -57,8 +57,7 @@ fn test_execute_returning_count() {
     )
     .unwrap();
 
-    let count = conn
-        .batch_execute("INSERT INTO diesel_test_count (value) VALUES (1), (2), (3)");
+    let count = conn.batch_execute("INSERT INTO diesel_test_count (value) VALUES (1), (2), (3)");
     assert!(count.is_ok());
 
     #[derive(QueryableByName, Debug)]
@@ -67,10 +66,9 @@ fn test_execute_returning_count() {
         cnt: i64,
     }
 
-    let results: Vec<CountRow> =
-        sql_query("SELECT COUNT(*) as cnt FROM diesel_test_count")
-            .load(&mut conn)
-            .unwrap();
+    let results: Vec<CountRow> = sql_query("SELECT COUNT(*) as cnt FROM diesel_test_count")
+        .load(&mut conn)
+        .unwrap();
     assert_eq!(results[0].cnt, 3);
 
     conn.batch_execute("DROP TABLE diesel_test_count").unwrap();
@@ -99,10 +97,9 @@ fn test_transaction() {
         cnt: i64,
     }
 
-    let results: Vec<CountRow> =
-        sql_query("SELECT COUNT(*) as cnt FROM diesel_test_tx")
-            .load(&mut conn)
-            .unwrap();
+    let results: Vec<CountRow> = sql_query("SELECT COUNT(*) as cnt FROM diesel_test_tx")
+        .load(&mut conn)
+        .unwrap();
     assert_eq!(results[0].cnt, 1);
 
     // Failed transaction (should rollback)
@@ -112,10 +109,9 @@ fn test_transaction() {
     });
     assert!(result.is_err());
 
-    let results: Vec<CountRow> =
-        sql_query("SELECT COUNT(*) as cnt FROM diesel_test_tx")
-            .load(&mut conn)
-            .unwrap();
+    let results: Vec<CountRow> = sql_query("SELECT COUNT(*) as cnt FROM diesel_test_tx")
+        .load(&mut conn)
+        .unwrap();
     assert_eq!(results[0].cnt, 1);
 
     conn.batch_execute("DROP TABLE diesel_test_tx").unwrap();

@@ -9,14 +9,14 @@ use crate::constant::{ColumnFlags, ColumnType};
 use crate::protocol::BinaryRowPayload;
 use crate::protocol::command::ColumnDefinition;
 use crate::protocol::primitive::read_string_lenenc;
-use crate::protocol::r#trait::BinaryResultSetHandler;
 use crate::protocol::response::OkPayloadBytes;
+use crate::protocol::r#trait::BinaryResultSetHandler;
 
 use super::row::ZeroMysqlRow;
 
 pub struct ColumnInfo {
     pub name: String,
-    pub tpe: MysqlType,
+    pub column_type: MysqlType,
 }
 
 pub struct Cursor {
@@ -176,8 +176,7 @@ fn wire_datetime_to_bytes(wire: &[u8], col_type: ColumnType) -> Vec<u8> {
                 12 => {
                     let neg = data[0] != 0;
                     let days = u32::from_le_bytes([data[1], data[2], data[3], data[4]]);
-                    let usec =
-                        u32::from_le_bytes([data[8], data[9], data[10], data[11]]) as u64;
+                    let usec = u32::from_le_bytes([data[8], data[9], data[10], data[11]]) as u64;
                     (
                         neg,
                         days * 24 + data[5] as u32,
@@ -234,7 +233,7 @@ fn wire_datetime_to_bytes(wire: &[u8], col_type: ColumnType) -> Vec<u8> {
                 ),
                 _ => (0, 0, 0, 0, 0, 0, 0),
             };
-            let tpe = match col_type {
+            let timestamp_type = match col_type {
                 ColumnType::MYSQL_TYPE_TIMESTAMP | ColumnType::MYSQL_TYPE_TIMESTAMP2 => {
                     MysqlTimestampType::MYSQL_TIMESTAMP_DATETIME
                 }
@@ -249,7 +248,7 @@ fn wire_datetime_to_bytes(wire: &[u8], col_type: ColumnType) -> Vec<u8> {
                 second,
                 usec as libc::c_ulong,
                 false,
-                tpe,
+                timestamp_type,
                 0,
             )
         }
@@ -287,7 +286,7 @@ impl BinaryResultSetHandler for CollectRawHandler {
                 let flags = c.tail.flags()?;
                 Ok(ColumnInfo {
                     name: String::from_utf8_lossy(c.name_alias).into_owned(),
-                    tpe: to_mysql_type(col_type, flags),
+                    column_type: to_mysql_type(col_type, flags),
                 })
             })
             .collect::<crate::error::Result<Vec<_>>>()?;

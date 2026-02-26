@@ -67,7 +67,7 @@ impl<'a> Field<'a, Mysql> for ZeroMysqlField<'a> {
 
     fn value(&self) -> Option<<Mysql as Backend>::RawValue<'_>> {
         self.value
-            .map(|raw| MysqlValue::new(raw, self.col_info.tpe))
+            .map(|raw| MysqlValue::new(raw, self.col_info.column_type))
     }
 
     fn is_null(&self) -> bool {
