@@ -59,8 +59,8 @@ impl Stream {
     pub async fn upgrade_to_tls(self, host: &str) -> std::io::Result<Self> {
         match self.inner {
             StreamInner::Tcp(tcp_stream) => {
-                let native_connector = compio::native_tls::TlsConnector::new()
-                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+                let native_connector =
+                    compio::native_tls::TlsConnector::new().map_err(std::io::Error::other)?;
                 let connector = compio::tls::TlsConnector::from(native_connector);
                 let tls_stream = connector.connect(host, tcp_stream).await?;
                 Ok(Self {

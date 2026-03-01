@@ -47,11 +47,10 @@ impl Stream {
             }
         };
 
-        let connector = native_tls::TlsConnector::new()
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        let connector = native_tls::TlsConnector::new().map_err(std::io::Error::other)?;
         let tls_stream = connector
             .connect(host, tcp)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+            .map_err(std::io::Error::other)?;
 
         Ok(Self::Tls(BufReader::new(tls_stream)))
     }
