@@ -59,6 +59,10 @@ jobs:
           MYSQL_PASSWORD: "1234"
           MYSQL_DATABASE: test
           MYSQL_ALLOW_EMPTY_ROOT_PASSWORD: "yes"
+          MARIADB_USER: test
+          MARIADB_PASSWORD: "1234"
+          MARIADB_DATABASE: test
+          MARIADB_ALLOW_EMPTY_ROOT_PASSWORD: "yes"
         ports:
           - 3306:3306
         options: >-
