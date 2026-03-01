@@ -52,7 +52,7 @@ impl TestTable {
 }
 
 #[compio::test]
-async fn test_transaction_explicit_commit() {
+async fn transaction_explicit_commit() {
     let mut conn = get_conn().await;
     let table = TestTable::new(&mut conn).await;
 
@@ -69,7 +69,7 @@ async fn test_transaction_explicit_commit() {
 }
 
 #[compio::test]
-async fn test_transaction_explicit_rollback() {
+async fn transaction_explicit_rollback() {
     let mut conn = get_conn().await;
     let table = TestTable::new(&mut conn).await;
 
@@ -86,7 +86,7 @@ async fn test_transaction_explicit_rollback() {
 }
 
 #[compio::test]
-async fn test_transaction_implicit_commit_on_ok() {
+async fn transaction_implicit_commit_on_ok() {
     let mut conn = get_conn().await;
     let table = TestTable::new(&mut conn).await;
 
@@ -103,7 +103,7 @@ async fn test_transaction_implicit_commit_on_ok() {
 }
 
 #[compio::test]
-async fn test_transaction_implicit_rollback_on_err() {
+async fn transaction_implicit_rollback_on_err() {
     let mut conn = get_conn().await;
     let table = TestTable::new(&mut conn).await;
 
@@ -121,7 +121,7 @@ async fn test_transaction_implicit_rollback_on_err() {
 }
 
 #[compio::test]
-async fn test_transaction_implicit_commit_with_return_value() {
+async fn transaction_implicit_commit_with_return_value() {
     let mut conn = get_conn().await;
     let table = TestTable::new(&mut conn).await;
 
@@ -140,7 +140,7 @@ async fn test_transaction_implicit_commit_with_return_value() {
 }
 
 #[compio::test]
-async fn test_transaction_implicit_commit_multiple_inserts() {
+async fn transaction_implicit_commit_multiple_inserts() {
     let mut conn = get_conn().await;
     let table = TestTable::new(&mut conn).await;
 
@@ -162,7 +162,7 @@ async fn test_transaction_implicit_commit_multiple_inserts() {
 }
 
 #[compio::test]
-async fn test_transaction_implicit_rollback_partial_work() {
+async fn transaction_implicit_rollback_partial_work() {
     let mut conn = get_conn().await;
     let table = TestTable::new(&mut conn).await;
 
@@ -182,7 +182,7 @@ async fn test_transaction_implicit_rollback_partial_work() {
 }
 
 #[compio::test]
-async fn test_transaction_connection_usable_after_implicit_commit() {
+async fn transaction_connection_usable_after_implicit_commit() {
     let mut conn = get_conn().await;
     let table = TestTable::new(&mut conn).await;
 
@@ -207,7 +207,7 @@ async fn test_transaction_connection_usable_after_implicit_commit() {
 }
 
 #[compio::test]
-async fn test_transaction_connection_usable_after_implicit_rollback() {
+async fn transaction_connection_usable_after_implicit_rollback() {
     let mut conn = get_conn().await;
     let table = TestTable::new(&mut conn).await;
 
@@ -232,7 +232,7 @@ async fn test_transaction_connection_usable_after_implicit_rollback() {
 }
 
 #[compio::test]
-async fn test_transaction_not_in_transaction_after_implicit_commit() {
+async fn transaction_not_in_transaction_after_implicit_commit() {
     let mut conn = get_conn().await;
 
     conn.transaction(async |conn, _tx| {
@@ -246,7 +246,7 @@ async fn test_transaction_not_in_transaction_after_implicit_commit() {
 }
 
 #[compio::test]
-async fn test_transaction_not_in_transaction_after_implicit_rollback() {
+async fn transaction_not_in_transaction_after_implicit_rollback() {
     let mut conn = get_conn().await;
 
     let _: Result<(), Error> = conn

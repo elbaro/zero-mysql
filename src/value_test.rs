@@ -19,7 +19,7 @@ fn make_col_tail(column_type: ColumnType, flags: ColumnFlags) -> ColumnDefinitio
 }
 
 #[test]
-fn test_value_parse_signed_integers() {
+fn value_parse_signed_integers() {
     // TINYINT (-42)
     let col = make_col_tail(ColumnType::MYSQL_TYPE_TINY, ColumnFlags::empty());
     let data = [214u8]; // -42 as i8
@@ -43,7 +43,7 @@ fn test_value_parse_signed_integers() {
 }
 
 #[test]
-fn test_value_parse_unsigned_integers() {
+fn value_parse_unsigned_integers() {
     // TINYINT UNSIGNED (200)
     let col = make_col_tail(ColumnType::MYSQL_TYPE_TINY, ColumnFlags::UNSIGNED_FLAG);
     let data = [200_u8];
@@ -60,7 +60,7 @@ fn test_value_parse_unsigned_integers() {
 }
 
 #[test]
-fn test_value_parse_float_double() {
+fn value_parse_float_double() {
     // FLOAT (3.14)
     let col = make_col_tail(ColumnType::MYSQL_TYPE_FLOAT, ColumnFlags::empty());
     let data = 3.14f32.to_le_bytes();
@@ -85,7 +85,7 @@ fn test_value_parse_float_double() {
 }
 
 #[test]
-fn test_value_parse_datetime() {
+fn value_parse_datetime() {
     let col = make_col_tail(ColumnType::MYSQL_TYPE_DATETIME, ColumnFlags::empty());
 
     // Datetime0 (0000-00-00 00:00:00)
@@ -132,7 +132,7 @@ fn test_value_parse_datetime() {
 }
 
 #[test]
-fn test_value_parse_date() {
+fn value_parse_date() {
     let col = make_col_tail(ColumnType::MYSQL_TYPE_DATE, ColumnFlags::empty());
 
     // Date0 (0000-00-00)
@@ -158,7 +158,7 @@ fn test_value_parse_date() {
 }
 
 #[test]
-fn test_value_parse_time() {
+fn value_parse_time() {
     let col = make_col_tail(ColumnType::MYSQL_TYPE_TIME, ColumnFlags::empty());
 
     // Time0 (00:00:00)
@@ -176,7 +176,7 @@ fn test_value_parse_time() {
     data.push(45); // second
     let (value, rest) = parse_value::<Value>(&col, false, &data).unwrap();
     if let Value::Time8(time) = value {
-        assert_eq!(time.is_negative(), true);
+        assert!(time.is_negative());
         assert_eq!(time.days(), 1);
         assert_eq!(time.hour, 12);
         assert_eq!(time.minute, 30);
@@ -188,7 +188,7 @@ fn test_value_parse_time() {
 }
 
 #[test]
-fn test_value_parse_string() {
+fn value_parse_string() {
     let col = make_col_tail(ColumnType::MYSQL_TYPE_VAR_STRING, ColumnFlags::empty());
 
     // Length-encoded string "Hello"
@@ -204,7 +204,7 @@ fn test_value_parse_string() {
 }
 
 #[test]
-fn test_value_parse_blob() {
+fn value_parse_blob() {
     let col = make_col_tail(ColumnType::MYSQL_TYPE_BLOB, ColumnFlags::empty());
 
     // Length-encoded binary data
@@ -220,7 +220,7 @@ fn test_value_parse_blob() {
 }
 
 #[test]
-fn test_value_parse_null() {
+fn value_parse_null() {
     let col = make_col_tail(ColumnType::MYSQL_TYPE_NULL, ColumnFlags::empty());
 
     let data = []; // NULL takes no bytes
@@ -230,7 +230,7 @@ fn test_value_parse_null() {
 }
 
 #[test]
-fn test_value_parse_with_remaining_data() {
+fn value_parse_with_remaining_data() {
     let col = make_col_tail(ColumnType::MYSQL_TYPE_TINY, ColumnFlags::UNSIGNED_FLAG);
 
     let data = [42u8, 0xFF, 0xFF]; // 42 followed by extra data
@@ -240,7 +240,7 @@ fn test_value_parse_with_remaining_data() {
 }
 
 #[test]
-fn test_null_bitmap_result_set() {
+fn null_bitmap_result_set() {
     // Example bitmap for 8 columns with offset=2
     // Bitmap bytes: [0b00000100, 0b00010000]
     // With offset=2, this means:
@@ -261,7 +261,7 @@ fn test_null_bitmap_result_set() {
 }
 
 #[test]
-fn test_null_bitmap_parameters() {
+fn null_bitmap_parameters() {
     // Example bitmap for parameters with offset=0
     // Bitmap: [0b00000101]
     // - Bit 0 (param 0) = 1 -> NULL

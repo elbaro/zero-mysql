@@ -219,7 +219,7 @@ fn error_invalid_usize_value() {
 #[test]
 fn error_negative_usize_value() {
     let result = Opts::try_from("mysql://localhost?pool_max_idle_conn=-1");
-    assert!(result.is_err());
+    result.unwrap_err();
 }
 
 #[test]

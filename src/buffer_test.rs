@@ -1,7 +1,7 @@
 use crate::BufferSet;
 
 #[test]
-fn test_buffer_set_new() {
+fn buffer_set_new() {
     let buffers = BufferSet::new();
     assert!(buffers.initial_handshake.is_empty());
     assert!(buffers.read_buffer.is_empty());
@@ -9,13 +9,13 @@ fn test_buffer_set_new() {
 }
 
 #[test]
-fn test_buffer_set_default() {
+fn buffer_set_default() {
     let buffers = BufferSet::default();
     assert!(buffers.initial_handshake.is_empty());
 }
 
 #[test]
-fn test_buffer_set_with_initial_handshake() {
+fn buffer_set_with_initial_handshake() {
     let handshake = vec![0x0a, 0x35, 0x2e, 0x37];
     let buffers = BufferSet::with_initial_handshake(handshake.clone());
     assert_eq!(buffers.initial_handshake, handshake);
@@ -23,7 +23,7 @@ fn test_buffer_set_with_initial_handshake() {
 }
 
 #[test]
-fn test_new_write_buffer() {
+fn new_write_buffer() {
     let mut buffers = BufferSet::new();
     let buf = buffers.new_write_buffer();
     // Should have 4 bytes reserved for header
@@ -32,7 +32,7 @@ fn test_new_write_buffer() {
 }
 
 #[test]
-fn test_write_buffer_mut() {
+fn write_buffer_mut() {
     let mut buffers = BufferSet::new();
     buffers.new_write_buffer().extend_from_slice(b"SELECT 1");
     // 4 header bytes + 8 payload bytes
@@ -41,7 +41,7 @@ fn test_write_buffer_mut() {
 }
 
 #[test]
-fn test_write_buffer() {
+fn write_buffer() {
     let mut buffers = BufferSet::new();
     buffers.new_write_buffer().extend_from_slice(b"test");
     let packet = buffers.write_buffer();
@@ -50,7 +50,7 @@ fn test_write_buffer() {
 }
 
 #[test]
-fn test_buffer_reuse() {
+fn buffer_reuse() {
     let mut buffers = BufferSet::new();
 
     // Write to buffers

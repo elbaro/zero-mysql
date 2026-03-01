@@ -8,7 +8,7 @@ use zero_mysql::tokio::Pool;
 const TEST_URL: &str = "mysql://test:1234@localhost:3306/test";
 
 #[tokio::test]
-async fn test_pool_basic() {
+async fn pool_basic() {
     let opts = Opts::try_from(TEST_URL).expect("parse opts");
     let pool = Arc::new(Pool::new(opts));
 
@@ -17,7 +17,7 @@ async fn test_pool_basic() {
 }
 
 #[tokio::test]
-async fn test_pool_connection_reuse() {
+async fn pool_connection_reuse() {
     let mut opts = Opts::try_from(TEST_URL).expect("parse opts");
     opts.pool_max_idle_conn = 1;
     opts.pool_reset_conn = false;
@@ -39,7 +39,7 @@ async fn test_pool_connection_reuse() {
 }
 
 #[tokio::test]
-async fn test_pool_max_idle_conn() {
+async fn pool_max_idle_conn() {
     let mut opts = Opts::try_from(TEST_URL).expect("parse opts");
     opts.pool_max_idle_conn = 2;
     opts.pool_reset_conn = false;
@@ -78,7 +78,7 @@ async fn test_pool_max_idle_conn() {
 }
 
 #[tokio::test]
-async fn test_pool_max_concurrency() {
+async fn pool_max_concurrency() {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use tokio::time::Duration;
 
@@ -132,7 +132,7 @@ async fn test_pool_max_concurrency() {
 }
 
 #[tokio::test]
-async fn test_pool_reset_conn() {
+async fn pool_reset_conn() {
     let mut opts = Opts::try_from(TEST_URL).expect("parse opts");
     opts.pool_max_idle_conn = 1;
     opts.pool_reset_conn = true;
@@ -209,7 +209,7 @@ async fn test_pool_reset_conn() {
 }
 
 #[tokio::test]
-async fn test_pool_concurrent_tasks() {
+async fn pool_concurrent_tasks() {
     let mut opts = Opts::try_from(TEST_URL).expect("parse opts");
     opts.pool_max_idle_conn = 5;
     opts.pool_reset_conn = false;

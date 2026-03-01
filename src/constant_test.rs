@@ -4,7 +4,7 @@ use crate::constant::{
 };
 
 #[test]
-fn test_capability_flags_classification() {
+fn capability_flags_classification() {
     // All 32 bits set (complete set of possible flags)
     const ALL_FLAGS: u32 = 0xFFFFFFFF;
 

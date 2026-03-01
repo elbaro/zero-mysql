@@ -45,7 +45,7 @@ impl TestTable {
 }
 
 #[test]
-fn test_transaction_explicit_commit() {
+fn transaction_explicit_commit() {
     let mut conn = get_conn();
     let table = TestTable::new(&mut conn);
 
@@ -60,7 +60,7 @@ fn test_transaction_explicit_commit() {
 }
 
 #[test]
-fn test_transaction_explicit_rollback() {
+fn transaction_explicit_rollback() {
     let mut conn = get_conn();
     let table = TestTable::new(&mut conn);
 
@@ -75,7 +75,7 @@ fn test_transaction_explicit_rollback() {
 }
 
 #[test]
-fn test_transaction_implicit_commit_on_ok() {
+fn transaction_implicit_commit_on_ok() {
     let mut conn = get_conn();
     let table = TestTable::new(&mut conn);
 
@@ -92,7 +92,7 @@ fn test_transaction_implicit_commit_on_ok() {
 }
 
 #[test]
-fn test_transaction_implicit_rollback_on_err() {
+fn transaction_implicit_rollback_on_err() {
     let mut conn = get_conn();
     let table = TestTable::new(&mut conn);
 
@@ -109,7 +109,7 @@ fn test_transaction_implicit_rollback_on_err() {
 }
 
 #[test]
-fn test_transaction_implicit_commit_with_return_value() {
+fn transaction_implicit_commit_with_return_value() {
     let mut conn = get_conn();
     let table = TestTable::new(&mut conn);
 
@@ -127,7 +127,7 @@ fn test_transaction_implicit_commit_with_return_value() {
 }
 
 #[test]
-fn test_transaction_implicit_commit_multiple_inserts() {
+fn transaction_implicit_commit_multiple_inserts() {
     let mut conn = get_conn();
     let table = TestTable::new(&mut conn);
 
@@ -147,7 +147,7 @@ fn test_transaction_implicit_commit_multiple_inserts() {
 }
 
 #[test]
-fn test_transaction_implicit_rollback_partial_work() {
+fn transaction_implicit_rollback_partial_work() {
     let mut conn = get_conn();
     let table = TestTable::new(&mut conn);
 
@@ -166,7 +166,7 @@ fn test_transaction_implicit_rollback_partial_work() {
 }
 
 #[test]
-fn test_transaction_connection_usable_after_implicit_commit() {
+fn transaction_connection_usable_after_implicit_commit() {
     let mut conn = get_conn();
     let table = TestTable::new(&mut conn);
 
@@ -189,7 +189,7 @@ fn test_transaction_connection_usable_after_implicit_commit() {
 }
 
 #[test]
-fn test_transaction_connection_usable_after_implicit_rollback() {
+fn transaction_connection_usable_after_implicit_rollback() {
     let mut conn = get_conn();
     let table = TestTable::new(&mut conn);
 
@@ -211,7 +211,7 @@ fn test_transaction_connection_usable_after_implicit_rollback() {
 }
 
 #[test]
-fn test_transaction_not_in_transaction_after_implicit_commit() {
+fn transaction_not_in_transaction_after_implicit_commit() {
     let mut conn = get_conn();
 
     conn.transaction(|conn, _tx| {
@@ -224,7 +224,7 @@ fn test_transaction_not_in_transaction_after_implicit_commit() {
 }
 
 #[test]
-fn test_transaction_not_in_transaction_after_implicit_rollback() {
+fn transaction_not_in_transaction_after_implicit_rollback() {
     let mut conn = get_conn();
 
     let _: Result<(), Error> =

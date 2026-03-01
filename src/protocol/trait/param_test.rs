@@ -2,7 +2,7 @@ use crate::constant::ColumnType;
 use crate::protocol::r#trait::param::{Params, TypedParam};
 
 #[test]
-fn test_param_i32() {
+fn param_i32() {
     let param: i32 = -42;
     let mut types = Vec::new();
     let mut values = Vec::new();
@@ -16,7 +16,7 @@ fn test_param_i32() {
 }
 
 #[test]
-fn test_param_u64() {
+fn param_u64() {
     let param: u64 = 12345678901234;
     let mut types = Vec::new();
     let mut values = Vec::new();
@@ -29,7 +29,7 @@ fn test_param_u64() {
 }
 
 #[test]
-fn test_param_f64() {
+fn param_f64() {
     let param: f64 = 3.14159;
     let mut types = Vec::new();
     let mut values = Vec::new();
@@ -42,7 +42,7 @@ fn test_param_f64() {
 }
 
 #[test]
-fn test_param_str() {
+fn param_str() {
     let param = "Hello, MySQL!";
     let mut types = Vec::new();
     let mut values = Vec::new();
@@ -56,7 +56,7 @@ fn test_param_str() {
 }
 
 #[test]
-fn test_param_string() {
+fn param_string() {
     let param = String::from("Rust");
     let mut types = Vec::new();
     let mut values = Vec::new();
@@ -70,7 +70,7 @@ fn test_param_string() {
 }
 
 #[test]
-fn test_param_bytes() {
+fn param_bytes() {
     let param: &[u8] = &[0xDE, 0xAD, 0xBE, 0xEF];
     let mut types = Vec::new();
     let mut values = Vec::new();
@@ -84,7 +84,7 @@ fn test_param_bytes() {
 }
 
 #[test]
-fn test_param_vec_u8() {
+fn param_vec_u8() {
     let param = vec![1u8, 2, 3, 4, 5];
     let mut types = Vec::new();
     let mut values = Vec::new();
@@ -98,7 +98,7 @@ fn test_param_vec_u8() {
 }
 
 #[test]
-fn test_param_option_some() {
+fn param_option_some() {
     let param = Some(42i32);
     let mut types = Vec::new();
     let mut values = Vec::new();
@@ -112,7 +112,7 @@ fn test_param_option_some() {
 }
 
 #[test]
-fn test_param_option_none() {
+fn param_option_none() {
     let param: Option<i32> = None;
     let mut types = Vec::new();
     let mut values = Vec::new();
@@ -126,7 +126,7 @@ fn test_param_option_none() {
 }
 
 #[test]
-fn test_param_option_string() {
+fn param_option_string() {
     let param = Some("test".to_string());
     let mut types = Vec::new();
     let mut values = Vec::new();
@@ -144,7 +144,7 @@ fn test_param_option_string() {
 // ============================================================================
 
 #[test]
-fn test_params_tuple() {
+fn params_tuple() {
     let params = (42i32, "hello", 3.14f64);
     assert_eq!(Params::len(&params), 3);
 
@@ -162,7 +162,7 @@ fn test_params_tuple() {
 }
 
 #[test]
-fn test_params_tuple_with_option() {
+fn params_tuple_with_option() {
     let params = (Some(42i32), None::<String>, Some("test"));
     assert_eq!(Params::len(&params), 3);
 
@@ -176,7 +176,7 @@ fn test_params_tuple_with_option() {
 }
 
 #[test]
-fn test_params_mixed_types() {
+fn params_mixed_types() {
     let params = (
         1i8, 2i16, 3i32, 4i64, 5u8, 6u16, 7u32, 8u64, 1.5f32, 2.5f64, "hello",
     );
@@ -192,7 +192,7 @@ fn test_params_mixed_types() {
 }
 
 #[test]
-fn test_params_string_variants() {
+fn params_string_variants() {
     let s1 = "hello";
     let s2 = String::from("world");
     let s3 = &String::from("test");
@@ -206,7 +206,7 @@ fn test_params_string_variants() {
 }
 
 #[test]
-fn test_params_byte_variants() {
+fn params_byte_variants() {
     let b1: &[u8] = &[1, 2, 3];
     let b2 = vec![4, 5, 6];
     let b3 = &vec![7, 8];
@@ -224,7 +224,7 @@ fn test_params_byte_variants() {
 // ============================================================================
 
 #[test]
-fn test_params_slice() {
+fn params_slice() {
     let values: &[i32] = &[1, 2, 3];
     assert_eq!(Params::len(&values), 3);
 
@@ -242,7 +242,7 @@ fn test_params_slice() {
 }
 
 #[test]
-fn test_params_vec() {
+fn params_vec() {
     let values: Vec<i32> = vec![1, 2, 3];
     assert_eq!(Params::len(&values), 3);
 
@@ -256,7 +256,7 @@ fn test_params_vec() {
 }
 
 #[test]
-fn test_params_vec_ref() {
+fn params_vec_ref() {
     let values: Vec<i32> = vec![1, 2, 3];
     let values_ref = &values;
     assert_eq!(Params::len(&values_ref), 3);
@@ -267,7 +267,7 @@ fn test_params_vec_ref() {
 }
 
 #[test]
-fn test_params_slice_with_options() {
+fn params_slice_with_options() {
     let values: &[Option<i32>] = &[Some(1), None, Some(3)];
     assert_eq!(Params::len(&values), 3);
 
@@ -281,7 +281,7 @@ fn test_params_slice_with_options() {
 }
 
 #[test]
-fn test_params_empty_slice() {
+fn params_empty_slice() {
     let values: &[i32] = &[];
     assert_eq!(Params::len(&values), 0);
 
@@ -295,7 +295,7 @@ fn test_params_empty_slice() {
 }
 
 #[test]
-fn test_params_slice_strings() {
+fn params_slice_strings() {
     let values: Vec<&str> = vec!["hello", "world"];
     assert_eq!(Params::len(&values), 2);
 

@@ -148,16 +148,6 @@ pub fn write_reset_statement(out: &mut Vec<u8>, statement_id: u32) {
     write_int_4(out, statement_id);
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn prepare_ok_has_alignment_of_1() {
-        assert_eq!(std::mem::align_of::<PrepareOk>(), 1);
-    }
-}
-
 // ============================================================================
 // State Machine API for exec_fold
 // ============================================================================
@@ -345,5 +335,15 @@ impl<'h, 'stmt, H: BinaryResultSetHandler> Exec<'h, 'stmt, H> {
                 Err(Error::LibraryBug(eyre!("Exec::step called after finished")))
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn prepare_ok_has_alignment_of_1() {
+        assert_eq!(std::mem::align_of::<PrepareOk>(), 1);
     }
 }

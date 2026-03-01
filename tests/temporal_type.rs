@@ -44,10 +44,10 @@ impl BinaryResultSetHandler for DatetimeTypeCollector {
         let data = row.values();
 
         // Parse the first column (id INT) to skip it
-        let (_id, rest): (i32, _) = parse_value(&cols[0].tail, null_bitmap.is_null(0), data)?;
+        let (_id, rest): (i32, _) = parse_value(cols[0].tail, null_bitmap.is_null(0), data)?;
 
         // Parse the datetime column (second column, index 1)
-        let (value, _): (Value<'_>, _) = parse_value(&cols[1].tail, null_bitmap.is_null(1), rest)?;
+        let (value, _): (Value<'_>, _) = parse_value(cols[1].tail, null_bitmap.is_null(1), rest)?;
 
         let dt_type = match value {
             Value::Datetime0 => DatetimeType::Datetime0,
@@ -66,7 +66,7 @@ impl BinaryResultSetHandler for DatetimeTypeCollector {
 }
 
 #[test]
-fn test_datetime6_with_different_inputs() {
+fn datetime6_with_different_inputs() {
     // Test how DATETIME(6) column handles ymd, ymd-hms, and ymd-hms-micro inputs
     let mut conn =
         zero_mysql::sync::Conn::new("mysql://test:1234@localhost:3306/test").expect("connect");
@@ -145,7 +145,7 @@ fn test_datetime6_with_different_inputs() {
 }
 
 #[test]
-fn test_datetime6_binary_protocol_insert() {
+fn datetime6_binary_protocol_insert() {
     // Test binary protocol INSERT with prepared statements
     let mut conn =
         zero_mysql::sync::Conn::new("mysql://test:1234@localhost:3306/test").expect("connect");

@@ -790,7 +790,7 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::unwrap_used)]
+    #[expect(clippy::unwrap_used)]
     fn rsa_encrypt_password_xors_and_encrypts() {
         use rsa::RsaPrivateKey;
         use rsa::pkcs8::{EncodePublicKey, LineEnding};
@@ -829,7 +829,7 @@ mod tests {
             read_caching_sha2_password_fast_auth_result(&[0x04]).unwrap(),
             CachingSha2PasswordFastAuthResult::FullAuthRequired,
         );
-        assert!(read_caching_sha2_password_fast_auth_result(&[0x05]).is_err());
-        assert!(read_caching_sha2_password_fast_auth_result(&[]).is_err());
+        read_caching_sha2_password_fast_auth_result(&[0x05]).unwrap_err();
+        read_caching_sha2_password_fast_auth_result(&[]).unwrap_err();
     }
 }

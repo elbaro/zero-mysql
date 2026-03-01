@@ -16,7 +16,7 @@ fn establish_connection() -> zero_mysql::diesel::Connection {
 }
 
 #[test]
-fn test_simple_query() {
+fn simple_query() {
     let mut conn = establish_connection();
     conn.batch_execute("DROP TABLE IF EXISTS diesel_test_simple")
         .unwrap();
@@ -48,7 +48,7 @@ fn test_simple_query() {
 }
 
 #[test]
-fn test_execute_returning_count() {
+fn execute_returning_count() {
     let mut conn = establish_connection();
     conn.batch_execute("DROP TABLE IF EXISTS diesel_test_count")
         .unwrap();
@@ -58,7 +58,7 @@ fn test_execute_returning_count() {
     .unwrap();
 
     let count = conn.batch_execute("INSERT INTO diesel_test_count (value) VALUES (1), (2), (3)");
-    assert!(count.is_ok());
+    count.unwrap();
 
     #[derive(QueryableByName, Debug)]
     struct CountRow {
@@ -75,7 +75,7 @@ fn test_execute_returning_count() {
 }
 
 #[test]
-fn test_transaction() {
+fn transaction() {
     let mut conn = establish_connection();
     conn.batch_execute("DROP TABLE IF EXISTS diesel_test_tx")
         .unwrap();

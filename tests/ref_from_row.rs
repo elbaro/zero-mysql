@@ -5,7 +5,7 @@ use zerocopy::{FromBytes, Immutable, KnownLayout};
 
 /// Test that FixedWireSize is implemented for all expected types.
 #[test]
-fn test_fixed_wire_size_primitives() {
+fn fixed_wire_size_primitives() {
     assert_eq!(<i8 as FixedWireSize>::WIRE_SIZE, 1);
     assert_eq!(<u8 as FixedWireSize>::WIRE_SIZE, 1);
     assert_eq!(<I16LE as FixedWireSize>::WIRE_SIZE, 2);
@@ -18,7 +18,7 @@ fn test_fixed_wire_size_primitives() {
 
 /// Test zerocopy parsing of little-endian integers.
 #[test]
-fn test_little_endian_parsing() {
+fn little_endian_parsing() {
     // i32 value 0x12345678 in little-endian
     let data: [u8; 4] = [0x78, 0x56, 0x34, 0x12];
     let value: &I32LE = FromBytes::ref_from_bytes(&data).unwrap();
@@ -32,7 +32,7 @@ fn test_little_endian_parsing() {
 
 /// Test a packed struct with multiple fields.
 #[test]
-fn test_packed_struct() {
+fn packed_struct() {
     #[derive(Debug, FromBytes, KnownLayout, Immutable)]
     #[repr(C, packed)]
     struct TestRow {
@@ -58,7 +58,7 @@ fn test_packed_struct() {
 
 /// Test that packed structs have correct alignment (1 byte).
 #[test]
-fn test_packed_alignment() {
+fn packed_alignment() {
     #[derive(Debug, FromBytes, KnownLayout, Immutable)]
     #[repr(C, packed)]
     struct MixedRow {
@@ -75,7 +75,7 @@ fn test_packed_alignment() {
 
 /// Test unsigned integers.
 #[test]
-fn test_unsigned_integers() {
+fn unsigned_integers() {
     #[derive(Debug, FromBytes, KnownLayout, Immutable)]
     #[repr(C, packed)]
     struct UnsignedRow {
@@ -97,7 +97,7 @@ fn test_unsigned_integers() {
 
 /// Test single-byte types (endian-agnostic).
 #[test]
-fn test_single_byte_types() {
+fn single_byte_types() {
     #[derive(Debug, FromBytes, KnownLayout, Immutable)]
     #[repr(C, packed)]
     struct ByteRow {
@@ -114,7 +114,7 @@ fn test_single_byte_types() {
 
 /// Test that zerocopy correctly rejects misaligned/wrong-sized data.
 #[test]
-fn test_size_validation() {
+fn size_validation() {
     #[derive(Debug, FromBytes, KnownLayout, Immutable)]
     #[repr(C, packed)]
     struct TestRow {
@@ -124,13 +124,13 @@ fn test_size_validation() {
 
     // Too small
     let data = [0u8; 11];
-    assert!(I32LE::ref_from_bytes(&data[..3]).is_err());
+    I32LE::ref_from_bytes(&data[..3]).unwrap_err();
 
     // Correct size
     let data = [0u8; 12];
-    assert!(<TestRow as FromBytes>::ref_from_bytes(&data).is_ok());
+    <TestRow as FromBytes>::ref_from_bytes(&data).unwrap();
 
     // Too large is OK - zerocopy allows prefix
     let data = [0u8; 20];
-    assert!(<TestRow as FromBytes>::ref_from_bytes(&data[..12]).is_ok());
+    <TestRow as FromBytes>::ref_from_bytes(&data[..12]).unwrap();
 }

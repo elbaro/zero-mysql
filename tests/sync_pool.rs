@@ -9,7 +9,7 @@ use zero_mysql::sync::Pool;
 const TEST_URL: &str = "mysql://test:1234@localhost:3306/test";
 
 #[test]
-fn test_pool_basic() {
+fn pool_basic() {
     let opts = Opts::try_from(TEST_URL).expect("parse opts");
     let pool = Arc::new(Pool::new(opts));
 
@@ -18,7 +18,7 @@ fn test_pool_basic() {
 }
 
 #[test]
-fn test_pool_connection_reuse() {
+fn pool_connection_reuse() {
     let mut opts = Opts::try_from(TEST_URL).expect("parse opts");
     opts.pool_max_idle_conn = 1;
     opts.pool_reset_conn = false;
@@ -37,7 +37,7 @@ fn test_pool_connection_reuse() {
 }
 
 #[test]
-fn test_pool_max_idle_conn() {
+fn pool_max_idle_conn() {
     let mut opts = Opts::try_from(TEST_URL).expect("parse opts");
     opts.pool_max_idle_conn = 2;
     opts.pool_reset_conn = false;
@@ -73,7 +73,7 @@ fn test_pool_max_idle_conn() {
 }
 
 #[test]
-fn test_pool_max_concurrency() {
+fn pool_max_concurrency() {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
 
@@ -127,7 +127,7 @@ fn test_pool_max_concurrency() {
 }
 
 #[test]
-fn test_pool_reset_conn() {
+fn pool_reset_conn() {
     let mut opts = Opts::try_from(TEST_URL).expect("parse opts");
     opts.pool_max_idle_conn = 1;
     opts.pool_reset_conn = true;
@@ -198,7 +198,7 @@ fn test_pool_reset_conn() {
 }
 
 #[test]
-fn test_pool_multi_threaded() {
+fn pool_multi_threaded() {
     let mut opts = Opts::try_from(TEST_URL).expect("parse opts");
     opts.pool_max_idle_conn = 5;
     opts.pool_reset_conn = false;
