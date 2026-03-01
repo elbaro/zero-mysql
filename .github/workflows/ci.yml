@@ -31,37 +31,46 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo clippy --all-targets --all-features -- -D warnings
 
-  test:
-    name: Test
+  test-db-backends:
+    name: Test / ${{ matrix.db-image }}
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - db-image: mariadb:10.11
+            health-cmd: "healthcheck.sh --connect --innodb_initialized"
+          - db-image: mariadb:11.4
+            health-cmd: "healthcheck.sh --connect --innodb_initialized"
+          - db-image: mariadb:12.3
+            health-cmd: "healthcheck.sh --connect --innodb_initialized"
+          - db-image: percona/percona-server:8.0
+            health-cmd: "mysqladmin ping -h 127.0.0.1 -u root"
+          - db-image: percona/percona-server:8.4
+            health-cmd: "mysqladmin ping -h 127.0.0.1 -u root"
+          - db-image: mysql:8.0
+            health-cmd: "mysqladmin ping -h 127.0.0.1 -u root"
+          - db-image: mysql:8.4
+            health-cmd: "mysqladmin ping -h 127.0.0.1 -u root"
     services:
       mysql:
-        image: mariadb:11
+        image: ${{ matrix.db-image }}
         env:
-          MARIADB_USER: test
-          MARIADB_PASSWORD: "1234"
-          MARIADB_DATABASE: test
-          MARIADB_ALLOW_EMPTY_ROOT_PASSWORD: "yes"
+          MYSQL_USER: test
+          MYSQL_PASSWORD: "1234"
+          MYSQL_DATABASE: test
+          MYSQL_ALLOW_EMPTY_ROOT_PASSWORD: "yes"
         ports:
           - 3306:3306
         options: >-
-          --health-cmd "healthcheck.sh --connect --innodb_initialized"
+          --health-cmd "${{ matrix.health-cmd }}"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
-        with:
-          components: llvm-tools-preview
       - uses: Swatinem/rust-cache@v2
-      - uses: taiki-e/install-action@cargo-llvm-cov
-      - name: Generate coverage report
-        run: cargo llvm-cov --all-features --lcov --output-path lcov.info
+      - name: Run tests
+        run: cargo test --all-features
         env:
           DATABASE_URL: mysql://test:1234@localhost/test
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4
-        with:
-          files: lcov.info
-          fail_ci_if_error: false
