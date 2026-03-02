@@ -4,6 +4,7 @@ use zerocopy::FromBytes;
 
 use crate::constant::{ColumnFlags, ColumnType};
 use crate::protocol::command::{ColumnDefinition, ColumnDefinitionBytes, ColumnDefinitionTail};
+use crate::test_macros::{check, check_eq, check_err};
 
 #[test]
 fn column_definition_tail_size() {
@@ -17,7 +18,7 @@ fn column_definition_tail_has_alignment_of_1() {
 }
 
 #[test]
-fn column_definition_tail_parsing() {
+fn column_definition_tail_parsing() -> crate::error::Result<()> {
     // Example data: charset=33 (utf8), length=255, type=253 (VARCHAR), flags=0, decimals=0, reserved=0
     let data: [u8; 12] = [
         0x21, 0x00, // charset = 33 (0x0021) LE
@@ -28,20 +29,21 @@ fn column_definition_tail_parsing() {
         0x00, 0x00, // reserved = 0 (0x0000) LE
     ];
 
-    let tail = ColumnDefinitionTail::ref_from_bytes(&data).expect("Failed to parse");
+    let tail = ColumnDefinitionTail::ref_from_bytes(&data)?;
 
-    assert_eq!(tail.charset(), 33);
-    assert_eq!(tail.column_length(), 255);
+    check_eq!(tail.charset(), 33);
+    check_eq!(tail.column_length(), 255);
 
-    let flags = tail.flags().expect("Failed to parse flags");
-    assert!(flags.is_empty());
+    let flags = tail.flags()?;
+    check!(flags.is_empty());
 
-    let col_type = tail.column_type().expect("Failed to parse column type");
-    assert_eq!(col_type, ColumnType::MYSQL_TYPE_VAR_STRING);
+    let col_type = tail.column_type()?;
+    check_eq!(col_type, ColumnType::MYSQL_TYPE_VAR_STRING);
+    Ok(())
 }
 
 #[test]
-fn column_definition_tail_with_flags() {
+fn column_definition_tail_with_flags() -> crate::error::Result<()> {
     // Example with NOT_NULL and UNSIGNED flags set
     let data: [u8; 12] = [
         0x21, 0x00, // charset = 33
@@ -52,19 +54,20 @@ fn column_definition_tail_with_flags() {
         0x00, 0x00, // reserved = 0
     ];
 
-    let tail = ColumnDefinitionTail::ref_from_bytes(&data).expect("Failed to parse");
+    let tail = ColumnDefinitionTail::ref_from_bytes(&data)?;
 
-    let flags = tail.flags().expect("Failed to parse flags");
-    assert!(flags.contains(ColumnFlags::NOT_NULL_FLAG));
-    assert!(flags.contains(ColumnFlags::UNSIGNED_FLAG));
-    assert!(!flags.contains(ColumnFlags::AUTO_INCREMENT_FLAG));
+    let flags = tail.flags()?;
+    check!(flags.contains(ColumnFlags::NOT_NULL_FLAG));
+    check!(flags.contains(ColumnFlags::UNSIGNED_FLAG));
+    check!(!flags.contains(ColumnFlags::AUTO_INCREMENT_FLAG));
 
-    let col_type = tail.column_type().expect("Failed to parse column type");
-    assert_eq!(col_type, ColumnType::MYSQL_TYPE_TINY);
+    let col_type = tail.column_type()?;
+    check_eq!(col_type, ColumnType::MYSQL_TYPE_TINY);
+    Ok(())
 }
 
 #[test]
-fn column_definition_tail_with_part_key_flag() {
+fn column_definition_tail_with_part_key_flag() -> crate::error::Result<()> {
     // Test with PART_KEY_FLAG (0x4000) - from actual MySQL response
     // This reproduces the bug: flags = 0x4203 (NOT_NULL | PRI_KEY | AUTO_INCREMENT | PART_KEY)
     let data: [u8; 12] = [
@@ -76,25 +79,24 @@ fn column_definition_tail_with_part_key_flag() {
         0x00, 0x00, // reserved = 0
     ];
 
-    let tail = ColumnDefinitionTail::ref_from_bytes(&data).expect("Failed to parse");
+    let tail = ColumnDefinitionTail::ref_from_bytes(&data)?;
 
-    assert_eq!(tail.charset(), 63);
-    assert_eq!(tail.column_length(), 11);
+    check_eq!(tail.charset(), 63);
+    check_eq!(tail.column_length(), 11);
 
-    let flags = tail
-        .flags()
-        .expect("Failed to parse flags with PART_KEY_FLAG");
-    assert!(flags.contains(ColumnFlags::NOT_NULL_FLAG));
-    assert!(flags.contains(ColumnFlags::PRI_KEY_FLAG));
-    assert!(flags.contains(ColumnFlags::AUTO_INCREMENT_FLAG));
-    assert!(flags.contains(ColumnFlags::PART_KEY_FLAG));
+    let flags = tail.flags()?;
+    check!(flags.contains(ColumnFlags::NOT_NULL_FLAG));
+    check!(flags.contains(ColumnFlags::PRI_KEY_FLAG));
+    check!(flags.contains(ColumnFlags::AUTO_INCREMENT_FLAG));
+    check!(flags.contains(ColumnFlags::PART_KEY_FLAG));
 
-    let col_type = tail.column_type().expect("Failed to parse column type");
-    assert_eq!(col_type, ColumnType::MYSQL_TYPE_LONG);
+    let col_type = tail.column_type()?;
+    check_eq!(col_type, ColumnType::MYSQL_TYPE_LONG);
+    Ok(())
 }
 
 #[test]
-fn column_definition_tail_invalid_column_type() {
+fn column_definition_tail_invalid_column_type() -> crate::error::Result<()> {
     // Example with invalid column type
     let data: [u8; 12] = [
         0x21, 0x00, // charset = 33
@@ -105,15 +107,16 @@ fn column_definition_tail_invalid_column_type() {
         0x00, 0x00, // reserved = 0
     ];
 
-    let tail = ColumnDefinitionTail::ref_from_bytes(&data).expect("Failed to parse");
+    let tail = ColumnDefinitionTail::ref_from_bytes(&data)?;
 
     // Should error on unknown column type
     let result = tail.column_type();
-    result.unwrap_err();
+    let _err = check_err!(result);
+    Ok(())
 }
 
 #[test]
-fn column_definition_bytes() {
+fn column_definition_bytes() -> crate::error::Result<()> {
     // Simulate a minimal column definition packet with just the tail
     // In reality, there would be variable-length strings before the tail
     let data: &[u8; 12] = &[
@@ -126,30 +129,32 @@ fn column_definition_bytes() {
     ];
 
     let col_bytes = ColumnDefinitionBytes(data);
-    let tail = col_bytes.tail().expect("Failed to parse tail");
+    let tail = col_bytes.tail()?;
 
-    assert_eq!(tail.charset(), 33);
-    assert_eq!(tail.column_length(), 255);
+    check_eq!(tail.charset(), 33);
+    check_eq!(tail.column_length(), 255);
 
-    let flags = tail.flags().expect("Failed to parse flags");
-    assert!(flags.contains(ColumnFlags::NOT_NULL_FLAG));
-    assert!(flags.contains(ColumnFlags::UNSIGNED_FLAG));
+    let flags = tail.flags()?;
+    check!(flags.contains(ColumnFlags::NOT_NULL_FLAG));
+    check!(flags.contains(ColumnFlags::UNSIGNED_FLAG));
 
-    let col_type = tail.column_type().expect("Failed to parse column type");
-    assert_eq!(col_type, ColumnType::MYSQL_TYPE_TINY);
+    let col_type = tail.column_type()?;
+    check_eq!(col_type, ColumnType::MYSQL_TYPE_TINY);
+    Ok(())
 }
 
 #[test]
-fn column_definition_bytes_too_short() {
+fn column_definition_bytes_too_short() -> crate::error::Result<()> {
     // Test with data that's too short
     let data: &[u8; 8] = &[0; 8];
     let col_bytes = ColumnDefinitionBytes(data);
     let result = col_bytes.tail();
-    result.unwrap_err();
+    let _err = check_err!(result);
+    Ok(())
 }
 
 #[test]
-fn column_definition_try_from() {
+fn column_definition_try_from() -> crate::error::Result<()> {
     // Build a complete column definition packet
     let mut packet = Vec::new();
 
@@ -192,26 +197,24 @@ fn column_definition_try_from() {
 
     // Parse using TryFrom
     let col_bytes = ColumnDefinitionBytes(&packet);
-    let col_def = ColumnDefinition::try_from(col_bytes).expect("Failed to parse");
+    let col_def = ColumnDefinition::try_from(col_bytes)?;
 
     // Verify string fields
-    assert_eq!(col_def.schema, b"test");
-    assert_eq!(col_def.table_alias, b"users");
-    assert_eq!(col_def.table_original, b"users");
-    assert_eq!(col_def.name_alias, b"id");
-    assert_eq!(col_def.name_original, b"id");
+    check_eq!(col_def.schema, b"test");
+    check_eq!(col_def.table_alias, b"users");
+    check_eq!(col_def.table_original, b"users");
+    check_eq!(col_def.name_alias, b"id");
+    check_eq!(col_def.name_original, b"id");
 
     // Verify tail fields
-    assert_eq!(col_def.tail.charset(), 33);
-    assert_eq!(col_def.tail.column_length(), 11);
+    check_eq!(col_def.tail.charset(), 33);
+    check_eq!(col_def.tail.column_length(), 11);
 
-    let flags = col_def.tail.flags().expect("Failed to parse flags");
-    assert!(flags.contains(ColumnFlags::NOT_NULL_FLAG));
-    assert!(flags.contains(ColumnFlags::PRI_KEY_FLAG));
+    let flags = col_def.tail.flags()?;
+    check!(flags.contains(ColumnFlags::NOT_NULL_FLAG));
+    check!(flags.contains(ColumnFlags::PRI_KEY_FLAG));
 
-    let col_type = col_def
-        .tail
-        .column_type()
-        .expect("Failed to parse column type");
-    assert_eq!(col_type, ColumnType::MYSQL_TYPE_LONG);
+    let col_type = col_def.tail.column_type()?;
+    check_eq!(col_type, ColumnType::MYSQL_TYPE_LONG);
+    Ok(())
 }

@@ -1,8 +1,7 @@
-/// Example demonstrating how to access connection information
-///
-/// This example shows how to use the new connection_id() and status_flags() methods
-/// to get information about the MySQL connection.
-
+// Example demonstrating how to access connection information
+//
+// This example shows how to use the new connection_id() and status_flags() methods
+// to get information about the MySQL connection.
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     use zero_mysql::constant::ServerStatusFlags;
 
