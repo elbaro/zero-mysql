@@ -6,47 +6,52 @@ use std::thread;
 use zero_mysql::Opts;
 use zero_mysql::sync::Pool;
 
+include!("common/check.rs");
+include!("common/check_eq.rs");
+
 const TEST_URL: &str = "mysql://test:1234@localhost:3306/test";
 
 #[test]
-fn pool_basic() {
-    let opts = Opts::try_from(TEST_URL).expect("parse opts");
+fn pool_basic() -> Result<(), Box<dyn std::error::Error>> {
+    let opts = Opts::try_from(TEST_URL)?;
     let pool = Arc::new(Pool::new(opts));
 
-    let mut conn = pool.get().expect("get connection");
-    conn.query_drop("SELECT 1").expect("query");
+    let mut conn = pool.get()?;
+    conn.query_drop("SELECT 1")?;
+    Ok(())
 }
 
 #[test]
-fn pool_connection_reuse() {
-    let mut opts = Opts::try_from(TEST_URL).expect("parse opts");
+fn pool_connection_reuse() -> Result<(), Box<dyn std::error::Error>> {
+    let mut opts = Opts::try_from(TEST_URL)?;
     opts.pool_max_idle_conn = 1;
     opts.pool_reset_conn = false;
     let pool = Arc::new(Pool::new(opts));
 
     // Get first connection and remember its ID
-    let conn1 = pool.get().expect("get connection 1");
+    let conn1 = pool.get()?;
     let conn_id1 = conn1.connection_id();
     drop(conn1);
 
     // Get another connection - should reuse the same one
-    let conn2 = pool.get().expect("get connection 2");
+    let conn2 = pool.get()?;
     let conn_id2 = conn2.connection_id();
 
-    assert_eq!(conn_id1, conn_id2, "connection should be reused from pool");
+    check_eq!(conn_id1, conn_id2, "connection should be reused from pool");
+    Ok(())
 }
 
 #[test]
-fn pool_max_idle_conn() {
-    let mut opts = Opts::try_from(TEST_URL).expect("parse opts");
+fn pool_max_idle_conn() -> Result<(), Box<dyn std::error::Error>> {
+    let mut opts = Opts::try_from(TEST_URL)?;
     opts.pool_max_idle_conn = 2;
     opts.pool_reset_conn = false;
     let pool = Arc::new(Pool::new(opts));
 
     // Get 3 connections
-    let conn1 = pool.get().expect("get connection 1");
-    let conn2 = pool.get().expect("get connection 2");
-    let conn3 = pool.get().expect("get connection 3");
+    let conn1 = pool.get()?;
+    let conn2 = pool.get()?;
+    let conn3 = pool.get()?;
 
     let id1 = conn1.connection_id();
     let id2 = conn2.connection_id();
@@ -58,26 +63,27 @@ fn pool_max_idle_conn() {
     drop(conn3); // This one gets rejected since pool is full
 
     // Get 2 connections - they should be from the pool (id1 and id2)
-    let conn_a = pool.get().expect("get connection a");
-    let conn_b = pool.get().expect("get connection b");
+    let conn_a = pool.get()?;
+    let conn_b = pool.get()?;
 
     let id_a = conn_a.connection_id();
     let id_b = conn_b.connection_id();
 
     // The pool can only hold 2 connections, so conn3 was dropped
     // conn1 and conn2 should be reused
-    assert!(
+    check!(
         (id_a == id1 || id_a == id2) && (id_b == id1 || id_b == id2),
         "connections should be reused from pool (got {id_a} and {id_b}, expected {id1} and {id2}), conn3 was dropped (id3={id3})"
     );
+    Ok(())
 }
 
 #[test]
-fn pool_max_concurrency() {
+fn pool_max_concurrency() -> Result<(), Box<dyn std::error::Error>> {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
 
-    let mut opts = Opts::try_from(TEST_URL).expect("parse opts");
+    let mut opts = Opts::try_from(TEST_URL)?;
     opts.pool_max_concurrency = Some(2);
     opts.pool_reset_conn = false;
     let pool = Arc::new(Pool::new(opts));
@@ -92,56 +98,62 @@ fn pool_max_concurrency() {
         let active_count = Arc::clone(&active_count);
         let max_active = Arc::clone(&max_active);
 
-        handles.push(thread::spawn(move || {
-            let _conn = pool.get().expect("get connection");
-            let current = active_count.fetch_add(1, Ordering::SeqCst) + 1;
+        handles.push(thread::spawn(
+            move || -> Result<(), zero_mysql::error::Error> {
+                let _conn = pool.get()?;
+                let current = active_count.fetch_add(1, Ordering::SeqCst) + 1;
 
-            // Update max_active if current is higher
-            loop {
-                let old_max = max_active.load(Ordering::SeqCst);
-                if current <= old_max {
-                    break;
+                // Update max_active if current is higher
+                loop {
+                    let old_max = max_active.load(Ordering::SeqCst);
+                    if current <= old_max {
+                        break;
+                    }
+                    if max_active
+                        .compare_exchange(old_max, current, Ordering::SeqCst, Ordering::SeqCst)
+                        .is_ok()
+                    {
+                        break;
+                    }
                 }
-                if max_active
-                    .compare_exchange(old_max, current, Ordering::SeqCst, Ordering::SeqCst)
-                    .is_ok()
-                {
-                    break;
-                }
-            }
 
-            thread::sleep(Duration::from_millis(50));
-            active_count.fetch_sub(1, Ordering::SeqCst);
-        }));
+                thread::sleep(Duration::from_millis(50));
+                active_count.fetch_sub(1, Ordering::SeqCst);
+                Ok(())
+            },
+        ));
     }
 
     for handle in handles {
-        handle.join().expect("thread join");
+        handle
+            .join()
+            .map_err(|e| format!("thread panicked: {e:?}"))??;
     }
 
     let observed_max = max_active.load(Ordering::SeqCst);
-    assert!(
+    check!(
         observed_max <= 2,
         "max concurrent connections should be limited to 2, but observed {observed_max}"
     );
+    Ok(())
 }
 
 #[test]
-fn pool_reset_conn() {
-    let mut opts = Opts::try_from(TEST_URL).expect("parse opts");
+fn pool_reset_conn() -> Result<(), Box<dyn std::error::Error>> {
+    let mut opts = Opts::try_from(TEST_URL)?;
     opts.pool_max_idle_conn = 1;
     opts.pool_reset_conn = true;
     let pool = Arc::new(Pool::new(opts));
 
     // Get a connection and set a session variable
     {
-        let mut conn = pool.get().expect("get connection");
-        conn.query_drop("SET @test_var = 42").expect("set variable");
+        let mut conn = pool.get()?;
+        conn.query_drop("SET @test_var = 42")?;
     }
 
     // Get another connection (should be reset)
     {
-        let mut conn = pool.get().expect("get connection");
+        let mut conn = pool.get()?;
 
         // Query the variable - it should be NULL after reset
         struct VarHandler {
@@ -186,20 +198,20 @@ fn pool_reset_conn() {
         let mut handler = VarHandler {
             value: Some("not_null".to_string()),
         };
-        conn.query("SELECT @test_var", &mut handler)
-            .expect("query variable");
+        conn.query("SELECT @test_var", &mut handler)?;
 
-        assert!(
+        check!(
             handler.value.is_none(),
             "session variable should be NULL after connection reset, got {:?}",
             handler.value
         );
     }
+    Ok(())
 }
 
 #[test]
-fn pool_multi_threaded() {
-    let mut opts = Opts::try_from(TEST_URL).expect("parse opts");
+fn pool_multi_threaded() -> Result<(), Box<dyn std::error::Error>> {
+    let mut opts = Opts::try_from(TEST_URL)?;
     opts.pool_max_idle_conn = 5;
     opts.pool_reset_conn = false;
     let pool = Arc::new(Pool::new(opts));
@@ -208,13 +220,19 @@ fn pool_multi_threaded() {
 
     for i in 0..10 {
         let pool = Arc::clone(&pool);
-        handles.push(thread::spawn(move || {
-            let mut conn = pool.get().expect("get connection");
-            conn.query_drop(&format!("SELECT {i}")).expect("query");
-        }));
+        handles.push(thread::spawn(
+            move || -> Result<(), zero_mysql::error::Error> {
+                let mut conn = pool.get()?;
+                conn.query_drop(&format!("SELECT {i}"))?;
+                Ok(())
+            },
+        ));
     }
 
     for handle in handles {
-        handle.join().expect("thread join");
+        handle
+            .join()
+            .map_err(|e| format!("thread panicked: {e:?}"))??;
     }
+    Ok(())
 }

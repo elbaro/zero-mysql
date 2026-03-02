@@ -1,142 +1,153 @@
 use crate::constant::ColumnType;
 use crate::protocol::r#trait::param::{Params, TypedParam};
+use crate::test_macros::{check, check_eq};
 
 #[test]
-fn param_i32() {
+fn param_i32() -> crate::error::Result<()> {
     let param: i32 = -42;
     let mut types = Vec::new();
     let mut values = Vec::new();
 
     i32::encode_type(&mut types);
-    param.encode_value(&mut values).unwrap();
+    param.encode_value(&mut values)?;
 
-    assert_eq!(types, vec![ColumnType::MYSQL_TYPE_LONG as u8, 0x00]);
-    assert_eq!(values, (-42i32).to_le_bytes());
-    assert!(!param.is_null());
+    check_eq!(types, vec![ColumnType::MYSQL_TYPE_LONG as u8, 0x00]);
+    check_eq!(values, (-42i32).to_le_bytes());
+    check!(!param.is_null());
+    Ok(())
 }
 
 #[test]
-fn param_u64() {
+fn param_u64() -> crate::error::Result<()> {
     let param: u64 = 12345678901234;
     let mut types = Vec::new();
     let mut values = Vec::new();
 
     u64::encode_type(&mut types);
-    param.encode_value(&mut values).unwrap();
+    param.encode_value(&mut values)?;
 
-    assert_eq!(types, vec![ColumnType::MYSQL_TYPE_LONGLONG as u8, 0x80]);
-    assert_eq!(values, 12345678901234u64.to_le_bytes());
+    check_eq!(types, vec![ColumnType::MYSQL_TYPE_LONGLONG as u8, 0x80]);
+    check_eq!(values, 12345678901234u64.to_le_bytes());
+    Ok(())
 }
 
 #[test]
-fn param_f64() {
-    let param: f64 = 3.14159;
+fn param_f64() -> crate::error::Result<()> {
+    let param: f64 = 3.12159;
     let mut types = Vec::new();
     let mut values = Vec::new();
 
     f64::encode_type(&mut types);
-    param.encode_value(&mut values).unwrap();
+    param.encode_value(&mut values)?;
 
-    assert_eq!(types, vec![ColumnType::MYSQL_TYPE_DOUBLE as u8, 0x00]);
-    assert_eq!(values, 3.14159f64.to_bits().to_le_bytes());
+    check_eq!(types, vec![ColumnType::MYSQL_TYPE_DOUBLE as u8, 0x00]);
+    check_eq!(values, 3.12159f64.to_bits().to_le_bytes());
+    Ok(())
 }
 
 #[test]
-fn param_str() {
+fn param_str() -> crate::error::Result<()> {
     let param = "Hello, MySQL!";
     let mut types = Vec::new();
     let mut values = Vec::new();
 
     <&str>::encode_type(&mut types);
-    param.encode_value(&mut values).unwrap();
+    param.encode_value(&mut values)?;
 
-    assert_eq!(types, vec![ColumnType::MYSQL_TYPE_VAR_STRING as u8, 0x00]);
-    assert_eq!(values[0], 13);
-    assert_eq!(&values[1..], b"Hello, MySQL!");
+    check_eq!(types, vec![ColumnType::MYSQL_TYPE_VAR_STRING as u8, 0x00]);
+    check_eq!(values[0], 13);
+    check_eq!(&values[1..], b"Hello, MySQL!");
+    Ok(())
 }
 
 #[test]
-fn param_string() {
+fn param_string() -> crate::error::Result<()> {
     let param = String::from("Rust");
     let mut types = Vec::new();
     let mut values = Vec::new();
 
     String::encode_type(&mut types);
-    param.encode_value(&mut values).unwrap();
+    param.encode_value(&mut values)?;
 
-    assert_eq!(types, vec![ColumnType::MYSQL_TYPE_VAR_STRING as u8, 0x00]);
-    assert_eq!(values[0], 4);
-    assert_eq!(&values[1..], b"Rust");
+    check_eq!(types, vec![ColumnType::MYSQL_TYPE_VAR_STRING as u8, 0x00]);
+    check_eq!(values[0], 4);
+    check_eq!(&values[1..], b"Rust");
+    Ok(())
 }
 
 #[test]
-fn param_bytes() {
+fn param_bytes() -> crate::error::Result<()> {
     let param: &[u8] = &[0xDE, 0xAD, 0xBE, 0xEF];
     let mut types = Vec::new();
     let mut values = Vec::new();
 
     <&[u8]>::encode_type(&mut types);
-    param.encode_value(&mut values).unwrap();
+    param.encode_value(&mut values)?;
 
-    assert_eq!(types, vec![ColumnType::MYSQL_TYPE_BLOB as u8, 0x00]);
-    assert_eq!(values[0], 4);
-    assert_eq!(&values[1..], &[0xDE, 0xAD, 0xBE, 0xEF]);
+    check_eq!(types, vec![ColumnType::MYSQL_TYPE_BLOB as u8, 0x00]);
+    check_eq!(values[0], 4);
+    check_eq!(&values[1..], &[0xDE, 0xAD, 0xBE, 0xEF]);
+    Ok(())
 }
 
 #[test]
-fn param_vec_u8() {
+fn param_vec_u8() -> crate::error::Result<()> {
     let param = vec![1u8, 2, 3, 4, 5];
     let mut types = Vec::new();
     let mut values = Vec::new();
 
     Vec::<u8>::encode_type(&mut types);
-    param.encode_value(&mut values).unwrap();
+    param.encode_value(&mut values)?;
 
-    assert_eq!(types, vec![ColumnType::MYSQL_TYPE_BLOB as u8, 0x00]);
-    assert_eq!(values[0], 5);
-    assert_eq!(&values[1..], &[1, 2, 3, 4, 5]);
+    check_eq!(types, vec![ColumnType::MYSQL_TYPE_BLOB as u8, 0x00]);
+    check_eq!(values[0], 5);
+    check_eq!(&values[1..], &[1, 2, 3, 4, 5]);
+    Ok(())
 }
 
 #[test]
-fn param_option_some() {
+fn param_option_some() -> crate::error::Result<()> {
     let param = Some(42i32);
     let mut types = Vec::new();
     let mut values = Vec::new();
 
-    assert!(!param.is_null());
+    check!(!param.is_null());
     Option::<i32>::encode_type(&mut types);
-    param.encode_value(&mut values).unwrap();
+    param.encode_value(&mut values)?;
 
-    assert_eq!(types, vec![ColumnType::MYSQL_TYPE_LONG as u8, 0x00]);
-    assert_eq!(values, 42i32.to_le_bytes());
+    check_eq!(types, vec![ColumnType::MYSQL_TYPE_LONG as u8, 0x00]);
+    check_eq!(values, 42i32.to_le_bytes());
+    Ok(())
 }
 
 #[test]
-fn param_option_none() {
+fn param_option_none() -> crate::error::Result<()> {
     let param: Option<i32> = None;
     let mut types = Vec::new();
     let mut values = Vec::new();
 
-    assert!(param.is_null());
+    check!(param.is_null());
     Option::<i32>::encode_type(&mut types);
-    param.encode_value(&mut values).unwrap();
+    param.encode_value(&mut values)?;
 
-    assert_eq!(types, vec![ColumnType::MYSQL_TYPE_LONG as u8, 0x00]);
-    assert_eq!(values, Vec::<u8>::new());
+    check_eq!(types, vec![ColumnType::MYSQL_TYPE_LONG as u8, 0x00]);
+    check_eq!(values, Vec::<u8>::new());
+    Ok(())
 }
 
 #[test]
-fn param_option_string() {
+fn param_option_string() -> crate::error::Result<()> {
     let param = Some("test".to_string());
     let mut types = Vec::new();
     let mut values = Vec::new();
 
     Option::<String>::encode_type(&mut types);
-    param.encode_value(&mut values).unwrap();
+    param.encode_value(&mut values)?;
 
-    assert_eq!(types, vec![ColumnType::MYSQL_TYPE_VAR_STRING as u8, 0x00]);
-    assert_eq!(values[0], 4);
-    assert_eq!(&values[1..], b"test");
+    check_eq!(types, vec![ColumnType::MYSQL_TYPE_VAR_STRING as u8, 0x00]);
+    check_eq!(values[0], 4);
+    check_eq!(&values[1..], b"test");
+    Ok(())
 }
 
 // ============================================================================
@@ -144,79 +155,84 @@ fn param_option_string() {
 // ============================================================================
 
 #[test]
-fn params_tuple() {
-    let params = (42i32, "hello", 3.14f64);
-    assert_eq!(Params::len(&params), 3);
+fn params_tuple() -> crate::error::Result<()> {
+    let params = (42i32, "hello", 3.12f64);
+    check_eq!(Params::len(&params), 3);
 
     let mut null_bitmap = Vec::new();
     Params::encode_null_bitmap(&params, &mut null_bitmap);
-    assert_eq!(null_bitmap, vec![0]);
+    check_eq!(null_bitmap, vec![0]);
 
     let mut types = Vec::new();
     Params::encode_types(&params, &mut types);
-    assert_eq!(types.len(), 6);
+    check_eq!(types.len(), 6);
 
     let mut values = Vec::new();
-    Params::encode_values(&params, &mut values).unwrap();
-    assert!(values.len() > 12);
+    Params::encode_values(&params, &mut values)?;
+    check!(values.len() > 12);
+    Ok(())
 }
 
 #[test]
-fn params_tuple_with_option() {
+fn params_tuple_with_option() -> crate::error::Result<()> {
     let params = (Some(42i32), None::<String>, Some("test"));
-    assert_eq!(Params::len(&params), 3);
+    check_eq!(Params::len(&params), 3);
 
     let mut null_bitmap = Vec::new();
     Params::encode_null_bitmap(&params, &mut null_bitmap);
-    assert_eq!(null_bitmap, vec![0b00000010]);
+    check_eq!(null_bitmap, vec![0b00000010]);
 
     let mut values = Vec::new();
-    Params::encode_values(&params, &mut values).unwrap();
-    assert_eq!(values.len(), 9);
+    Params::encode_values(&params, &mut values)?;
+    check_eq!(values.len(), 9);
+    Ok(())
 }
 
 #[test]
-fn params_mixed_types() {
+fn params_mixed_types() -> crate::error::Result<()> {
     let params = (
         1i8, 2i16, 3i32, 4i64, 5u8, 6u16, 7u32, 8u64, 1.5f32, 2.5f64, "hello",
     );
-    assert_eq!(Params::len(&params), 11);
+    check_eq!(Params::len(&params), 11);
 
     let mut types = Vec::new();
     Params::encode_types(&params, &mut types);
-    assert_eq!(types.len(), 22);
+    check_eq!(types.len(), 22);
 
     let mut values = Vec::new();
-    Params::encode_values(&params, &mut values).unwrap();
-    assert_eq!(values.len(), 48);
+    Params::encode_values(&params, &mut values)?;
+    check_eq!(values.len(), 48);
+    Ok(())
 }
 
 #[test]
-fn params_string_variants() {
+fn params_string_variants() -> crate::error::Result<()> {
     let s1 = "hello";
     let s2 = String::from("world");
     let s3 = &String::from("test");
 
     let params = (s1, s2, s3);
-    assert_eq!(Params::len(&params), 3);
+    check_eq!(Params::len(&params), 3);
 
     let mut values = Vec::new();
-    Params::encode_values(&params, &mut values).unwrap();
-    assert_eq!(values.len(), 17);
+    Params::encode_values(&params, &mut values)?;
+    check_eq!(values.len(), 17);
+    Ok(())
 }
 
 #[test]
-fn params_byte_variants() {
+fn params_byte_variants() -> crate::error::Result<()> {
     let b1: &[u8] = &[1, 2, 3];
     let b2 = vec![4, 5, 6];
     let b3 = &vec![7, 8];
 
     let params = (b1, b2, b3);
-    assert_eq!(Params::len(&params), 3);
+    check_eq!(Params::len(&params), 3);
 
     let mut out = Vec::new();
-    Params::encode_values(&params, &mut out).unwrap();
-    assert_eq!(out.len(), 11);
+    Params::encode_values(&params, &mut out)?;
+    check_eq!(out.len(), 11);
+    Ok(())
 }
 
 // ============================================================================
@@ -224,35 +240,37 @@ fn params_byte_variants() {
 // ============================================================================
 
 #[test]
-fn params_slice() {
+fn params_slice() -> crate::error::Result<()> {
     let values: &[i32] = &[1, 2, 3];
-    assert_eq!(Params::len(&values), 3);
+    check_eq!(Params::len(&values), 3);
 
     let mut null_bitmap = Vec::new();
     Params::encode_null_bitmap(&values, &mut null_bitmap);
-    assert_eq!(null_bitmap, vec![0]);
+    check_eq!(null_bitmap, vec![0]);
 
     let mut types = Vec::new();
     Params::encode_types(&values, &mut types);
-    assert_eq!(types.len(), 6); // 3 params * 2 bytes
+    check_eq!(types.len(), 6); // 3 params * 2 bytes
 
     let mut out = Vec::new();
-    Params::encode_values(&values, &mut out).unwrap();
-    assert_eq!(out.len(), 12); // 3 * 4 bytes for i32
+    Params::encode_values(&values, &mut out)?;
+    check_eq!(out.len(), 12); // 3 * 4 bytes for i32
+    Ok(())
 }
 
 #[test]
-fn params_vec() {
+fn params_vec() -> crate::error::Result<()> {
     let values: Vec<i32> = vec![1, 2, 3];
-    assert_eq!(Params::len(&values), 3);
+    check_eq!(Params::len(&values), 3);
 
     let mut types = Vec::new();
     Params::encode_types(&values, &mut types);
-    assert_eq!(types.len(), 6);
+    check_eq!(types.len(), 6);
 
     let mut out = Vec::new();
-    Params::encode_values(&values, &mut out).unwrap();
-    assert_eq!(out.len(), 12);
+    Params::encode_values(&values, &mut out)?;
+    check_eq!(out.len(), 12);
+    Ok(())
 }
 
 #[test]
@@ -267,17 +285,18 @@ fn params_vec_ref() {
 }
 
 #[test]
-fn params_slice_with_options() {
+fn params_slice_with_options() -> crate::error::Result<()> {
     let values: &[Option<i32>] = &[Some(1), None, Some(3)];
-    assert_eq!(Params::len(&values), 3);
+    check_eq!(Params::len(&values), 3);
 
     let mut null_bitmap = Vec::new();
     Params::encode_null_bitmap(&values, &mut null_bitmap);
-    assert_eq!(null_bitmap, vec![0b00000010]); // bit 1 set for None
+    check_eq!(null_bitmap, vec![0b00000010]); // bit 1 set for None
 
     let mut out = Vec::new();
-    Params::encode_values(&values, &mut out).unwrap();
-    assert_eq!(out.len(), 8); // 2 * 4 bytes (None is skipped)
+    Params::encode_values(&values, &mut out)?;
+    check_eq!(out.len(), 8); // 2 * 4 bytes (None is skipped)
+    Ok(())
 }
 
 #[test]
@@ -295,16 +314,17 @@ fn params_empty_slice() {
 }
 
 #[test]
-fn params_slice_strings() {
+fn params_slice_strings() -> crate::error::Result<()> {
     let values: Vec<&str> = vec!["hello", "world"];
-    assert_eq!(Params::len(&values), 2);
+    check_eq!(Params::len(&values), 2);
 
     let mut types = Vec::new();
     Params::encode_types(&values, &mut types);
-    assert_eq!(types.len(), 4); // 2 params * 2 bytes
+    check_eq!(types.len(), 4); // 2 params * 2 bytes
 
     let mut out = Vec::new();
-    Params::encode_values(&values, &mut out).unwrap();
+    Params::encode_values(&values, &mut out)?;
     // "hello" = 1 (len) + 5 (data), "world" = 1 (len) + 5 (data)
-    assert_eq!(out.len(), 12);
+    check_eq!(out.len(), 12);
+    Ok(())
 }

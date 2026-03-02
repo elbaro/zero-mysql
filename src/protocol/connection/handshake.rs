@@ -783,6 +783,7 @@ impl<'a> Handshake<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_macros::{check_eq, check_err};
 
     #[test]
     fn handshake_fixed_fields_has_alignment_of_1() {
@@ -820,16 +821,17 @@ mod tests {
     }
 
     #[test]
-    fn fast_auth_result_parsing() {
-        assert_eq!(
-            read_caching_sha2_password_fast_auth_result(&[0x03]).unwrap(),
+    fn fast_auth_result_parsing() -> crate::error::Result<()> {
+        check_eq!(
+            read_caching_sha2_password_fast_auth_result(&[0x03])?,
             CachingSha2PasswordFastAuthResult::Success,
         );
-        assert_eq!(
-            read_caching_sha2_password_fast_auth_result(&[0x04]).unwrap(),
+        check_eq!(
+            read_caching_sha2_password_fast_auth_result(&[0x04])?,
             CachingSha2PasswordFastAuthResult::FullAuthRequired,
         );
-        read_caching_sha2_password_fast_auth_result(&[0x05]).unwrap_err();
-        read_caching_sha2_password_fast_auth_result(&[]).unwrap_err();
+        check_err!(read_caching_sha2_password_fast_auth_result(&[0x05]));
+        check_err!(read_caching_sha2_password_fast_auth_result(&[]));
+        Ok(())
     }
 }

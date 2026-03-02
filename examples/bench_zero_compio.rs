@@ -8,7 +8,9 @@ use zero_mysql::compio::Conn;
 
 #[compio::main]
 async fn main() -> zero_mysql::error::Result<()> {
-    let url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
+    let url = env::var("DATABASE_URL").map_err(|_unhelpful_err| {
+        zero_mysql::error::Error::BadUsageError("DATABASE_URL must be set".into())
+    })?;
     let mut conn = Conn::new(url.as_str()).await?;
 
     conn.query_drop("DROP TABLE IF EXISTS bench_compio").await?;
@@ -60,7 +62,6 @@ async fn main() -> zero_mysql::error::Result<()> {
         let elapsed = iteration_start.elapsed();
         let mut count_stmt = conn.prepare("SELECT COUNT(*) FROM bench_compio").await?;
         let count: Vec<(i64,)> = conn.exec_collect(&mut count_stmt, ()).await?;
-        #[allow(clippy::print_stdout)]
         {
             println!(
                 "Iteration {}: Inserted {} rows (took {:.2}ms)",

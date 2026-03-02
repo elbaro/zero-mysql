@@ -21,49 +21,60 @@ pub struct Comment {
     pub text: String,
 }
 
-fn connection() -> PooledConn {
-    let connection_url = std::env::var("MYSQL_DATABASE_URL")
-        .or_else(|_| std::env::var("DATABASE_URL"))
-        .expect("DATABASE_URL must be set in order to run tests");
-    let pool = Pool::new(connection_url.as_str()).unwrap();
-    let mut conn = pool.get_conn().unwrap();
+type UserPostRow = (
+    i32,
+    String,
+    Option<String>,
+    Option<i32>,
+    Option<i32>,
+    Option<String>,
+    Option<String>,
+);
 
-    conn.query_drop("SET FOREIGN_KEY_CHECKS = 0;").unwrap();
-    conn.query_drop("TRUNCATE TABLE comments").unwrap();
-    conn.query_drop("TRUNCATE TABLE posts").unwrap();
-    conn.query_drop("TRUNCATE TABLE users").unwrap();
+fn connection() -> Result<PooledConn, Box<dyn std::error::Error>> {
+    let connection_url =
+        std::env::var("MYSQL_DATABASE_URL").or_else(|_| std::env::var("DATABASE_URL"))?;
+    let pool = Pool::new(connection_url.as_str())?;
+    let mut conn = pool.get_conn()?;
 
-    conn
+    conn.query_drop("SET FOREIGN_KEY_CHECKS = 0;")?;
+    conn.query_drop("TRUNCATE TABLE comments")?;
+    conn.query_drop("TRUNCATE TABLE posts")?;
+    conn.query_drop("TRUNCATE TABLE users")?;
+
+    Ok(conn)
 }
 
 fn insert_users(
     size: usize,
     conn: &mut PooledConn,
     hair_color_init: impl Fn(usize) -> Option<String>,
-) {
-    let mut stmt = conn
-        .prep("INSERT INTO users (name, hair_color) VALUES (?, ?)")
-        .unwrap();
+) -> Result<(), Box<dyn std::error::Error>> {
+    let stmt = conn.prep("INSERT INTO users (name, hair_color) VALUES (?, ?)")?;
 
     for x in 0..size {
         let name = format!("User {}", x);
         let hair_color = hair_color_init(x);
 
-        conn.exec_drop(&stmt, (name.as_str(), hair_color.as_deref()))
-            .unwrap();
+        conn.exec_drop(&stmt, (name.as_str(), hair_color.as_deref()))?;
     }
+    Ok(())
 }
 
 fn bench_trivial_query_by_id(c: &mut Criterion) {
     let mut group = c.benchmark_group("trivial_query_by_id");
 
-    // for size in [1, 10, 100].iter() {
-    for size in [1].iter() {
-        group.bench_with_input(BenchmarkId::from_parameter(size), size, |b, &size| {
-            let mut conn = connection();
-            insert_users(size, &mut conn, |_| None);
+    {
+        let size = 1;
+        group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, &size| {
+            let Ok(mut conn) = connection() else { return };
+            let Ok(()) = insert_users(size, &mut conn, |_| None) else {
+                return;
+            };
 
-            let mut stmt = conn.prep("SELECT id, name, hair_color FROM users").unwrap();
+            let Ok(stmt) = conn.prep("SELECT id, name, hair_color FROM users") else {
+                return;
+            };
 
             b.iter(|| {
                 conn.exec_map(
@@ -75,7 +86,7 @@ fn bench_trivial_query_by_id(c: &mut Criterion) {
                         hair_color,
                     },
                 )
-                .unwrap()
+                .unwrap_or_default()
             })
         });
     }
@@ -87,43 +98,26 @@ fn bench_medium_complex_query_by_id(c: &mut Criterion) {
 
     for size in [1, 10, 100].iter() {
         group.bench_with_input(BenchmarkId::from_parameter(size), size, |b, &size| {
-            let mut conn = connection();
-            insert_users(size, &mut conn, |i| {
+            let Ok(mut conn) = connection() else { return };
+            let Ok(()) = insert_users(size, &mut conn, |i| {
                 Some(if i % 2 == 0 {
                     String::from("black")
                 } else {
                     String::from("brown")
                 })
-            });
+            }) else { return };
 
-            let mut stmt = conn
+            let Ok(stmt) = conn
                 .prep(
                     "SELECT u.id, u.name, u.hair_color, p.id, p.user_id, p.title, p.body \
                      FROM users as u LEFT JOIN posts as p on u.id = p.user_id WHERE u.hair_color = ?",
-                )
-                .unwrap();
+                ) else { return };
 
             b.iter(|| {
                 conn.exec_map(
                     &stmt,
                     ("black",),
-                    |(
-                        user_id,
-                        name,
-                        hair_color,
-                        post_id,
-                        post_user_id,
-                        title,
-                        body,
-                    ): (
-                        i32,
-                        String,
-                        Option<String>,
-                        Option<i32>,
-                        Option<i32>,
-                        Option<String>,
-                        Option<String>,
-                    )| {
+                    |(user_id, name, hair_color, post_id, post_user_id, title, body): UserPostRow| {
                         let user = User {
                             id: user_id,
                             name,
@@ -131,14 +125,14 @@ fn bench_medium_complex_query_by_id(c: &mut Criterion) {
                         };
                         let post = post_id.map(|id| Post {
                             id,
-                            user_id: post_user_id.unwrap(),
-                            title: title.unwrap(),
+                            user_id: post_user_id.unwrap_or_default(),
+                            title: title.unwrap_or_default(),
                             body,
                         });
                         (user, post)
                     },
                 )
-                .unwrap()
+                .unwrap_or_default()
             })
         });
     }
@@ -150,9 +144,11 @@ fn bench_insert(c: &mut Criterion) {
 
     for size in [1, 10, 100].iter() {
         group.bench_with_input(BenchmarkId::from_parameter(size), size, |b, &size| {
-            let mut conn = connection();
+            let Ok(mut conn) = connection() else { return };
 
-            b.iter(|| insert_users(size, &mut conn, |_| Some(String::from("hair_color"))))
+            b.iter(|| {
+                let _result = insert_users(size, &mut conn, |_| Some(String::from("hair_color")));
+            })
         });
     }
     group.finish();

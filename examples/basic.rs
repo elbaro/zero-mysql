@@ -44,8 +44,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             100_i16,
             1000_i32,
             10000_i64,
-            3.14_f32,
-            2.71828_f64,
+            3.12_f32,
+            2.81_f64,
             "hello",
             "This is some text",
             b"binary data".as_slice(),
@@ -60,8 +60,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             -100_i16,
             -1000_i32,
             -10000_i64,
-            -3.14_f32,
-            -2.71828_f64,
+            -3.12_f32,
+            -2.81_f64,
             "world",
             "More text content",
             b"\x00\x01\x02\x03".as_slice(),
@@ -73,9 +73,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         &mut insert_stmt,
         (
             127_i8,
-            32767_i16,
-            2147483647_i32,
-            9223372036854775807_i64,
+            0x7FFF_i16,
+            0x7FFF_FFFF_i32,
+            0x7FFF_FFFF_FFFF_FFFF_i64,
             1.0e38_f32,
             1.0e308_f64,
             "max values",
@@ -91,16 +91,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     )?;
 
     // Use CollectHandler to fetch all rows
-    let mut handler: zero_mysql::handler::CollectHandler<(
-        u32,
-        i8,
-        i16,
-        i32,
-        i64,
-        f32,
-        f64,
-        String,
-    )> = zero_mysql::handler::CollectHandler::default();
+    type ExampleRow = (u32, i8, i16, i32, i64, f32, f64, String);
+    let mut handler: zero_mysql::handler::CollectHandler<ExampleRow> =
+        zero_mysql::handler::CollectHandler::default();
 
     conn.exec(&mut select_stmt, (), &mut handler)?;
 

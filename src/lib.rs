@@ -36,4 +36,6 @@ mod constant_test;
 #[cfg(test)]
 mod opts_test;
 #[cfg(test)]
+mod test_macros;
+#[cfg(test)]
 mod value_test;
