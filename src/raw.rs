@@ -270,23 +270,29 @@ pub fn parse_value<'buf, T: FromRawValue<'buf>>(
         | ColumnType::MYSQL_TYPE_TIMESTAMP
         | ColumnType::MYSQL_TYPE_TIMESTAMP2
         | ColumnType::MYSQL_TYPE_DATETIME2 => {
-            let (len, mut rest) = read_int_1(data)?;
+            let (len, rest) = read_int_1(data)?;
             match len {
                 0 => Ok((T::from_datetime0()?, rest)),
                 4 => {
-                    let ts = Timestamp4::ref_from_bytes(&rest[..4])?;
-                    rest = &rest[4..];
-                    Ok((T::from_datetime4(ts)?, rest))
+                    let (chunk, tail) = rest
+                        .split_first_chunk::<4>()
+                        .ok_or_else(|| Error::LibraryBug(eyre!("truncated datetime4")))?;
+                    let ts = Timestamp4::ref_from_bytes(chunk)?;
+                    Ok((T::from_datetime4(ts)?, tail))
                 }
                 7 => {
-                    let ts = Timestamp7::ref_from_bytes(&rest[..7])?;
-                    rest = &rest[7..];
-                    Ok((T::from_datetime7(ts)?, rest))
+                    let (chunk, tail) = rest
+                        .split_first_chunk::<7>()
+                        .ok_or_else(|| Error::LibraryBug(eyre!("truncated datetime7")))?;
+                    let ts = Timestamp7::ref_from_bytes(chunk)?;
+                    Ok((T::from_datetime7(ts)?, tail))
                 }
                 11 => {
-                    let ts = Timestamp11::ref_from_bytes(&rest[..11])?;
-                    rest = &rest[11..];
-                    Ok((T::from_datetime11(ts)?, rest))
+                    let (chunk, tail) = rest
+                        .split_first_chunk::<11>()
+                        .ok_or_else(|| Error::LibraryBug(eyre!("truncated datetime11")))?;
+                    let ts = Timestamp11::ref_from_bytes(chunk)?;
+                    Ok((T::from_datetime11(ts)?, tail))
                 }
                 _ => Err(Error::LibraryBug(eyre!("invalid datetime length: {}", len))),
             }
@@ -294,18 +300,22 @@ pub fn parse_value<'buf, T: FromRawValue<'buf>>(
 
         // TIME types
         ColumnType::MYSQL_TYPE_TIME | ColumnType::MYSQL_TYPE_TIME2 => {
-            let (len, mut rest) = read_int_1(data)?;
+            let (len, rest) = read_int_1(data)?;
             match len {
                 0 => Ok((T::from_time0()?, rest)),
                 8 => {
-                    let time = Time8::ref_from_bytes(&rest[..8])?;
-                    rest = &rest[8..];
-                    Ok((T::from_time8(time)?, rest))
+                    let (chunk, tail) = rest
+                        .split_first_chunk::<8>()
+                        .ok_or_else(|| Error::LibraryBug(eyre!("truncated time8")))?;
+                    let time = Time8::ref_from_bytes(chunk)?;
+                    Ok((T::from_time8(time)?, tail))
                 }
                 12 => {
-                    let time = Time12::ref_from_bytes(&rest[..12])?;
-                    rest = &rest[12..];
-                    Ok((T::from_time12(time)?, rest))
+                    let (chunk, tail) = rest
+                        .split_first_chunk::<12>()
+                        .ok_or_else(|| Error::LibraryBug(eyre!("truncated time12")))?;
+                    let time = Time12::ref_from_bytes(chunk)?;
+                    Ok((T::from_time12(time)?, tail))
                 }
                 _ => Err(Error::LibraryBug(eyre!("invalid time length: {}", len))),
             }
@@ -766,7 +776,12 @@ macro_rules! impl_from_row_tuple {
                 let mut data = row.values();
                 let null_bitmap = row.null_bitmap();
                 $(
-                    let ($T, rest) = parse_value::<$T>(&cols[$idx].tail, null_bitmap.is_null($idx), data)?;
+                    let col = cols.get($idx)
+                        .ok_or_else(|| Error::LibraryBug(eyre!(
+                            "from_row: column index {} out of bounds (got {} columns)",
+                            $idx, cols.len()
+                        )))?;
+                    let ($T, rest) = parse_value::<$T>(&col.tail, null_bitmap.is_null($idx), data)?;
                     data = rest;
                 )+
                 let _ = data; // suppress unused warning for last element
@@ -814,6 +829,12 @@ impl FromRawValue<'_> for uuid::Uuid {
 // ============================================================================
 
 #[cfg(feature = "with-chrono")]
+const MIDNIGHT: chrono::NaiveTime = match chrono::NaiveTime::from_hms_opt(0, 0, 0) {
+    Some(t) => t,
+    None => panic!("00:00:00 is valid"),
+};
+
+#[cfg(feature = "with-chrono")]
 impl FromRawValue<'_> for chrono::NaiveDate {
     fn from_date0() -> Result<Self> {
         Err(Error::BadUsageError(
@@ -831,7 +852,7 @@ impl FromRawValue<'_> for chrono::NaiveDate {
 #[cfg(feature = "with-chrono")]
 impl FromRawValue<'_> for chrono::NaiveTime {
     fn from_time0() -> Result<Self> {
-        Ok(chrono::NaiveTime::from_hms_opt(0, 0, 0).expect("00:00:00 is valid"))
+        Ok(MIDNIGHT)
     }
 
     fn from_time8(v: &Time8) -> Result<Self> {
@@ -887,7 +908,7 @@ impl FromRawValue<'_> for chrono::NaiveDateTime {
             .ok_or_else(|| {
             Error::BadUsageError(format!("Invalid date: {}-{}-{}", v.year(), v.month, v.day))
         })?;
-        Ok(date.and_hms_opt(0, 0, 0).expect("00:00:00 is valid"))
+        Ok(date.and_time(MIDNIGHT))
     }
 
     fn from_datetime7(v: &Timestamp7) -> Result<Self> {

@@ -110,11 +110,15 @@ impl ColumnDefinitions {
             let mut buf = packets.as_slice();
             let mut definitions = Vec::with_capacity(num_columns);
             for _ in 0..num_columns {
-                let len = u32::from_ne_bytes(buf[..4].try_into().unwrap()) as usize;
-                definitions.push(ColumnDefinition::try_from(ColumnDefinitionBytes(
-                    &buf[4..4 + len],
-                ))?);
-                buf = &buf[4 + len..]; // Advance past the length prefix and payload
+                let (len_bytes, rest) = buf.split_first_chunk::<4>().ok_or_else(|| {
+                    Error::LibraryBug(eyre!("column definition: truncated length prefix"))
+                })?;
+                let len = u32::from_ne_bytes(*len_bytes) as usize;
+                let (payload, rest) = rest.split_at_checked(len).ok_or_else(|| {
+                    Error::LibraryBug(eyre!("column definition: truncated payload"))
+                })?;
+                definitions.push(ColumnDefinition::try_from(ColumnDefinitionBytes(payload))?);
+                buf = rest;
             }
 
             // Safety: borrowed data is valid for 'static because Self holds packets

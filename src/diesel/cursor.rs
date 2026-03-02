@@ -6,6 +6,7 @@ use diesel::mysql::MysqlType;
 use diesel::mysql::data_types::{MysqlTime, MysqlTimestampType};
 
 use crate::constant::{ColumnFlags, ColumnType};
+use crate::error::eyre;
 use crate::protocol::BinaryRowPayload;
 use crate::protocol::command::ColumnDefinition;
 use crate::protocol::primitive::read_string_lenenc;
@@ -131,17 +132,14 @@ fn to_mysql_type(col_type: ColumnType, flags: ColumnFlags) -> MysqlType {
 ///
 /// Diesel's `FromSql` for date/time types expects the raw bytes of a C `MYSQL_TIME` struct,
 /// which is different from the compact MySQL binary protocol wire format.
-fn wire_datetime_to_bytes(wire: &[u8], col_type: ColumnType) -> Vec<u8> {
-    let len = wire[0] as usize;
-    let data = &wire[1..1 + len];
-
+fn wire_datetime_to_bytes(data: &[u8], col_type: ColumnType) -> Vec<u8> {
     let time = match col_type {
         ColumnType::MYSQL_TYPE_DATE | ColumnType::MYSQL_TYPE_NEWDATE => {
-            let (year, month, day) = if data.len() >= 4 {
+            let (year, month, day) = if let Some(d) = data.first_chunk::<4>() {
                 (
-                    u16::from_le_bytes([data[0], data[1]]) as libc::c_uint,
-                    data[2] as libc::c_uint,
-                    data[3] as libc::c_uint,
+                    u16::from_le_bytes([d[0], d[1]]) as libc::c_uint,
+                    d[2] as libc::c_uint,
+                    d[3] as libc::c_uint,
                 )
             } else {
                 (0, 0, 0)
@@ -163,27 +161,23 @@ fn wire_datetime_to_bytes(wire: &[u8], col_type: ColumnType) -> Vec<u8> {
             let (neg, hours, minutes, seconds, usec) = match data.len() {
                 0 => (false, 0u32, 0u32, 0u32, 0u64),
                 8 => {
-                    let neg = data[0] != 0;
-                    let days = u32::from_le_bytes([data[1], data[2], data[3], data[4]]);
-                    (
-                        neg,
-                        days * 24 + data[5] as u32,
-                        data[6] as u32,
-                        data[7] as u32,
-                        0,
-                    )
+                    if let Some(d) = data.first_chunk::<8>() {
+                        let neg = d[0] != 0;
+                        let days = u32::from_le_bytes([d[1], d[2], d[3], d[4]]);
+                        (neg, days * 24 + d[5] as u32, d[6] as u32, d[7] as u32, 0)
+                    } else {
+                        (false, 0, 0, 0, 0)
+                    }
                 }
                 12 => {
-                    let neg = data[0] != 0;
-                    let days = u32::from_le_bytes([data[1], data[2], data[3], data[4]]);
-                    let usec = u32::from_le_bytes([data[8], data[9], data[10], data[11]]) as u64;
-                    (
-                        neg,
-                        days * 24 + data[5] as u32,
-                        data[6] as u32,
-                        data[7] as u32,
-                        usec,
-                    )
+                    if let Some(d) = data.first_chunk::<12>() {
+                        let neg = d[0] != 0;
+                        let days = u32::from_le_bytes([d[1], d[2], d[3], d[4]]);
+                        let usec = u32::from_le_bytes([d[8], d[9], d[10], d[11]]) as u64;
+                        (neg, days * 24 + d[5] as u32, d[6] as u32, d[7] as u32, usec)
+                    } else {
+                        (false, 0, 0, 0, 0)
+                    }
                 }
                 _ => (false, 0, 0, 0, 0),
             };
@@ -204,33 +198,51 @@ fn wire_datetime_to_bytes(wire: &[u8], col_type: ColumnType) -> Vec<u8> {
         _ => {
             let (year, month, day, hour, minute, second, usec) = match data.len() {
                 0 => (0u32, 0u32, 0u32, 0u32, 0u32, 0u32, 0u64),
-                4 => (
-                    u16::from_le_bytes([data[0], data[1]]) as u32,
-                    data[2] as u32,
-                    data[3] as u32,
-                    0,
-                    0,
-                    0,
-                    0,
-                ),
-                7 => (
-                    u16::from_le_bytes([data[0], data[1]]) as u32,
-                    data[2] as u32,
-                    data[3] as u32,
-                    data[4] as u32,
-                    data[5] as u32,
-                    data[6] as u32,
-                    0,
-                ),
-                11 => (
-                    u16::from_le_bytes([data[0], data[1]]) as u32,
-                    data[2] as u32,
-                    data[3] as u32,
-                    data[4] as u32,
-                    data[5] as u32,
-                    data[6] as u32,
-                    u32::from_le_bytes([data[7], data[8], data[9], data[10]]) as u64,
-                ),
+                4 => {
+                    if let Some(d) = data.first_chunk::<4>() {
+                        (
+                            u16::from_le_bytes([d[0], d[1]]) as u32,
+                            d[2] as u32,
+                            d[3] as u32,
+                            0,
+                            0,
+                            0,
+                            0,
+                        )
+                    } else {
+                        (0, 0, 0, 0, 0, 0, 0)
+                    }
+                }
+                7 => {
+                    if let Some(d) = data.first_chunk::<7>() {
+                        (
+                            u16::from_le_bytes([d[0], d[1]]) as u32,
+                            d[2] as u32,
+                            d[3] as u32,
+                            d[4] as u32,
+                            d[5] as u32,
+                            d[6] as u32,
+                            0,
+                        )
+                    } else {
+                        (0, 0, 0, 0, 0, 0, 0)
+                    }
+                }
+                11 => {
+                    if let Some(d) = data.first_chunk::<11>() {
+                        (
+                            u16::from_le_bytes([d[0], d[1]]) as u32,
+                            d[2] as u32,
+                            d[3] as u32,
+                            d[4] as u32,
+                            d[5] as u32,
+                            d[6] as u32,
+                            u32::from_le_bytes([d[7], d[8], d[9], d[10]]) as u64,
+                        )
+                    } else {
+                        (0, 0, 0, 0, 0, 0, 0)
+                    }
+                }
                 _ => (0, 0, 0, 0, 0, 0, 0),
             };
             let timestamp_type = match col_type {
@@ -317,28 +329,40 @@ impl BinaryResultSetHandler for CollectRawHandler {
 
                 // 1-byte integer
                 ColumnType::MYSQL_TYPE_TINY => {
-                    values.push(Some(data[..1].to_vec()));
-                    data = &data[1..];
+                    let (chunk, rest) = data.split_first_chunk::<1>().ok_or_else(|| {
+                        crate::error::Error::LibraryBug(eyre!("truncated TINY column"))
+                    })?;
+                    values.push(Some(chunk.to_vec()));
+                    data = rest;
                 }
 
                 // 2-byte integer
                 ColumnType::MYSQL_TYPE_SHORT | ColumnType::MYSQL_TYPE_YEAR => {
-                    values.push(Some(data[..2].to_vec()));
-                    data = &data[2..];
+                    let (chunk, rest) = data.split_first_chunk::<2>().ok_or_else(|| {
+                        crate::error::Error::LibraryBug(eyre!("truncated SHORT column"))
+                    })?;
+                    values.push(Some(chunk.to_vec()));
+                    data = rest;
                 }
 
                 // 4-byte integer/float
                 ColumnType::MYSQL_TYPE_INT24
                 | ColumnType::MYSQL_TYPE_LONG
                 | ColumnType::MYSQL_TYPE_FLOAT => {
-                    values.push(Some(data[..4].to_vec()));
-                    data = &data[4..];
+                    let (chunk, rest) = data.split_first_chunk::<4>().ok_or_else(|| {
+                        crate::error::Error::LibraryBug(eyre!("truncated LONG column"))
+                    })?;
+                    values.push(Some(chunk.to_vec()));
+                    data = rest;
                 }
 
                 // 8-byte integer/double
                 ColumnType::MYSQL_TYPE_LONGLONG | ColumnType::MYSQL_TYPE_DOUBLE => {
-                    values.push(Some(data[..8].to_vec()));
-                    data = &data[8..];
+                    let (chunk, rest) = data.split_first_chunk::<8>().ok_or_else(|| {
+                        crate::error::Error::LibraryBug(eyre!("truncated LONGLONG column"))
+                    })?;
+                    values.push(Some(chunk.to_vec()));
+                    data = rest;
                 }
 
                 // Date/time: variable-length wire format → MysqlTime struct bytes
@@ -350,10 +374,15 @@ impl BinaryResultSetHandler for CollectRawHandler {
                 | ColumnType::MYSQL_TYPE_TIMESTAMP2
                 | ColumnType::MYSQL_TYPE_TIME
                 | ColumnType::MYSQL_TYPE_TIME2 => {
-                    let len = data[0] as usize;
-                    let wire = &data[..1 + len];
-                    values.push(Some(wire_datetime_to_bytes(wire, col_type)));
-                    data = &data[1 + len..];
+                    let (&len_byte, payload) = data.split_first().ok_or_else(|| {
+                        crate::error::Error::LibraryBug(eyre!("truncated datetime length"))
+                    })?;
+                    let len = len_byte as usize;
+                    let (dt_data, rest) = payload.split_at_checked(len).ok_or_else(|| {
+                        crate::error::Error::LibraryBug(eyre!("truncated datetime payload"))
+                    })?;
+                    values.push(Some(wire_datetime_to_bytes(dt_data, col_type)));
+                    data = rest;
                 }
 
                 // Length-encoded string/blob/decimal

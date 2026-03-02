@@ -6,10 +6,10 @@ use zerocopy::byteorder::little_endian::{U16 as U16LE, U32 as U32LE, U64 as U64L
 
 /// Read 1-byte integer
 pub fn read_int_1(data: &[u8]) -> Result<(u8, &[u8])> {
-    if unlikely(data.is_empty()) {
-        return Err(Error::LibraryBug(eyre!("read_int_1: empty buffer")));
-    }
-    Ok((data[0], &data[1..]))
+    let (&byte, rest) = data
+        .split_first()
+        .ok_or_else(|| Error::LibraryBug(eyre!("read_int_1: empty buffer")))?;
+    Ok((byte, rest))
 }
 
 /// Read 2-byte little-endian integer
@@ -26,14 +26,11 @@ pub fn read_int_2(data: &[u8]) -> Result<(u16, &[u8])> {
 
 /// Read 3-byte little-endian integer
 pub fn read_int_3(data: &[u8]) -> Result<(u32, &[u8])> {
-    if unlikely(data.len() < 3) {
-        return Err(Error::LibraryBug(eyre!(
-            "read_int_3: buffer too short: {} < 3",
-            data.len()
-        )));
-    }
-    let value = u32::from_le_bytes([data[0], data[1], data[2], 0]);
-    Ok((value, &data[3..]))
+    let (chunk, rest) = data.split_first_chunk::<3>().ok_or_else(|| {
+        Error::LibraryBug(eyre!("read_int_3: buffer too short: {} < 3", data.len()))
+    })?;
+    let value = u32::from_le_bytes([chunk[0], chunk[1], chunk[2], 0]);
+    Ok((value, rest))
 }
 
 /// Read 4-byte little-endian integer
@@ -50,14 +47,13 @@ pub fn read_int_4(data: &[u8]) -> Result<(u32, &[u8])> {
 
 /// Read 6-byte little-endian integer
 pub fn read_int_6(data: &[u8]) -> Result<(u64, &[u8])> {
-    if unlikely(data.len() < 6) {
-        return Err(Error::LibraryBug(eyre!(
-            "read_int_6: buffer too short: {} < 6",
-            data.len()
-        )));
-    }
-    let value = u64::from_le_bytes([data[0], data[1], data[2], data[3], data[4], data[5], 0, 0]);
-    Ok((value, &data[6..]))
+    let (chunk, rest) = data.split_first_chunk::<6>().ok_or_else(|| {
+        Error::LibraryBug(eyre!("read_int_6: buffer too short: {} < 6", data.len()))
+    })?;
+    let value = u64::from_le_bytes([
+        chunk[0], chunk[1], chunk[2], chunk[3], chunk[4], chunk[5], 0, 0,
+    ]);
+    Ok((value, rest))
 }
 
 /// Read 8-byte little-endian integer

@@ -140,7 +140,7 @@ fn parse_bool(key: &str, value: &str) -> Result<bool, Error> {
 
 /// Parse a usize value from a query parameter.
 fn parse_usize(key: &str, value: &str) -> Result<usize, Error> {
-    value.parse().map_err(|_| {
+    value.parse().map_err(|_unhelpful_err| {
         Error::BadUsageError(format!(
             "Invalid unsigned integer value '{}' for parameter '{}'",
             value, key
