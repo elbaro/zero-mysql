@@ -829,10 +829,7 @@ impl FromRawValue<'_> for uuid::Uuid {
 // ============================================================================
 
 #[cfg(feature = "with-chrono")]
-const MIDNIGHT: chrono::NaiveTime = match chrono::NaiveTime::from_hms_opt(0, 0, 0) {
-    Some(t) => t,
-    None => panic!("00:00:00 is valid"),
-};
+const MIDNIGHT: chrono::NaiveTime = chrono::NaiveTime::from_hms_opt(0, 0, 0).unwrap();
 
 #[cfg(feature = "with-chrono")]
 impl FromRawValue<'_> for chrono::NaiveDate {
