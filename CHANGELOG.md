@@ -1,5 +1,29 @@
 # Changelog
 
+## [v0.5.1](https://github.com/elbaro/zero-mysql/compare/v0.5.0...v0.5.1) - 2026-03-02
+
+### <!-- 1 -->Bug fixes
+- move separateMajorMinor to top-level config
+
+### <!-- 9 -->Other
+- infra: allow empty password in ci
+- infra: change mariadb-12.3 to 12.3-rc
+- tidy: replace panicking assertions with fallible check macros ([#26](https://github.com/elbaro/zero-mysql/pull/26))
+- tidy: relax clippy lints, add clippy.toml, simplify const
+- tidy: fix all clippy warnings with infallible conversions
+- tidy: sync clippy lint set with zero-postgres
+- infra: update Rust crate zerocopy to v0.8.40 ([#24](https://github.com/elbaro/zero-mysql/pull/24))
+- infra: fix mariadb tests by adding MARIADB_ env vars
+- infra: add multi-backend DB compatibility matrix to CI
+- tidy: remove redundant test_ prefix from test functions
+- tidy: use std::io::Error::other and fix redundant closures
+- infra: grant checks:write permission to security audit
+- infra: tune renovate config and normalize dep ranges
+- infra: fix renovate hourly limit and branch splitting
+- infra: group renovate PRs by breaking changes
+- infra: configure renovate
+- infra: add compile_fail doc tests for RefFromRow
+
 ## [v0.5.0](https://github.com/elbaro/zero-mysql/compare/v0.4.1...v0.5.0) - 2026-02-26
 
 ### <!-- 0 -->New features
