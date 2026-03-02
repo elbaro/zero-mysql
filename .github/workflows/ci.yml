@@ -41,7 +41,7 @@ jobs:
             health-cmd: "healthcheck.sh --connect --innodb_initialized"
           - db-image: mariadb:11.4
             health-cmd: "healthcheck.sh --connect --innodb_initialized"
-          - db-image: mariadb:12.3
+          - db-image: mariadb:12.3-rc
             health-cmd: "healthcheck.sh --connect --innodb_initialized"
           - db-image: percona/percona-server:8.0
             health-cmd: "mysqladmin ping -h 127.0.0.1 -u root"
