@@ -25,12 +25,12 @@ fn fixed_wire_size_primitives() -> Result<(), Box<dyn std::error::Error>> {
 fn little_endian_parsing() -> Result<(), Box<dyn std::error::Error>> {
     // i32 value 0x12345678 in little-endian
     let data1: [u8; 4] = [0x78, 0x56, 0x34, 0x12];
-    let value1: &I32LE = FromBytes::ref_from_bytes(&data1).map_err(|e| e.to_string())?;
+    let value1: &I32LE = FromBytes::ref_from_bytes(&data1).unwrap();
     check_eq!(value1.get(), 0x12345678);
 
     // i64 value
     let data2: [u8; 8] = [0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08];
-    let value2: &I64LE = FromBytes::ref_from_bytes(&data2).map_err(|e| e.to_string())?;
+    let value2: &I64LE = FromBytes::ref_from_bytes(&data2).unwrap();
     check_eq!(value2.get(), 0x0807060504030201);
     Ok(())
 }
@@ -55,7 +55,7 @@ fn packed_struct() -> Result<(), Box<dyn std::error::Error>> {
     data[4..12].copy_from_slice(&12345_i64.to_le_bytes());
     data[12..14].copy_from_slice(&(-100_i16).to_le_bytes());
 
-    let row: &TestRow = FromBytes::ref_from_bytes(&data).map_err(|e| e.to_string())?;
+    let row: &TestRow = FromBytes::ref_from_bytes(&data).unwrap();
     check_eq!(row.a.get(), 42);
     check_eq!(row.b.get(), 12345);
     check_eq!(row.c.get(), -100);
@@ -96,7 +96,7 @@ fn unsigned_integers() -> Result<(), Box<dyn std::error::Error>> {
     data[2..6].copy_from_slice(&0xDEADBEEF_u32.to_le_bytes());
     data[6..14].copy_from_slice(&0xCAFEBABEDEADC0DE_u64.to_le_bytes());
 
-    let row: &UnsignedRow = FromBytes::ref_from_bytes(&data).map_err(|e| e.to_string())?;
+    let row: &UnsignedRow = FromBytes::ref_from_bytes(&data).unwrap();
     check_eq!(row.a.get(), 0xFFFF);
     check_eq!(row.b.get(), 0xDEADBEEF);
     check_eq!(row.c.get(), 0xCAFEBABEDEADC0DE);
@@ -115,7 +115,7 @@ fn single_byte_types() -> Result<(), Box<dyn std::error::Error>> {
 
     let data: [u8; 2] = [0xFF, 0xFF]; // -1 for i8, 255 for u8
 
-    let row: &ByteRow = FromBytes::ref_from_bytes(&data).map_err(|e| e.to_string())?;
+    let row: &ByteRow = FromBytes::ref_from_bytes(&data).unwrap();
     check_eq!(row.signed, -1);
     check_eq!(row.unsigned, 255);
     Ok(())
@@ -133,14 +133,14 @@ fn size_validation() -> Result<(), Box<dyn std::error::Error>> {
 
     // Too small
     let data1 = [0u8; 11];
-    let _err = check_err!(I32LE::ref_from_bytes(&data1[..3]).map_err(|e| e.to_string()));
+    let _err = check_err!(I32LE::ref_from_bytes(&data1[..3]));
 
     // Correct size
     let data2 = [0u8; 12];
-    <TestRow as FromBytes>::ref_from_bytes(&data2).map_err(|e| e.to_string())?;
+    <TestRow as FromBytes>::ref_from_bytes(&data2).unwrap();
 
     // Too large is OK - zerocopy allows prefix
     let data3 = [0u8; 20];
-    <TestRow as FromBytes>::ref_from_bytes(&data3[..12]).map_err(|e| e.to_string())?;
+    <TestRow as FromBytes>::ref_from_bytes(&data3[..12]).unwrap();
     Ok(())
 }

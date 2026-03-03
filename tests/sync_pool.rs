@@ -125,9 +125,7 @@ fn pool_max_concurrency() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     for handle in handles {
-        handle
-            .join()
-            .map_err(|e| format!("thread panicked: {e:?}"))??;
+        handle.join().expect("thread panicked")?;
     }
 
     let observed_max = max_active.load(Ordering::SeqCst);
@@ -230,9 +228,7 @@ fn pool_multi_threaded() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     for handle in handles {
-        handle
-            .join()
-            .map_err(|e| format!("thread panicked: {e:?}"))??;
+        handle.join().expect("thread panicked")?;
     }
     Ok(())
 }

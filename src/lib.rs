@@ -1,3 +1,10 @@
+#![warn(
+    clippy::expect_used,
+    clippy::get_unwrap,
+    clippy::unwrap_in_result,
+    clippy::unwrap_used
+)]
+
 mod buffer;
 mod buffer_pool;
 pub mod constant;
