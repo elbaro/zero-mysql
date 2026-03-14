@@ -257,12 +257,17 @@ pub fn read_caching_sha2_password_fast_auth_result(
 ///
 /// XORs the null-terminated password with the scramble (cyclically),
 /// then RSA-OAEP-SHA1 encrypts with the server's public key.
-fn rsa_encrypt_password(password: &str, scramble: &[u8], pem: &str) -> Result<Vec<u8>> {
-    use rsa::pkcs8::DecodePublicKey;
-    use rsa::{Oaep, RsaPublicKey};
+fn rsa_encrypt_password(password: &str, scramble: &[u8], pem_str: &str) -> Result<Vec<u8>> {
+    use aws_lc_rs::rsa::{OAEP_SHA1_MGF1SHA1, OaepPublicEncryptingKey, PublicEncryptingKey};
 
-    let public_key = RsaPublicKey::from_public_key_pem(pem)
-        .map_err(|e| Error::LibraryBug(eyre!("failed to parse RSA public key: {}", e)))?;
+    let pem_data = pem::parse(pem_str)
+        .map_err(|e| Error::LibraryBug(eyre!("failed to parse RSA public key PEM: {}", e)))?;
+
+    let public_key = PublicEncryptingKey::from_der(pem_data.contents())
+        .map_err(|e| Error::LibraryBug(eyre!("failed to parse RSA public key DER: {}", e)))?;
+
+    let oaep_key = OaepPublicEncryptingKey::new(public_key)
+        .map_err(|e| Error::LibraryBug(eyre!("failed to create OAEP key: {}", e)))?;
 
     if scramble.is_empty() {
         return Err(Error::LibraryBug(eyre!(
@@ -279,10 +284,12 @@ fn rsa_encrypt_password(password: &str, scramble: &[u8], pem: &str) -> Result<Ve
         *byte ^= key;
     }
 
-    let padding = Oaep::new::<sha1::Sha1>();
-    public_key
-        .encrypt(&mut rsa::rand_core::OsRng, padding, &buf)
-        .map_err(|e| Error::LibraryBug(eyre!("RSA encryption failed: {}", e)))
+    let mut ciphertext = vec![0u8; oaep_key.ciphertext_size()];
+    let encrypted = oaep_key
+        .encrypt(&OAEP_SHA1_MGF1SHA1, &buf, &mut ciphertext, None)
+        .map_err(|e| Error::LibraryBug(eyre!("RSA encryption failed: {}", e)))?;
+
+    Ok(encrypted.to_vec())
 }
 
 // ============================================================================
@@ -793,23 +800,31 @@ mod tests {
     #[test]
     #[expect(clippy::unwrap_used)]
     fn rsa_encrypt_password_xors_and_encrypts() {
-        use rsa::RsaPrivateKey;
-        use rsa::pkcs8::{EncodePublicKey, LineEnding};
+        use aws_lc_rs::encoding::AsDer;
+        use aws_lc_rs::rsa::{
+            KeySize, OAEP_SHA1_MGF1SHA1, OaepPrivateDecryptingKey, PrivateDecryptingKey,
+        };
+        use aws_lc_rs::signature::KeyPair;
 
-        let mut rng = rsa::rand_core::OsRng;
-        let private_key = RsaPrivateKey::new(&mut rng, 2048).unwrap();
-        let public_key = rsa::RsaPublicKey::from(&private_key);
-        let pem = public_key.to_public_key_pem(LineEnding::LF).unwrap();
+        let key_pair = aws_lc_rs::rsa::KeyPair::generate(KeySize::Rsa2048).unwrap();
+        let private_key_pkcs8 = key_pair.as_der().unwrap();
+        let public_key_der = key_pair.public_key().as_der().unwrap();
+
+        let pem_data = pem::Pem::new("PUBLIC KEY", public_key_der.as_ref().to_vec());
+        let pem_string = pem::encode(&pem_data);
 
         let password = "test_password";
         let scramble = b"01234567890123456789";
 
-        let encrypted = super::rsa_encrypt_password(password, scramble, &pem).unwrap();
+        let encrypted = super::rsa_encrypt_password(password, scramble, &pem_string).unwrap();
 
         // Decrypt and verify
-        use rsa::Oaep;
-        let padding = Oaep::new::<sha1::Sha1>();
-        let decrypted = private_key.decrypt(padding, &encrypted).unwrap();
+        let private_key = PrivateDecryptingKey::from_pkcs8(private_key_pkcs8.as_ref()).unwrap();
+        let oaep_key = OaepPrivateDecryptingKey::new(private_key).unwrap();
+        let mut plaintext = vec![0u8; encrypted.len()];
+        let decrypted = oaep_key
+            .decrypt(&OAEP_SHA1_MGF1SHA1, &encrypted, &mut plaintext, None)
+            .unwrap();
 
         // Decrypted should be XOR(password + '\0', scramble)
         let mut expected = password.as_bytes().to_vec();
