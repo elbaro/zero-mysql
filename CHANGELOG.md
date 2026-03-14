@@ -1,5 +1,17 @@
 # Changelog
 
+## [v0.6.0](https://github.com/elbaro/zero-mysql/compare/v0.5.1...v0.6.0) - 2026-03-14
+
+### <!-- 1 -->Bug fixes
+- replace rsa crate with aws-lc-rs (RUSTSEC-2023-0071) ([#29](https://github.com/elbaro/zero-mysql/pull/29))
+
+### <!-- 9 -->Other
+- [**breaking**] infra!: update breaking dependencies ([#25](https://github.com/elbaro/zero-mysql/pull/25))
+- infra: update non-breaking dependencies ([#28](https://github.com/elbaro/zero-mysql/pull/28))
+- infra: enable platform automerge and remove schedule restriction
+- infra: disable Renovate platformAutomerge
+- tidy: move unwrap/expect clippy lints from Cargo.toml to lib.rs
+
 ## [v0.5.1](https://github.com/elbaro/zero-mysql/compare/v0.5.0...v0.5.1) - 2026-03-02
 
 ### <!-- 1 -->Bug fixes
