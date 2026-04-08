@@ -45,8 +45,8 @@ diesel = { version = "2", features = [
   "i-implement-a-third-party-backend-and-opt-into-breaking-changes",
 ], optional = true }
 zerocopy = { version = "0.8", features = ["derive"] }
-sha1 = "0.10"
-sha2 = "0.10"
+sha1 = "0.11"
+sha2 = "0.11"
 aws-lc-rs = "1"
 pem = "3"
 url = "2"
@@ -145,7 +145,7 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
 criterion = { version = "0.8", features = ["html_reports"] }
 pretty_assertions = "1"
 tracing-subscriber = "0.3"
-mysql = "27"
+mysql = "28"
 mysql_async = "0.36"
 
 [profile.bench]
