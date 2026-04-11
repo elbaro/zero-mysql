@@ -1,5 +1,29 @@
 # Changelog
 
+## [v0.6.0](https://github.com/elbaro/zero-mysql/compare/v0.5.1...v0.6.0) - 2026-04-11
+
+### <!-- 1 -->Bug fixes
+- replace rsa crate with aws-lc-rs (RUSTSEC-2023-0071) ([#29](https://github.com/elbaro/zero-mysql/pull/29))
+
+### <!-- 9 -->Other
+- [**breaking**] infra!: update breaking dependencies ([#30](https://github.com/elbaro/zero-mysql/pull/30))
+- tidy: unify renovate.json formatting across repos
+- infra: disable Renovate dependency dashboard
+- infra: run security audit on main push and PRs, not every branch push
+- infra: update Rust crate tokio to v1.51.1 ([#38](https://github.com/elbaro/zero-mysql/pull/38))
+- infra: update Rust crate tokio to v1.51.0 ([#37](https://github.com/elbaro/zero-mysql/pull/37))
+- infra: update Rust crate mysql_async to v0.36.2 ([#36](https://github.com/elbaro/zero-mysql/pull/36))
+- infra: update Rust crate zerocopy to v0.8.48 ([#35](https://github.com/elbaro/zero-mysql/pull/35))
+- infra: update Rust crate rust_decimal to v1.41.0 ([#34](https://github.com/elbaro/zero-mysql/pull/34))
+- infra: update Rust crate uuid to v1.23.0 ([#33](https://github.com/elbaro/zero-mysql/pull/33))
+- infra: update non-breaking dependencies ([#32](https://github.com/elbaro/zero-mysql/pull/32))
+- infra: update Rust crate zerocopy to v0.8.46 ([#31](https://github.com/elbaro/zero-mysql/pull/31))
+- [**breaking**] infra!: update breaking dependencies ([#25](https://github.com/elbaro/zero-mysql/pull/25))
+- infra: update non-breaking dependencies ([#28](https://github.com/elbaro/zero-mysql/pull/28))
+- infra: enable platform automerge and remove schedule restriction
+- infra: disable Renovate platformAutomerge
+- tidy: move unwrap/expect clippy lints from Cargo.toml to lib.rs
+
 ## [v0.5.1](https://github.com/elbaro/zero-mysql/compare/v0.5.0...v0.5.1) - 2026-03-02
 
 ### <!-- 1 -->Bug fixes
