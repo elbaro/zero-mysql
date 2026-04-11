@@ -1,8 +1,6 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": [
-    "config:recommended"
-  ],
+  "extends": ["config:recommended"],
   "dependencyDashboard": false,
   "timezone": "Asia/Seoul",
   "platformAutomerge": true,
@@ -16,40 +14,27 @@
   "commitMessageExtra": "to {{#if isPinDigest}}{{{newDigestShort}}}{{else}}{{#if isMajor}}v{{{newMajor}}}{{else}}{{#if isSingleVersion}}v{{{newVersion}}}{{else}}{{{newValue}}}{{/if}}{{/if}}{{/if}}",
   "packageRules": [
     {
-      "matchUpdateTypes": [
-        "major"
-      ],
+      "matchUpdateTypes": ["major"],
       "commitMessagePrefix": "infra!: ",
       "groupName": "breaking dependencies",
       "groupSlug": "breaking"
     },
     {
-      "matchUpdateTypes": [
-        "minor"
-      ],
+      "matchUpdateTypes": ["minor"],
       "matchCurrentVersion": "<1.0.0",
       "commitMessagePrefix": "infra!: ",
       "groupName": "breaking dependencies",
       "groupSlug": "breaking"
     },
     {
-      "matchUpdateTypes": [
-        "minor",
-        "patch",
-        "pin",
-        "digest"
-      ],
+      "matchUpdateTypes": ["minor", "patch", "pin", "digest"],
       "matchCurrentVersion": ">=1.0.0",
       "groupName": "non-breaking dependencies",
       "groupSlug": "non-breaking",
       "automerge": true
     },
     {
-      "matchUpdateTypes": [
-        "patch",
-        "pin",
-        "digest"
-      ],
+      "matchUpdateTypes": ["patch", "pin", "digest"],
       "matchCurrentVersion": "<1.0.0",
       "groupName": "non-breaking dependencies",
       "groupSlug": "non-breaking",
