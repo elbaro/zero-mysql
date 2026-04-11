@@ -3,6 +3,7 @@
   "extends": [
     "config:recommended"
   ],
+  "dependencyDashboard": false,
   "timezone": "Asia/Seoul",
   "platformAutomerge": true,
   "prHourlyLimit": 0,
