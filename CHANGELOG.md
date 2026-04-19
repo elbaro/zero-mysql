@@ -1,5 +1,16 @@
 # Changelog
 
+## [v0.6.1](https://github.com/elbaro/zero-mysql/compare/v0.6.0...v0.6.1) - 2026-04-19
+
+### <!-- 9 -->Other
+- infra: remove paths filter so audit required check reports on every PR
+- infra: refresh Cargo.lock
+- infra: add deny.toml
+- infra: update Rust crate tokio to v1.52.1 ([#44](https://github.com/elbaro/zero-mysql/pull/44))
+- infra: update non-breaking dependencies to v1.16.3 ([#43](https://github.com/elbaro/zero-mysql/pull/43))
+- infra: update non-breaking dependencies ([#42](https://github.com/elbaro/zero-mysql/pull/42))
+- infra: skip release commits in changelog parsers
+
 ## [v0.6.0](https://github.com/elbaro/zero-mysql/compare/v0.5.1...v0.6.0) - 2026-04-11
 
 ### <!-- 1 -->Bug fixes
