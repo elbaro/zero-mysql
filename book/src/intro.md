@@ -7,7 +7,7 @@ zero-mysql is a high-performance MySQL client library for Rust.
 zero-mysql = "*"
 ```
 
-**Requires Rust nightly.**
+See [Feature Flags in the README](https://github.com/elbaro/zero-mysql#feature-flags).
 
 ## Quick Start
 
@@ -29,24 +29,3 @@ conn.transaction(|conn, _tx| {
     Ok(())
 })?;
 ```
-
-## Features
-
-- **Zero-Copy**: Minimal allocations and copies in hot paths
-- **Zero-Allocation**: Reuse buffers across queries
-- **Sync and Async**: Both `sync` and `tokio` modules available
-- **Binary Protocol**: Prepared statements with automatic caching
-- **MariaDB Bulk Execution**: Single round-trip bulk operations
-- **Customizable Deserialization**: Process rows without intermediate allocations
-
-## Feature Flags
-
-- `sync` (default): Synchronous API
-- `tokio` (default): Asynchronous API with Tokio
-- `sync-tls`: TLS support for synchronous API (experimental)
-- `tokio-tls`: TLS support for asynchronous API (experimental)
-
-## Limitations
-
-- **No Streaming**: All results are fetched into memory
-- **Nightly Rust Required**: Uses unstable features for performance
