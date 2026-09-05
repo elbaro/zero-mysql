@@ -1,5 +1,52 @@
 # Changelog
 
+## [v0.7.0](https://github.com/elbaro/zero-mysql/compare/v0.6.0...v0.7.0) - 2026-09-05
+
+### <!-- 1 -->Bug fixes
+- new syntax for release-plz
+
+### <!-- 3 -->Documentation
+- clean up
+
+### <!-- 9 -->Other
+- infra: update Rust crate crossbeam-queue to v0.3.14 ([#69](https://github.com/elbaro/zero-mysql/pull/69))
+- infra: update Rust crate syn to v3.0.5 ([#68](https://github.com/elbaro/zero-mysql/pull/68))
+- infra: update Rust crate diesel to v2.3.13 ([#67](https://github.com/elbaro/zero-mysql/pull/67))
+- infra: update Rust crate rust_decimal to v1.43.0 ([#66](https://github.com/elbaro/zero-mysql/pull/66))
+- infra: update Rust crate aws-lc-rs to v1.18.1 ([#65](https://github.com/elbaro/zero-mysql/pull/65))
+- infra: update non-breaking dependencies ([#64](https://github.com/elbaro/zero-mysql/pull/64))
+- infra: update Rust crate uuid to v1.26.0 ([#63](https://github.com/elbaro/zero-mysql/pull/63))
+- infra: update Rust crate syn to v3.0.4 ([#62](https://github.com/elbaro/zero-mysql/pull/62))
+- infra: update non-breaking dependencies ([#61](https://github.com/elbaro/zero-mysql/pull/61))
+- infra: update Rust crate compio to v0.19.2 ([#60](https://github.com/elbaro/zero-mysql/pull/60))
+- infra: update Rust crate uuid to v1.24.1 ([#59](https://github.com/elbaro/zero-mysql/pull/59))
+- infra: accept zlib license
+- infra: update EmbarkStudios/cargo-deny-action action to v2.1.1 ([#53](https://github.com/elbaro/zero-mysql/pull/53))
+- [**breaking**] infra!: update breaking dependencies ([#55](https://github.com/elbaro/zero-mysql/pull/55))
+- infra: update Rust crate zerocopy to v0.8.50 ([#58](https://github.com/elbaro/zero-mysql/pull/58))
+- infra: update Rust crate uuid to v1.23.2 ([#57](https://github.com/elbaro/zero-mysql/pull/57))
+- infra: update Rust crate zerocopy to v0.8.49 ([#56](https://github.com/elbaro/zero-mysql/pull/56))
+- infra: update Rust crate log to v0.4.30 ([#54](https://github.com/elbaro/zero-mysql/pull/54))
+- infra: update EmbarkStudios/cargo-deny-action action to v2.0.18 ([#51](https://github.com/elbaro/zero-mysql/pull/51))
+- infra: update Rust crate aws-lc-rs to v1.17.0 ([#52](https://github.com/elbaro/zero-mysql/pull/52))
+- infra: update Rust crate tokio to v1.52.3 ([#50](https://github.com/elbaro/zero-mysql/pull/50))
+- infra: update Rust crate rust_decimal to v1.42.0 ([#49](https://github.com/elbaro/zero-mysql/pull/49))
+- infra: update Rust crate tokio to v1.52.2 ([#48](https://github.com/elbaro/zero-mysql/pull/48))
+- infra: update Rust crate diesel to v2.3.9 ([#47](https://github.com/elbaro/zero-mysql/pull/47))
+- infra: update Rust crate diesel to v2.3.8 ([#46](https://github.com/elbaro/zero-mysql/pull/46))
+- infra: waive RUSTSEC-2024-0436 for transitive paste
+- [**breaking**] infra!: update actions/upload-pages-artifact action to v5 ([#41](https://github.com/elbaro/zero-mysql/pull/41))
+- infra: switch CI Rust toolchain from nightly to stable
+- infra: use cargo-deny-action v2.0.17
+- infra: replace rustsec/audit-check with cargo-deny-action
+- infra: remove paths filter so audit required check reports on every PR
+- infra: refresh Cargo.lock
+- infra: add deny.toml
+- infra: update Rust crate tokio to v1.52.1 ([#44](https://github.com/elbaro/zero-mysql/pull/44))
+- infra: update non-breaking dependencies to v1.16.3 ([#43](https://github.com/elbaro/zero-mysql/pull/43))
+- infra: update non-breaking dependencies ([#42](https://github.com/elbaro/zero-mysql/pull/42))
+- infra: skip release commits in changelog parsers
+
 ## [v0.6.0](https://github.com/elbaro/zero-mysql/compare/v0.5.1...v0.6.0) - 2026-04-11
 
 ### <!-- 1 -->Bug fixes
