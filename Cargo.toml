@@ -1,6 +1,6 @@
 [package]
 name = "zero-mysql"
-version = "0.6.0"
+version = "0.7.0"
 edition = "2024"
 license = "MIT"
 description = "A high-performance MySQL client"
@@ -59,7 +59,7 @@ std-semaphore = "0.1"
 color-eyre = "0.6"
 simdutf8 = "0.1"
 smart-default = "0.7"
-zero-mysql-derive = { version = "0.2", path = "zero-mysql-derive", optional = true }
+zero-mysql-derive = { version = "0.3", path = "zero-mysql-derive", optional = true }
 uuid = { version = "1", optional = true }
 chrono = { version = "0.4", default-features = false, optional = true }
 time = { version = "0.3", optional = true }
