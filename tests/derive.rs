@@ -12,10 +12,13 @@ include!("common/check.rs");
 include!("common/check_eq.rs");
 include!("common/check_err.rs");
 
-const TEST_URL: &str = "mysql://test:1234@localhost:3306/test";
+fn test_url() -> String {
+    std::env::var("DATABASE_URL")
+        .unwrap_or_else(|_| "mysql://test:1234@localhost:3306/test".to_string())
+}
 
 fn get_conn() -> Result<Conn, zero_mysql::error::Error> {
-    let opts = Opts::try_from(TEST_URL)?;
+    let opts = Opts::try_from(test_url().as_str())?;
     Conn::new(opts)
 }
 

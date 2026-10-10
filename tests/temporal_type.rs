@@ -73,10 +73,15 @@ impl BinaryResultSetHandler for DatetimeTypeCollector {
     }
 }
 
+fn test_url() -> String {
+    std::env::var("DATABASE_URL")
+        .unwrap_or_else(|_| "mysql://test:1234@localhost:3306/test".to_string())
+}
+
 #[test]
 fn datetime6_with_different_inputs() -> Result<()> {
     // Test how DATETIME(6) column handles ymd, ymd-hms, and ymd-hms-micro inputs
-    let mut conn = zero_mysql::sync::Conn::new("mysql://test:1234@localhost:3306/test")?;
+    let mut conn = zero_mysql::sync::Conn::new(test_url().as_str())?;
 
     conn.query_drop(
         "CREATE TEMPORARY TABLE test_datetime6 (
@@ -148,7 +153,7 @@ fn datetime6_with_different_inputs() -> Result<()> {
 #[test]
 fn datetime6_binary_protocol_insert() -> Result<()> {
     // Test binary protocol INSERT with prepared statements
-    let mut conn = zero_mysql::sync::Conn::new("mysql://test:1234@localhost:3306/test")?;
+    let mut conn = zero_mysql::sync::Conn::new(test_url().as_str())?;
 
     conn.query_drop(
         "CREATE TEMPORARY TABLE test_datetime6_binary (

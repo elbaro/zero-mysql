@@ -9,11 +9,14 @@ use zero_mysql::sync::Pool;
 include!("common/check.rs");
 include!("common/check_eq.rs");
 
-const TEST_URL: &str = "mysql://test:1234@localhost:3306/test";
+fn test_url() -> String {
+    std::env::var("DATABASE_URL")
+        .unwrap_or_else(|_| "mysql://test:1234@localhost:3306/test".to_string())
+}
 
 #[test]
 fn pool_basic() -> Result<(), Box<dyn std::error::Error>> {
-    let opts = Opts::try_from(TEST_URL)?;
+    let opts = Opts::try_from(test_url().as_str())?;
     let pool = Arc::new(Pool::new(opts));
 
     let mut conn = pool.get()?;
@@ -23,7 +26,7 @@ fn pool_basic() -> Result<(), Box<dyn std::error::Error>> {
 
 #[test]
 fn pool_connection_reuse() -> Result<(), Box<dyn std::error::Error>> {
-    let mut opts = Opts::try_from(TEST_URL)?;
+    let mut opts = Opts::try_from(test_url().as_str())?;
     opts.pool_max_idle_conn = 1;
     opts.pool_reset_conn = false;
     let pool = Arc::new(Pool::new(opts));
@@ -43,7 +46,7 @@ fn pool_connection_reuse() -> Result<(), Box<dyn std::error::Error>> {
 
 #[test]
 fn pool_max_idle_conn() -> Result<(), Box<dyn std::error::Error>> {
-    let mut opts = Opts::try_from(TEST_URL)?;
+    let mut opts = Opts::try_from(test_url().as_str())?;
     opts.pool_max_idle_conn = 2;
     opts.pool_reset_conn = false;
     let pool = Arc::new(Pool::new(opts));
@@ -83,7 +86,7 @@ fn pool_max_concurrency() -> Result<(), Box<dyn std::error::Error>> {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
 
-    let mut opts = Opts::try_from(TEST_URL)?;
+    let mut opts = Opts::try_from(test_url().as_str())?;
     opts.pool_max_concurrency = Some(2);
     opts.pool_reset_conn = false;
     let pool = Arc::new(Pool::new(opts));
@@ -138,7 +141,7 @@ fn pool_max_concurrency() -> Result<(), Box<dyn std::error::Error>> {
 
 #[test]
 fn pool_reset_conn() -> Result<(), Box<dyn std::error::Error>> {
-    let mut opts = Opts::try_from(TEST_URL)?;
+    let mut opts = Opts::try_from(test_url().as_str())?;
     opts.pool_max_idle_conn = 1;
     opts.pool_reset_conn = true;
     let pool = Arc::new(Pool::new(opts));
@@ -209,7 +212,7 @@ fn pool_reset_conn() -> Result<(), Box<dyn std::error::Error>> {
 
 #[test]
 fn pool_multi_threaded() -> Result<(), Box<dyn std::error::Error>> {
-    let mut opts = Opts::try_from(TEST_URL)?;
+    let mut opts = Opts::try_from(test_url().as_str())?;
     opts.pool_max_idle_conn = 5;
     opts.pool_reset_conn = false;
     let pool = Arc::new(Pool::new(opts));
