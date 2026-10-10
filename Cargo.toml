@@ -2,7 +2,7 @@
 name = "zero-mysql"
 version = "0.6.0"
 edition = "2024"
-license = "MIT"
+license = "BlueOak-1.0.0"
 description = "A high-performance MySQL client"
 repository = "https://github.com/elbaro/zero-mysql"
 keywords = ["mysql", "mariadb", "database", "sql", "async"]
