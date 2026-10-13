@@ -39,13 +39,13 @@ jobs:
             health-cmd: "healthcheck.sh --connect --innodb_initialized"
           - db-image: mariadb:12.3
             health-cmd: "healthcheck.sh --connect --innodb_initialized"
-          - db-image: percona/percona-server:8.0
-            health-cmd: "mysqladmin ping -h 127.0.0.1 -u root"
           - db-image: percona/percona-server:8.4
             health-cmd: "mysqladmin ping -h 127.0.0.1 -u root"
-          - db-image: mysql:8.0
+          - db-image: percona/percona-server:9.7
             health-cmd: "mysqladmin ping -h 127.0.0.1 -u root"
           - db-image: mysql:8.4
+            health-cmd: "mysqladmin ping -h 127.0.0.1 -u root"
+          - db-image: mysql:9.7
             health-cmd: "mysqladmin ping -h 127.0.0.1 -u root"
     services:
       mysql:
