@@ -1,5 +1,5 @@
-use crate::Opts;
 use crate::test_macros::{check, check_eq, check_err};
+use crate::{Opts, TlsMode};
 
 #[test]
 fn default_opts() -> crate::error::Result<()> {
@@ -12,7 +12,7 @@ fn default_opts() -> crate::error::Result<()> {
     check!(opts.socket.is_none());
     check!(opts.user.is_empty());
     check!(opts.password.is_empty());
-    check!(!opts.tls);
+    check_eq!(opts.tls_mode, TlsMode::Prefer);
     check!(opts.upgrade_to_unix_socket);
     check!(opts.init_command.is_none());
     check!(opts.pool_reset_conn);
@@ -83,34 +83,22 @@ fn parse_socket_param() -> crate::error::Result<()> {
 }
 
 #[test]
-fn parse_tls_param() -> crate::error::Result<()> {
-    let opts1 = Opts::try_from("mysql://localhost?tls=true")?;
-    check!(opts1.tls);
+fn parse_tls_mode_param() -> crate::error::Result<()> {
+    let opts1 = Opts::try_from("mysql://localhost?tls_mode=disable")?;
+    check_eq!(opts1.tls_mode, TlsMode::Disable);
 
-    let opts2 = Opts::try_from("mysql://localhost?tls=1")?;
-    check!(opts2.tls);
+    let opts2 = Opts::try_from("mysql://localhost?tls_mode=prefer")?;
+    check_eq!(opts2.tls_mode, TlsMode::Prefer);
 
-    let opts3 = Opts::try_from("mysql://localhost?tls=True")?;
-    check!(opts3.tls);
-
-    let opts4 = Opts::try_from("mysql://localhost?tls=false")?;
-    check!(!opts4.tls);
-
-    let opts5 = Opts::try_from("mysql://localhost?tls=0")?;
-    check!(!opts5.tls);
-
-    let opts6 = Opts::try_from("mysql://localhost?tls=False")?;
-    check!(!opts6.tls);
+    let opts3 = Opts::try_from("mysql://localhost?tls_mode=require")?;
+    check_eq!(opts3.tls_mode, TlsMode::Require);
     Ok(())
 }
 
 #[test]
-fn parse_ssl_param() -> crate::error::Result<()> {
-    let opts1 = Opts::try_from("mysql://localhost?ssl=true")?;
-    check!(opts1.tls);
-
-    let opts2 = Opts::try_from("mysql://localhost?ssl=false")?;
-    check!(!opts2.tls);
+fn parse_invalid_tls_mode_param() -> crate::error::Result<()> {
+    let err = check_err!(Opts::try_from("mysql://localhost?tls_mode=true"));
+    check!(err.to_string().contains("Invalid tls_mode"));
     Ok(())
 }
 
@@ -181,14 +169,14 @@ fn parse_pool_max_concurrency_param() -> crate::error::Result<()> {
 #[test]
 fn parse_multiple_params() -> crate::error::Result<()> {
     let opts = Opts::try_from(
-        "mysql://root:pass@localhost:3307/mydb?tls=true&compress=true&pool_max_idle_conn=50",
+        "mysql://root:pass@localhost:3307/mydb?tls_mode=require&compress=true&pool_max_idle_conn=50",
     )?;
     check_eq!(opts.host, "localhost");
     check_eq!(opts.port, 3307);
     check_eq!(opts.user, "root");
     check_eq!(opts.password.as_str(), "pass");
     check_eq!(opts.db.as_deref(), Some("mydb"));
-    check!(opts.tls);
+    check_eq!(opts.tls_mode, TlsMode::Require);
     check!(opts.compress);
     check_eq!(opts.pool_max_idle_conn, 50);
     Ok(())
@@ -220,7 +208,7 @@ fn error_unknown_param() -> crate::error::Result<()> {
 
 #[test]
 fn error_invalid_bool_value() -> crate::error::Result<()> {
-    let result = Opts::try_from("mysql://localhost?tls=yes");
+    let result = Opts::try_from("mysql://localhost?compress=yes");
     let err = check_err!(result);
     check!(err.to_string().contains("Invalid boolean value"));
     Ok(())

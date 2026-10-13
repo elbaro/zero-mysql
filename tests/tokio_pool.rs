@@ -10,7 +10,7 @@ include!("common/check_eq.rs");
 
 fn test_url() -> String {
     std::env::var("DATABASE_URL")
-        .unwrap_or_else(|_| "mysql://test:1234@localhost:3306/test".to_string())
+        .unwrap_or_else(|_| "mysql://test:1234@localhost:3306/test?tls_mode=disable".to_string())
 }
 
 #[tokio::test]

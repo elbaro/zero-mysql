@@ -6,6 +6,18 @@ use crate::buffer_pool::{BufferPool, GLOBAL_BUFFER_POOL};
 use crate::constant::CapabilityFlags;
 use crate::error::Error;
 
+/// TLS connection mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TlsMode {
+    /// Don't use TLS (Insecure)
+    Disable,
+    /// Try TLS, fall back to unencrypted if the server does not support TLS (Insecure)
+    #[default]
+    Prefer,
+    /// Require TLS (Recommended)
+    Require,
+}
+
 /// A configuration for connection
 ///
 /// ```rs
@@ -64,10 +76,10 @@ pub struct Opts {
     /// Default: `""`
     pub password: String,
 
-    /// Enable TLS.
+    /// TLS connection mode.
     ///
-    /// Default: `false`
-    pub tls: bool,
+    /// Default: `TlsMode::Prefer`
+    pub tls_mode: TlsMode,
 
     /// When connected via TCP, read `SELECT @@socket` and reconnect to the unix socket.
     /// Only has effect on Unix platforms.
@@ -114,7 +126,7 @@ impl Default for Opts {
             socket: None,
             user: String::new(),
             password: String::new(),
-            tls: false,
+            tls_mode: TlsMode::Prefer,
             upgrade_to_unix_socket: true,
             init_command: None,
             pool_reset_conn: true,
@@ -159,7 +171,7 @@ fn parse_usize(key: &str, value: &str) -> Result<usize, Error> {
 /// # Query Parameters
 ///
 /// - `socket`
-/// - `tls` (or `ssl`)
+/// - `tls_mode`: `disable`, `prefer`, `require`
 /// - `compress`
 /// - `tcp_nodelay`
 /// - `upgrade_to_unix_socket`
@@ -182,7 +194,7 @@ fn parse_usize(key: &str, value: &str) -> Result<usize, Error> {
 /// let opts = Opts::try_from("mysql://root:password@localhost:3306/mydb").unwrap();
 ///
 /// // With query parameters
-/// let opts = Opts::try_from("mysql://localhost?tls=true&compress=true").unwrap();
+/// let opts = Opts::try_from("mysql://localhost?tls_mode=require&compress=true").unwrap();
 ///
 /// // Unix socket (hostname is ignored)
 /// let opts = Opts::try_from("mysql://localhost?socket=/var/run/mysqld/mysqld.sock").unwrap();
@@ -220,7 +232,19 @@ impl TryFrom<&Url> for Opts {
         for (key, value) in url.query_pairs() {
             match key.as_ref() {
                 "socket" => opts.socket = Some(value.into_owned()),
-                "tls" | "ssl" => opts.tls = parse_bool(&key, &value)?,
+                "tls_mode" => {
+                    opts.tls_mode = match value.as_ref() {
+                        "disable" => TlsMode::Disable,
+                        "prefer" => TlsMode::Prefer,
+                        "require" => TlsMode::Require,
+                        _ => {
+                            return Err(Error::BadUsageError(format!(
+                                "Invalid tls_mode: expected one of ['disable', 'prefer', 'require'], got {}",
+                                value
+                            )));
+                        }
+                    };
+                }
                 "compress" => opts.compress = parse_bool(&key, &value)?,
                 "tcp_nodelay" => opts.tcp_nodelay = parse_bool(&key, &value)?,
                 "upgrade_to_unix_socket" => opts.upgrade_to_unix_socket = parse_bool(&key, &value)?,

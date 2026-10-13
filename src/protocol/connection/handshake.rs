@@ -8,7 +8,7 @@ use crate::constant::{
     MARIADB_CAPABILITIES_ENABLED, MAX_ALLOWED_PACKET, MariadbCapabilityFlags, UTF8MB4_GENERAL_CI,
 };
 use crate::error::{Error, Result, eyre};
-use crate::opts::Opts;
+use crate::opts::{Opts, TlsMode};
 use crate::protocol::primitive::*;
 use crate::protocol::response::ErrPayloadBytes;
 
@@ -401,11 +401,33 @@ impl<'a> Handshake<'a> {
                 if self.opts.db.is_some() {
                     client_caps |= CapabilityFlags::CLIENT_CONNECT_WITH_DB;
                 }
-                if self.opts.tls {
+                let client_supports_tls = cfg!(any(
+                    feature = "sync-tls",
+                    feature = "tokio-tls",
+                    feature = "compio-tls"
+                ));
+                let request_tls = match self.opts.tls_mode {
+                    TlsMode::Disable => false,
+                    TlsMode::Prefer => client_supports_tls,
+                    TlsMode::Require if !client_supports_tls => {
+                        return Err(Error::BadUsageError(
+                            "TLS required but no TLS feature is enabled".to_string(),
+                        ));
+                    }
+                    TlsMode::Require => true,
+                };
+                if request_tls {
                     client_caps |= CapabilityFlags::CLIENT_SSL;
                 }
 
                 let negotiated_caps = client_caps & handshake.capability_flags;
+                if self.opts.tls_mode == TlsMode::Require
+                    && !negotiated_caps.contains(CapabilityFlags::CLIENT_SSL)
+                {
+                    return Err(Error::Unsupported(
+                        "TLS required but not supported by server".to_string(),
+                    ));
+                }
                 let mariadb_caps = if negotiated_caps.is_mariadb() {
                     if !handshake
                         .mariadb_capabilities
@@ -427,7 +449,7 @@ impl<'a> Handshake<'a> {
                 self.initial_handshake = Some(handshake);
 
                 // TLS: SSLRequest + HandshakeResponse
-                if self.opts.tls && negotiated_caps.contains(CapabilityFlags::CLIENT_SSL) {
+                if negotiated_caps.contains(CapabilityFlags::CLIENT_SSL) {
                     write_ssl_request(buffer_set.new_write_buffer(), negotiated_caps, mariadb_caps);
 
                     let seq = self.next_sequence_id;

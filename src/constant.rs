@@ -159,7 +159,7 @@ pub const CAPABILITIES_ALWAYS_DISABLED: CapabilityFlags =
         .union(CapabilityFlags::CLIENT_ZSTD_COMPRESSION_ALGORITHM)
         .union(CapabilityFlags::CLIENT_MULTI_FACTOR_AUTHENTICATION)
         .union(CapabilityFlags::CLIENT_CAPABILITY_EXTENSION)
-        .union(CapabilityFlags::CLIENT_SSL) // set by opts.tls
+        .union(CapabilityFlags::CLIENT_SSL) // set by opts.tls_mode
         .union(CapabilityFlags::CLIENT_SSL_VERIFY_SERVER_CERT)
         .union(CapabilityFlags::CLIENT_REMEMBER_OPTIONS)
         .union(CapabilityFlags::CLIENT_CONNECT_ATTRS) // TODO

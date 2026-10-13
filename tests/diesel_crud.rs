@@ -13,7 +13,7 @@ include!("common/check_eq.rs");
 
 fn establish_connection() -> Result<zero_mysql::diesel::Connection, Box<dyn std::error::Error>> {
     let url = env::var("DATABASE_URL")
-        .unwrap_or_else(|_| "mysql://test:1234@localhost:3306/test".to_string());
+        .unwrap_or_else(|_| "mysql://test:1234@localhost:3306/test?tls_mode=disable".to_string());
     Ok(<zero_mysql::diesel::Connection as diesel::Connection>::establish(&url)?)
 }
 

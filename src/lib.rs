@@ -21,7 +21,7 @@ pub mod value;
 
 pub use buffer::BufferSet;
 pub use buffer_pool::BufferPool;
-pub use opts::Opts;
+pub use opts::{Opts, TlsMode};
 pub use prepared::PreparedStatement;
 
 #[cfg(feature = "tokio")]

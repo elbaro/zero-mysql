@@ -12,7 +12,7 @@ static TABLE_COUNTER: AtomicU32 = AtomicU32::new(0);
 
 fn get_conn() -> Result<Conn, Error> {
     let url = env::var("DATABASE_URL")
-        .unwrap_or_else(|_| "mysql://test:1234@localhost:3306/test".to_string());
+        .unwrap_or_else(|_| "mysql://test:1234@localhost:3306/test?tls_mode=disable".to_string());
     Conn::new(url.as_str())
 }
 
