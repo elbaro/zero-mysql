@@ -247,9 +247,32 @@ fn parse_ipv6_address() -> crate::error::Result<()> {
 
 #[test]
 fn parse_url_encoded_password() -> crate::error::Result<()> {
-    // URL library preserves percent-encoded characters in password
     let opts = Opts::try_from("mysql://root:p%40ssw%2Frd@localhost")?;
-    check_eq!(opts.password.as_str(), "p%40ssw%2Frd");
+    check_eq!(opts.password.as_str(), "p@ssw/rd");
+    Ok(())
+}
+
+#[test]
+fn parse_url_encoded_user_and_db() -> crate::error::Result<()> {
+    let opts = Opts::try_from("mysql://al%40ice:pass@localhost/my%20db")?;
+    check_eq!(opts.user, "al@ice");
+    check_eq!(opts.db.as_deref(), Some("my db"));
+    Ok(())
+}
+
+#[test]
+fn parse_raw_at_sign_in_password() -> crate::error::Result<()> {
+    // Url re-encodes the raw '@' as %40.
+    let opts = Opts::try_from("mysql://root:p@ss@localhost")?;
+    check_eq!(opts.password.as_str(), "p@ss");
+    check_eq!(opts.host, "localhost");
+    Ok(())
+}
+
+#[test]
+fn parse_invalid_utf8_in_password() -> crate::error::Result<()> {
+    let err = check_err!(Opts::try_from("mysql://root:%FF@localhost"));
+    check!(err.to_string().contains("Invalid UTF-8 in URL"));
     Ok(())
 }
 

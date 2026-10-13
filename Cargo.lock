@@ -2967,6 +2967,7 @@ dependencies = [
  "mysql_async",
  "native-tls",
  "pem",
+ "percent-encoding",
  "pretty_assertions",
  "rust_decimal",
  "sha1 0.11.0",

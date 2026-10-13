@@ -160,6 +160,17 @@ fn parse_usize(key: &str, value: &str) -> Result<usize, Error> {
     })
 }
 
+/// Decode a percent-encoded URL component such as the user or password.
+///
+/// `Url` keeps these components encoded, and it encodes some raw characters
+/// itself, so `p@ss` comes back from `Url::password()` as `p%40ss`.
+fn percent_decode(s: &str) -> Result<String, Error> {
+    percent_encoding::percent_decode_str(s)
+        .decode_utf8()
+        .map(|s| s.into_owned())
+        .map_err(|e| Error::BadUsageError(format!("Invalid UTF-8 in URL: {}", e)))
+}
+
 /// Parse connection options from a MySQL URL.
 ///
 /// # URL Format
@@ -181,6 +192,10 @@ fn parse_usize(key: &str, value: &str) -> Result<usize, Error> {
 /// - `pool_max_concurrency`
 ///
 /// Boolean values accept: `1`, `0`, `true`, `false`, `True`, `False`
+///
+/// The user, password and database are percent-decoded, so characters such as
+/// `/`, `#` and `?` can be written as `%2F`, `%23` and `%3F`. A literal `%`
+/// followed by two hex digits must be written as `%25`.
 ///
 /// # Examples
 ///
@@ -212,13 +227,14 @@ impl TryFrom<&Url> for Opts {
 
         let host = url.host_str().unwrap_or_default().to_string();
         let port = url.port().unwrap_or(3306);
-        let user = url.username().to_string();
-        let password = url.password().unwrap_or_default().to_string();
+        let user = percent_decode(url.username())?;
+        let password = percent_decode(url.password().unwrap_or_default())?;
         let db = url
             .path()
             .strip_prefix('/')
             .filter(|db| !db.is_empty())
-            .map(ToString::to_string);
+            .map(percent_decode)
+            .transpose()?;
 
         let mut opts = Self {
             host,
