@@ -5,6 +5,8 @@
     clippy::unwrap_used
 )]
 
+//! A high-performance MySQL client library.
+
 mod buffer;
 mod buffer_pool;
 pub mod constant;
