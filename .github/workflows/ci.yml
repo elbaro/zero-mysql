@@ -28,7 +28,7 @@ jobs:
       - run: cargo clippy --all-targets --all-features -- -D warnings
 
   test-db-backends:
-    name: Test / ${{ matrix.db-image }}
+    name: Test / ${{ matrix.db-name || matrix.db-image }}
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -42,12 +42,16 @@ jobs:
           - db-image: mariadb:12.3
             health-cmd: "healthcheck.sh --connect --innodb_initialized"
           - db-image: percona/percona-server:8.4
+            db-name: percona-mysql:8.4
             health-cmd: "mysqladmin ping -h 127.0.0.1 -u root"
           - db-image: percona/percona-server:9.7
+            db-name: percona-mysql:9.7
             health-cmd: "mysqladmin ping -h 127.0.0.1 -u root"
           - db-image: mysql:8.4
+            db-name: oracle-mysql:8.4
             health-cmd: "mysqladmin ping -h 127.0.0.1 -u root"
           - db-image: mysql:9.7
+            db-name: oracle-mysql:9.7
             health-cmd: "mysqladmin ping -h 127.0.0.1 -u root"
     services:
       mysql:
