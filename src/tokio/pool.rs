@@ -46,11 +46,11 @@ impl Pool {
         Ok(PooledConn {
             conn: ManuallyDrop::new(conn),
             pool: Arc::clone(self),
-            _permit: permit,
+            permit,
         })
     }
 
-    fn check_in(self: &Arc<Self>, mut conn: Conn) {
+    fn check_in(self: &Arc<Self>, mut conn: Conn, permit: Option<OwnedSemaphorePermit>) {
         if conn.is_broken() {
             return;
         }
@@ -63,6 +63,7 @@ impl Pool {
                 if conn.reset().await.is_ok() {
                     let _ = pool.conns.push(conn);
                 }
+                drop(permit);
             });
         } else {
             let _ = self.conns.push(conn);
@@ -73,7 +74,7 @@ impl Pool {
 pub struct PooledConn {
     pool: Arc<Pool>,
     conn: ManuallyDrop<Conn>,
-    _permit: Option<OwnedSemaphorePermit>,
+    permit: Option<OwnedSemaphorePermit>,
 }
 
 impl Deref for PooledConn {
@@ -93,6 +94,6 @@ impl Drop for PooledConn {
     fn drop(&mut self) {
         // SAFETY: conn is never accessed after this
         let conn = unsafe { ManuallyDrop::take(&mut self.conn) };
-        self.pool.check_in(conn);
+        self.pool.check_in(conn, self.permit.take());
     }
 }
