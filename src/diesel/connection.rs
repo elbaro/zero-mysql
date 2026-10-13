@@ -111,14 +111,21 @@ fn into_diesel_error(e: crate::error::Error) -> diesel::result::Error {
         crate::error::Error::ServerError(server_error) => {
             let code = server_error.error_code;
             let kind = match code {
-                // ER_DUP_ENTRY, ER_DUP_ENTRY_WITH_KEY_NAME
-                1062 | 1586 => diesel::result::DatabaseErrorKind::UniqueViolation,
-                // ER_ROW_IS_REFERENCED_2, ER_NO_REFERENCED_ROW_2
-                1451 | 1452 => diesel::result::DatabaseErrorKind::ForeignKeyViolation,
-                // ER_BAD_NULL_ERROR
-                1048 => diesel::result::DatabaseErrorKind::NotNullViolation,
+                // ER_DUP_ENTRY, ER_DUP_ENTRY_WITH_KEY_NAME, ER_DUP_UNKNOWN_IN_INDEX
+                1062 | 1586 | 1859 => diesel::result::DatabaseErrorKind::UniqueViolation,
+                // ER_NO_REFERENCED_ROW, ER_ROW_IS_REFERENCED, ER_ROW_IS_REFERENCED_2,
+                // ER_NO_REFERENCED_ROW_2, ER_FK_COLUMN_NOT_NULL, ER_FK_CANNOT_DELETE_PARENT
+                1216 | 1217 | 1451 | 1452 | 1830 | 1834 => {
+                    diesel::result::DatabaseErrorKind::ForeignKeyViolation
+                }
+                // ER_CANT_EXECUTE_IN_READ_ONLY_TRANSACTION
+                1792 => diesel::result::DatabaseErrorKind::ReadOnlyTransaction,
+                // ER_BAD_NULL_ERROR, ER_NO_DEFAULT_FOR_FIELD
+                1048 | 1364 => diesel::result::DatabaseErrorKind::NotNullViolation,
                 // ER_CHECK_CONSTRAINT_VIOLATED
                 3819 => diesel::result::DatabaseErrorKind::CheckViolation,
+                // ER_LOCK_DEADLOCK
+                1213 => diesel::result::DatabaseErrorKind::SerializationFailure,
                 _ => diesel::result::DatabaseErrorKind::Unknown,
             };
             diesel::result::Error::DatabaseError(
