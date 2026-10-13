@@ -6,6 +6,8 @@
 )]
 
 //! A high-performance MySQL client library.
+//!
+//! [User Guide](https://elbaro.github.io/zero-mysql/)
 
 mod buffer;
 mod buffer_pool;
