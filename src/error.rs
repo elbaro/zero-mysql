@@ -24,7 +24,7 @@ pub enum Error {
     // ─── Library Error ───────────────────────────────────────────────────
     #[error("A bug in zero-mysql: {0}")]
     LibraryBug(#[from] color_eyre::Report),
-    #[error("Unsupported authentication plugin: {0}")]
+    #[error("Unsupported: {0}")]
     Unsupported(String),
     #[error("Cannot nest transactions - a transaction is already active")]
     NestedTransaction,
