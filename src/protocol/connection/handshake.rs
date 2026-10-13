@@ -366,11 +366,15 @@ pub struct Handshake<'a> {
     next_sequence_id: u8,
     capability_flags: Option<CapabilityFlags>,
     mariadb_capabilities: Option<MariadbCapabilityFlags>,
+    /// Whether the driver can perform a TLS upgrade
+    tls_supported: bool,
 }
 
 impl<'a> Handshake<'a> {
     /// Create a new handshake state machine
-    pub fn new(opts: &'a Opts) -> Self {
+    ///
+    /// `tls_supported` tells whether the driver can handle [`HandshakeAction::UpgradeTls`].
+    pub fn new(opts: &'a Opts, tls_supported: bool) -> Self {
         Self {
             state: HandshakeState::Start,
             opts,
@@ -378,6 +382,7 @@ impl<'a> Handshake<'a> {
             next_sequence_id: 1,
             capability_flags: None,
             mariadb_capabilities: None,
+            tls_supported,
         }
     }
 
@@ -401,17 +406,12 @@ impl<'a> Handshake<'a> {
                 if self.opts.db.is_some() {
                     client_caps |= CapabilityFlags::CLIENT_CONNECT_WITH_DB;
                 }
-                let client_supports_tls = cfg!(any(
-                    feature = "sync-tls",
-                    feature = "tokio-tls",
-                    feature = "compio-tls"
-                ));
                 let request_tls = match self.opts.tls_mode {
                     TlsMode::Disable => false,
-                    TlsMode::Prefer => client_supports_tls,
-                    TlsMode::Require if !client_supports_tls => {
+                    TlsMode::Prefer => self.tls_supported,
+                    TlsMode::Require if !self.tls_supported => {
                         return Err(Error::BadUsageError(
-                            "TLS required but no TLS feature is enabled".to_string(),
+                            "TLS requested but TLS feature not enabled".to_string(),
                         ));
                     }
                     TlsMode::Require => true,
@@ -425,7 +425,7 @@ impl<'a> Handshake<'a> {
                     && !negotiated_caps.contains(CapabilityFlags::CLIENT_SSL)
                 {
                     return Err(Error::Unsupported(
-                        "TLS required but not supported by server".to_string(),
+                        "TLS requested but not supported by server".to_string(),
                     ));
                 }
                 let mariadb_caps = if negotiated_caps.is_mariadb() {
@@ -812,7 +812,8 @@ impl<'a> Handshake<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_macros::{check_eq, check_err};
+    use crate::buffer::BufferSet;
+    use crate::test_macros::{check, check_eq, check_err};
 
     #[test]
     fn handshake_fixed_fields_has_alignment_of_1() {
@@ -869,6 +870,76 @@ mod tests {
         );
         check_err!(read_caching_sha2_password_fast_auth_result(&[0x05]));
         check_err!(read_caching_sha2_password_fast_auth_result(&[]));
+        Ok(())
+    }
+
+    fn initial_handshake_packet() -> Vec<u8> {
+        let caps = (CAPABILITIES_ALWAYS_ENABLED | CapabilityFlags::CLIENT_SSL).bits();
+        let mut packet = vec![10];
+        packet.extend_from_slice(b"8.4.0\0");
+        packet.extend_from_slice(&1_u32.to_le_bytes()); // connection_id
+        packet.extend_from_slice(b"abcdefgh"); // auth_data_part1
+        packet.push(0); // filler
+        packet.extend_from_slice(&(caps as u16).to_le_bytes());
+        packet.push(UTF8MB4_GENERAL_CI);
+        packet.extend_from_slice(&0_u16.to_le_bytes()); // status_flags
+        packet.extend_from_slice(&((caps >> 16) as u16).to_le_bytes());
+        packet.push(21); // auth_data_len
+        packet.extend_from_slice(&[0; 6]); // filler
+        packet.extend_from_slice(&0_u32.to_le_bytes()); // mariadb_capabilities
+        packet.extend_from_slice(b"ijklmnopqrst"); // auth_data_part2
+        packet.push(0); // reserved
+        packet.extend_from_slice(b"mysql_native_password\0");
+        packet
+    }
+
+    fn step_initial_handshake<'buf>(
+        tls_mode: TlsMode,
+        tls_supported: bool,
+        buffer_set: &'buf mut BufferSet,
+    ) -> Result<HandshakeAction<'buf>> {
+        let opts = Opts {
+            tls_mode,
+            ..Opts::default()
+        };
+        let mut handshake = Handshake::new(&opts, tls_supported);
+        handshake.step(buffer_set)?;
+        buffer_set.initial_handshake = initial_handshake_packet();
+        handshake.step(buffer_set)
+    }
+
+    #[test]
+    fn prefer_upgrades_tls_when_tls_supported() -> crate::error::Result<()> {
+        let mut buffer_set = BufferSet::new();
+        let action = step_initial_handshake(TlsMode::Prefer, true, &mut buffer_set)?;
+        check!(matches!(action, HandshakeAction::UpgradeTls { .. }));
+        Ok(())
+    }
+
+    #[test]
+    fn prefer_skips_tls_when_tls_unsupported() -> crate::error::Result<()> {
+        let mut buffer_set = BufferSet::new();
+        let action = step_initial_handshake(TlsMode::Prefer, false, &mut buffer_set)?;
+        check!(matches!(action, HandshakeAction::WritePacket { .. }));
+        Ok(())
+    }
+
+    #[test]
+    fn require_upgrades_tls_when_tls_supported() -> crate::error::Result<()> {
+        let mut buffer_set = BufferSet::new();
+        let action = step_initial_handshake(TlsMode::Require, true, &mut buffer_set)?;
+        check!(matches!(action, HandshakeAction::UpgradeTls { .. }));
+        Ok(())
+    }
+
+    #[test]
+    fn require_fails_when_tls_unsupported() -> crate::error::Result<()> {
+        let mut buffer_set = BufferSet::new();
+        check_err!(step_initial_handshake(
+            TlsMode::Require,
+            false,
+            &mut buffer_set
+        ));
         Ok(())
     }
 }

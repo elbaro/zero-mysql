@@ -102,7 +102,7 @@ impl Conn {
         #[cfg(feature = "sync-tls")]
         let host = opts.host.clone();
 
-        let mut handshake = Handshake::new(opts);
+        let mut handshake = Handshake::new(opts, cfg!(feature = "sync-tls"));
 
         loop {
             match handshake.step(&mut buffer_set)? {

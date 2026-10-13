@@ -91,7 +91,7 @@ impl Conn {
         #[cfg(feature = "tokio-tls")]
         let host = opts.host.clone();
 
-        let mut handshake = Handshake::new(opts);
+        let mut handshake = Handshake::new(opts, cfg!(feature = "tokio-tls"));
 
         loop {
             match handshake.step(&mut buffer_set)? {

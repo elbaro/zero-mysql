@@ -86,7 +86,7 @@ impl Conn {
         #[cfg(feature = "compio-tls")]
         let host = opts.host.clone();
 
-        let mut handshake = Handshake::new(opts);
+        let mut handshake = Handshake::new(opts, cfg!(feature = "compio-tls"));
 
         loop {
             match handshake.step(&mut buffer_set)? {
