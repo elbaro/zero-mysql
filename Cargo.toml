@@ -129,8 +129,6 @@ string_add = "warn"
 string_lit_chars_any = "warn"
 suspicious_xor_used_as_pow = "warn"
 todo = "warn"
-# Conn::new accepts URL strings through `TryInto<Opts>`, which needs `TryFrom<&str> for Opts`.
-try_from_instead_of_from_str = "allow"
 undocumented_unsafe_blocks = "warn"
 unimplemented = "warn"
 unnecessary_safety_comment = "warn"
