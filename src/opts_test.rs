@@ -262,7 +262,6 @@ fn parse_url_encoded_user_and_db() -> crate::error::Result<()> {
 
 #[test]
 fn parse_raw_at_sign_in_password() -> crate::error::Result<()> {
-    // Url re-encodes the raw '@' as %40.
     let opts = Opts::try_from("mysql://root:p@ss@localhost")?;
     check_eq!(opts.password.as_str(), "p@ss");
     check_eq!(opts.host, "localhost");

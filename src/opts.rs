@@ -161,9 +161,6 @@ fn parse_usize(key: &str, value: &str) -> Result<usize, Error> {
 }
 
 /// Decode a percent-encoded URL component such as the user or password.
-///
-/// `Url` keeps these components encoded, and it encodes some raw characters
-/// itself, so `p@ss` comes back from `Url::password()` as `p%40ss`.
 fn percent_decode(s: &str) -> Result<String, Error> {
     percent_encoding::percent_decode_str(s)
         .decode_utf8()
