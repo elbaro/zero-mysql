@@ -7,6 +7,7 @@ description = "A high-performance MySQL client"
 repository = "https://github.com/elbaro/zero-mysql"
 keywords = ["mysql", "mariadb", "database", "sql", "async"]
 categories = ["database"]
+include = ["/src/**/*", "/README.md", "/LICENSE.md", "/CHANGELOG.md"]
 
 [package.metadata.docs.rs]
 all-features = true
