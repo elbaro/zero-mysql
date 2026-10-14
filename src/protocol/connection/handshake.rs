@@ -429,6 +429,14 @@ impl<'a> Handshake<'a> {
                         "TLS requested but not supported by server".to_string(),
                     ));
                 }
+                if self.opts.db.is_some()
+                    && !negotiated_caps.contains(CapabilityFlags::CLIENT_CONNECT_WITH_DB)
+                {
+                    return Err(Error::Unsupported(
+                        "database name requested but server does not support CLIENT_CONNECT_WITH_DB"
+                            .to_string(),
+                    ));
+                }
                 let mariadb_caps = if negotiated_caps.is_mariadb() {
                     if !handshake
                         .mariadb_capabilities
@@ -741,7 +749,9 @@ impl<'a> Handshake<'a> {
             out.extend_from_slice(&auth_response);
         }
         // database name (null-terminated, if CLIENT_CONNECT_WITH_DB)
-        if let Some(db) = &self.opts.db {
+        if capability_flags.contains(CapabilityFlags::CLIENT_CONNECT_WITH_DB)
+            && let Some(db) = &self.opts.db
+        {
             write_string_null(out, db.as_bytes());
         }
 
@@ -874,8 +884,15 @@ mod tests {
         Ok(())
     }
 
-    fn initial_handshake_packet(mariadb_capabilities: u32) -> Vec<u8> {
-        let caps = (CAPABILITIES_ALWAYS_ENABLED | CapabilityFlags::CLIENT_SSL).bits();
+    const SERVER_CAPABILITIES: CapabilityFlags = CAPABILITIES_ALWAYS_ENABLED
+        .union(CapabilityFlags::CLIENT_SSL)
+        .union(CapabilityFlags::CLIENT_CONNECT_WITH_DB);
+
+    fn initial_handshake_packet(
+        capabilities: CapabilityFlags,
+        mariadb_capabilities: u32,
+    ) -> Vec<u8> {
+        let caps = capabilities.bits();
         let mut packet = vec![10];
         packet.extend_from_slice(b"8.4.0\0");
         packet.extend_from_slice(&1_u32.to_le_bytes()); // connection_id
@@ -905,14 +922,32 @@ mod tests {
         };
         let mut handshake = Handshake::new(&opts, tls_supported);
         handshake.step(buffer_set)?;
-        buffer_set.initial_handshake = initial_handshake_packet(0);
+        buffer_set.initial_handshake = initial_handshake_packet(SERVER_CAPABILITIES, 0);
         handshake.step(buffer_set)
+    }
+
+    #[test]
+    fn db_fails_when_server_lacks_connect_with_db() -> crate::error::Result<()> {
+        let opts = Opts {
+            db: Some("app".to_string()),
+            tls_mode: TlsMode::Disable,
+            ..Opts::default()
+        };
+        let mut buffer_set = BufferSet::new();
+        let mut handshake = Handshake::new(&opts, false);
+        handshake.step(&mut buffer_set)?;
+        buffer_set.initial_handshake = initial_handshake_packet(
+            SERVER_CAPABILITIES.difference(CapabilityFlags::CLIENT_CONNECT_WITH_DB),
+            0,
+        );
+        check_err!(handshake.step(&mut buffer_set));
+        Ok(())
     }
 
     #[test]
     fn unknown_mariadb_capability_bits_are_dropped() -> crate::error::Result<()> {
         let known = MARIADB_CAPABILITIES_ENABLED.bits();
-        let packet = initial_handshake_packet(known | (1 << 31));
+        let packet = initial_handshake_packet(SERVER_CAPABILITIES, known | (1 << 31));
         let handshake = read_initial_handshake(&packet)?;
         check_eq!(handshake.mariadb_capabilities.bits(), known);
         Ok(())
