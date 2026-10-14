@@ -1,3 +1,6 @@
+[graph]
+all-features = true
+
 [licenses]
 version = 2
 allow = [
@@ -12,3 +15,11 @@ allow = [
 
 [advisories]
 version = 2
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
