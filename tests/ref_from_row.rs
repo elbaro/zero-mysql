@@ -3,6 +3,7 @@
 use zero_mysql::ref_row::{FixedWireSize, I16LE, I32LE, I64LE, U16LE, U32LE, U64LE};
 use zerocopy::{FromBytes, Immutable, KnownLayout};
 
+include!("common/check.rs");
 include!("common/check_eq.rs");
 include!("common/check_err.rs");
 
@@ -142,5 +143,108 @@ fn size_validation() -> Result<(), Box<dyn std::error::Error>> {
     // Too large is OK - zerocopy allows prefix
     let data3 = [0u8; 20];
     <TestRow as FromBytes>::ref_from_bytes(&data3[..12]).unwrap();
+    Ok(())
+}
+
+// ─── #[derive(RefFromRow)] ───────────────────────────────────────────────────
+
+use zero_mysql::error::Error;
+use zero_mysql::sync::Conn;
+use zero_mysql_derive::RefFromRow;
+
+#[derive(FromBytes, KnownLayout, Immutable, RefFromRow)]
+#[repr(C, packed)]
+struct Stats {
+    id: I64LE,
+    count: I32LE,
+    flag: i8,
+}
+
+/// Connects and fills a temporary `ref_rows` table with three rows.
+fn conn_with_rows() -> Result<Conn, Error> {
+    let url = std::env::var("DATABASE_URL")
+        .unwrap_or_else(|_| "mysql://test:1234@localhost:3306/test?tls_mode=disable".to_string());
+    let mut conn = Conn::new(url.as_str())?;
+    conn.query_drop(
+        "CREATE TEMPORARY TABLE ref_rows (
+            id BIGINT NOT NULL,
+            count INT NOT NULL,
+            maybe INT NULL,
+            small SMALLINT NOT NULL,
+            flag TINYINT NOT NULL,
+            name VARCHAR(10) NOT NULL
+        )",
+    )?;
+    conn.query_drop(
+        "INSERT INTO ref_rows VALUES
+            (1, -10, NULL, 1, 65, 'abcd'),
+            (2, -20, NULL, 2, 66, 'abcd'),
+            (3, -30, NULL, 3, 67, 'abcd')",
+    )?;
+    Ok(conn)
+}
+
+fn exec_stats(conn: &mut Conn, sql: &str) -> Result<Vec<(i64, i32, i8)>, Error> {
+    let mut stmt = conn.prepare(sql)?;
+    let mut rows = Vec::new();
+    conn.exec_foreach_ref::<Stats, _, _>(&mut stmt, (), |row| {
+        rows.push((row.id.get(), row.count.get(), row.flag));
+        Ok(())
+    })?;
+    Ok(rows)
+}
+
+#[test]
+fn exec_foreach_ref_decodes_rows() -> Result<(), Box<dyn std::error::Error>> {
+    let mut conn = conn_with_rows()?;
+    let rows = exec_stats(
+        &mut conn,
+        "SELECT id, count, flag FROM ref_rows ORDER BY id",
+    )?;
+    check_eq!(rows, vec![(1, -10, 65), (2, -20, 66), (3, -30, 67)]);
+    Ok(())
+}
+
+#[test]
+fn exec_foreach_ref_rejects_null() -> Result<(), Box<dyn std::error::Error>> {
+    let mut conn = conn_with_rows()?;
+    let err = check_err!(exec_stats(
+        &mut conn,
+        "SELECT id, maybe, flag FROM ref_rows"
+    ));
+    check!(err.to_string().contains("column 1 is NULL"));
+    Ok(())
+}
+
+#[test]
+fn exec_foreach_ref_rejects_wrong_integer_size() -> Result<(), Box<dyn std::error::Error>> {
+    let mut conn = conn_with_rows()?;
+    let err = check_err!(exec_stats(
+        &mut conn,
+        "SELECT id, small, flag FROM ref_rows"
+    ));
+    check!(
+        err.to_string()
+            .contains("column 1 has type MYSQL_TYPE_SHORT, expected a 4-byte integer")
+    );
+    Ok(())
+}
+
+#[test]
+fn exec_foreach_ref_rejects_non_integer() -> Result<(), Box<dyn std::error::Error>> {
+    let mut conn = conn_with_rows()?;
+    let err = check_err!(exec_stats(&mut conn, "SELECT id, name, flag FROM ref_rows"));
+    check!(
+        err.to_string()
+            .contains("column 1 has type MYSQL_TYPE_VAR_STRING")
+    );
+    Ok(())
+}
+
+#[test]
+fn exec_foreach_ref_rejects_wrong_column_count() -> Result<(), Box<dyn std::error::Error>> {
+    let mut conn = conn_with_rows()?;
+    let err = check_err!(exec_stats(&mut conn, "SELECT id, count FROM ref_rows"));
+    check!(err.to_string().contains("expects 3 columns, got 2"));
     Ok(())
 }

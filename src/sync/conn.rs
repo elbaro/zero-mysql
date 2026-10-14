@@ -539,8 +539,9 @@ impl Conn {
     ///
     /// ```ignore
     /// use zero_mysql::ref_row::{RefFromRow, I64LE, I32LE};
+    /// use zerocopy::{FromBytes, Immutable, KnownLayout};
     ///
-    /// #[derive(RefFromRow)]
+    /// #[derive(FromBytes, KnownLayout, Immutable, RefFromRow)]
     /// #[repr(C, packed)]
     /// struct UserStats {
     ///     user_id: I64LE,
