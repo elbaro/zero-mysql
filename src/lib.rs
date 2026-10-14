@@ -21,6 +21,8 @@ pub mod protocol;
 pub mod raw;
 pub mod ref_row;
 pub mod sync;
+#[cfg(any(feature = "sync-tls", feature = "tokio-tls", feature = "compio-tls"))]
+mod tls;
 pub mod value;
 
 pub use buffer::BufferSet;

@@ -17,7 +17,7 @@ Python binding: [pyro-mysql](https://github.com/elbaro/pyro-mysql/)
 - `compio-tls`: TLS support for compio (experimental)
 - `diesel`: Diesel support (experimental)
 
-TLS flags use `native-tls`.
+TLS flags use `rustls` with the platform's native root certificates.
 
 [External type supports](https://elbaro.github.io/zero-mysql/datatype.html#feature-gated-types):
 - `with-chrono` - Support [chrono](https://crates.io/crates/chrono) date/time types

@@ -7,12 +7,12 @@ use std::os::unix::net::UnixStream;
 use crate::nightly::read_uninit_exact;
 
 #[cfg(feature = "sync-tls")]
-use native_tls::TlsStream;
+use rustls::{ClientConnection, StreamOwned};
 
 pub enum Stream {
     Tcp(BufReader<TcpStream>),
     #[cfg(feature = "sync-tls")]
-    Tls(BufReader<TlsStream<TcpStream>>),
+    Tls(BufReader<Box<StreamOwned<ClientConnection, TcpStream>>>),
     #[cfg(unix)]
     Unix(BufReader<UnixStream>),
 }
@@ -29,7 +29,7 @@ impl Stream {
 
     #[cfg(feature = "sync-tls")]
     pub fn upgrade_to_tls(self, host: &str) -> std::io::Result<Self> {
-        let tcp = match self {
+        let mut tcp = match self {
             Self::Tcp(buf_reader) => buf_reader.into_inner(),
             #[cfg(feature = "sync-tls")]
             Self::Tls(_) => {
@@ -47,12 +47,18 @@ impl Stream {
             }
         };
 
-        let connector = native_tls::TlsConnector::new().map_err(std::io::Error::other)?;
-        let tls_stream = connector
-            .connect(host, tcp)
-            .map_err(std::io::Error::other)?;
+        let mut conn =
+            ClientConnection::new(crate::tls::client_config()?, crate::tls::server_name(host)?)
+                .map_err(std::io::Error::other)?;
+        // Finish the handshake now so that TLS errors surface here instead of
+        // on the first query.
+        while conn.is_handshaking() {
+            conn.complete_io(&mut tcp)?;
+        }
 
-        Ok(Self::Tls(BufReader::new(tls_stream)))
+        Ok(Self::Tls(BufReader::new(Box::new(StreamOwned::new(
+            conn, tcp,
+        )))))
     }
 
     pub fn read_exact(&mut self, buf: &mut [u8]) -> std::io::Result<()> {

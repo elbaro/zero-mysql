@@ -5,12 +5,12 @@ use tokio::net::TcpStream;
 use tokio::net::UnixStream;
 
 #[cfg(feature = "tokio-tls")]
-use tokio_native_tls::TlsStream;
+use tokio_rustls::client::TlsStream;
 
 pub enum Stream {
     Tcp(BufReader<TcpStream>),
     #[cfg(feature = "tokio-tls")]
-    Tls(BufReader<TlsStream<TcpStream>>),
+    Tls(BufReader<Box<TlsStream<TcpStream>>>),
     #[cfg(unix)]
     Unix(BufReader<UnixStream>),
 }
@@ -45,14 +45,12 @@ impl Stream {
             }
         };
 
-        let connector = native_tls::TlsConnector::new().map_err(std::io::Error::other)?;
-        let connector = tokio_native_tls::TlsConnector::from(connector);
+        let connector = tokio_rustls::TlsConnector::from(crate::tls::client_config()?);
         let tls_stream = connector
-            .connect(host, tcp)
-            .await
-            .map_err(std::io::Error::other)?;
+            .connect(crate::tls::server_name(host)?, tcp)
+            .await?;
 
-        Ok(Self::Tls(BufReader::new(tls_stream)))
+        Ok(Self::Tls(BufReader::new(Box::new(tls_stream))))
     }
 
     pub async fn read_exact(&mut self, buf: &mut [u8]) -> std::io::Result<()> {
@@ -107,8 +105,7 @@ impl Stream {
             Self::Tls(r) => r
                 .get_ref()
                 .get_ref()
-                .get_ref()
-                .get_ref()
+                .0
                 .peer_addr()
                 .map(|addr| addr.ip().is_loopback())
                 .unwrap_or(false),

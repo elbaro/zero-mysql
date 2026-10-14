@@ -37,7 +37,7 @@ pub const fn unlikely(b: bool) -> bool {
 /// and never reads from it. This is not guaranteed by the `Read` trait contract,
 /// but is true for:
 /// - std types (TcpStream, BufReader, File)
-/// - native-tls/OpenSSL: SSL_read writes decrypted data into buf, never reads from it
+/// - rustls: `StreamOwned` copies decrypted plaintext into buf, never reads from it
 pub fn read_uninit_exact<R: Read>(
     reader: &mut R,
     buf: &mut [MaybeUninit<u8>],
