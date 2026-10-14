@@ -63,8 +63,9 @@ pub fn read_initial_handshake(payload: &[u8]) -> Result<InitialHandshake> {
             | (fixed.capability_flags_lower.get() as u32),
     )
     .ok_or_else(|| Error::LibraryBug(eyre!("invalid capability flags from server")))?;
-    let mariadb_capabilities = MariadbCapabilityFlags::from_bits(fixed.mariadb_capabilities.get())
-        .ok_or_else(|| Error::LibraryBug(eyre!("invalid mariadb capability flags from server")))?;
+    // Drop extension bits added by newer MariaDB servers so they are never echoed back.
+    let mariadb_capabilities =
+        MariadbCapabilityFlags::from_bits_truncate(fixed.mariadb_capabilities.get());
     let auth_data_len = fixed.auth_data_len;
 
     let auth_data_2_len = (auth_data_len as usize).saturating_sub(9).max(12);
@@ -873,7 +874,7 @@ mod tests {
         Ok(())
     }
 
-    fn initial_handshake_packet() -> Vec<u8> {
+    fn initial_handshake_packet(mariadb_capabilities: u32) -> Vec<u8> {
         let caps = (CAPABILITIES_ALWAYS_ENABLED | CapabilityFlags::CLIENT_SSL).bits();
         let mut packet = vec![10];
         packet.extend_from_slice(b"8.4.0\0");
@@ -886,7 +887,7 @@ mod tests {
         packet.extend_from_slice(&((caps >> 16) as u16).to_le_bytes());
         packet.push(21); // auth_data_len
         packet.extend_from_slice(&[0; 6]); // filler
-        packet.extend_from_slice(&0_u32.to_le_bytes()); // mariadb_capabilities
+        packet.extend_from_slice(&mariadb_capabilities.to_le_bytes());
         packet.extend_from_slice(b"ijklmnopqrst"); // auth_data_part2
         packet.push(0); // reserved
         packet.extend_from_slice(b"mysql_native_password\0");
@@ -904,8 +905,17 @@ mod tests {
         };
         let mut handshake = Handshake::new(&opts, tls_supported);
         handshake.step(buffer_set)?;
-        buffer_set.initial_handshake = initial_handshake_packet();
+        buffer_set.initial_handshake = initial_handshake_packet(0);
         handshake.step(buffer_set)
+    }
+
+    #[test]
+    fn unknown_mariadb_capability_bits_are_dropped() -> crate::error::Result<()> {
+        let known = MARIADB_CAPABILITIES_ENABLED.bits();
+        let packet = initial_handshake_packet(known | (1 << 31));
+        let handshake = read_initial_handshake(&packet)?;
+        check_eq!(handshake.mariadb_capabilities.bits(), known);
+        Ok(())
     }
 
     #[test]
