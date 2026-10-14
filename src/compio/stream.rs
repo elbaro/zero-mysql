@@ -56,10 +56,14 @@ impl Stream {
     }
 
     #[cfg(feature = "compio-tls")]
-    pub async fn upgrade_to_tls(self, host: &str) -> std::io::Result<Self> {
+    pub async fn upgrade_to_tls(
+        self,
+        host: &str,
+        config: std::sync::Arc<rustls::ClientConfig>,
+    ) -> std::io::Result<Self> {
         match self.inner {
             StreamInner::Tcp(tcp_stream) => {
-                let connector = compio::tls::TlsConnector::from(crate::tls::client_config()?);
+                let connector = compio::tls::TlsConnector::from(config);
                 let tls_stream = connector.connect(host, tcp_stream).await?;
                 Ok(Self {
                     inner: StreamInner::Tls(Box::new(tls_stream)),

@@ -28,7 +28,11 @@ impl Stream {
     }
 
     #[cfg(feature = "sync-tls")]
-    pub fn upgrade_to_tls(self, host: &str) -> std::io::Result<Self> {
+    pub fn upgrade_to_tls(
+        self,
+        host: &str,
+        config: std::sync::Arc<rustls::ClientConfig>,
+    ) -> std::io::Result<Self> {
         let mut tcp = match self {
             Self::Tcp(buf_reader) => buf_reader.into_inner(),
             #[cfg(feature = "sync-tls")]
@@ -47,9 +51,8 @@ impl Stream {
             }
         };
 
-        let mut conn =
-            ClientConnection::new(crate::tls::client_config()?, crate::tls::server_name(host)?)
-                .map_err(std::io::Error::other)?;
+        let mut conn = ClientConnection::new(config, crate::tls::server_name(host)?)
+            .map_err(std::io::Error::other)?;
         // Finish the handshake now so that TLS errors surface here instead of
         // on the first query.
         while conn.is_handshaking() {

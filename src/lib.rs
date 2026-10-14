@@ -30,6 +30,10 @@ pub use buffer_pool::BufferPool;
 pub use opts::{Opts, TlsMode};
 pub use prepared::PreparedStatement;
 
+/// The rustls version used for TLS, for building [`Opts::tls_config`].
+#[cfg(any(feature = "sync-tls", feature = "tokio-tls", feature = "compio-tls"))]
+pub use rustls;
+
 #[cfg(feature = "tokio")]
 pub mod tokio;
 

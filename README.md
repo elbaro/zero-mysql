@@ -18,6 +18,8 @@ Python binding: [pyro-mysql](https://github.com/elbaro/pyro-mysql/)
 - `diesel`: Diesel support (experimental)
 
 TLS flags use `rustls` with the platform's native root certificates.
+To trust a private CA or present a client certificate, set `Opts::tls_config`
+to a `rustls::ClientConfig` built with the re-exported `zero_mysql::rustls`.
 
 [External type supports](https://elbaro.github.io/zero-mysql/datatype.html#feature-gated-types):
 - `with-chrono` - Support [chrono](https://crates.io/crates/chrono) date/time types

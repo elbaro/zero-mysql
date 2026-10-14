@@ -102,7 +102,8 @@ impl Conn {
                 #[cfg(feature = "compio-tls")]
                 HandshakeAction::UpgradeTls { sequence_id } => {
                     write_handshake_payload(&mut conn_stream, &mut buffer_set, sequence_id).await?;
-                    conn_stream = conn_stream.upgrade_to_tls(&host).await?;
+                    let config = crate::tls::client_config(opts)?;
+                    conn_stream = conn_stream.upgrade_to_tls(&host, config).await?;
                 }
                 #[cfg(not(feature = "compio-tls"))]
                 HandshakeAction::UpgradeTls { .. } => {

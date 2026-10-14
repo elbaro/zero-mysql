@@ -81,6 +81,40 @@ pub struct Opts {
     /// Default: `TlsMode::Prefer`
     pub tls_mode: TlsMode,
 
+    /// rustls client config for TLS connections.
+    ///
+    /// Set this to trust a private CA or to present a client certificate.
+    /// Build the config with [`crate::rustls`] so that the rustls versions match,
+    /// and with the aws-lc-rs provider, which this crate uses:
+    ///
+    /// ```no_run
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use std::sync::Arc;
+    /// use zero_mysql::rustls::pki_types::{pem::PemObject, CertificateDer};
+    /// use zero_mysql::rustls::{crypto::aws_lc_rs, ClientConfig, RootCertStore};
+    ///
+    /// let mut roots = RootCertStore::empty();
+    /// for cert in CertificateDer::pem_file_iter("/etc/myapp/db-ca.pem")? {
+    ///     roots.add(cert?)?;
+    /// }
+    /// let config = ClientConfig::builder_with_provider(Arc::new(aws_lc_rs::default_provider()))
+    ///     .with_safe_default_protocol_versions()?
+    ///     .with_root_certificates(roots)
+    ///     .with_no_client_auth();
+    ///
+    /// let mut opts = zero_mysql::Opts::default();
+    /// opts.tls_config = Some(Arc::new(config));
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// `None` uses the platform's native root certificates, loaded once and
+    /// shared by all connections.
+    ///
+    /// Default: `None`
+    #[cfg(any(feature = "sync-tls", feature = "tokio-tls", feature = "compio-tls"))]
+    pub tls_config: Option<Arc<rustls::ClientConfig>>,
+
     /// When connected via TCP, read `SELECT @@socket` and reconnect to the unix socket.
     /// Only has effect on Unix platforms.
     ///
@@ -127,6 +161,8 @@ impl Default for Opts {
             user: String::new(),
             password: String::new(),
             tls_mode: TlsMode::Prefer,
+            #[cfg(any(feature = "sync-tls", feature = "tokio-tls", feature = "compio-tls"))]
+            tls_config: None,
             upgrade_to_unix_socket: true,
             init_command: None,
             pool_reset_conn: true,

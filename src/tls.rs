@@ -2,10 +2,21 @@ use std::sync::{Arc, OnceLock};
 
 use rustls::{ClientConfig, RootCertStore};
 
-/// Returns the rustls client config shared by all TLS connections.
+use crate::opts::Opts;
+
+/// Returns `opts.tls_config`, or the shared native config when it is unset.
+pub fn client_config(opts: &Opts) -> std::io::Result<Arc<ClientConfig>> {
+    match &opts.tls_config {
+        Some(config) => Ok(Arc::clone(config)),
+        None => native_client_config(),
+    }
+}
+
+/// Returns the rustls client config shared by all TLS connections without
+/// `Opts::tls_config`.
 ///
 /// The OS trust store is loaded on the first call and reused afterwards.
-pub fn client_config() -> std::io::Result<Arc<ClientConfig>> {
+fn native_client_config() -> std::io::Result<Arc<ClientConfig>> {
     static CONFIG: OnceLock<Arc<ClientConfig>> = OnceLock::new();
     if let Some(config) = CONFIG.get() {
         return Ok(Arc::clone(config));

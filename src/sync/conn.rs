@@ -118,7 +118,8 @@ impl Conn {
                 #[cfg(feature = "sync-tls")]
                 HandshakeAction::UpgradeTls { sequence_id } => {
                     write_handshake_payload(&mut conn_stream, &mut buffer_set, sequence_id)?;
-                    conn_stream = conn_stream.upgrade_to_tls(&host)?;
+                    let config = crate::tls::client_config(opts)?;
+                    conn_stream = conn_stream.upgrade_to_tls(&host, config)?;
                 }
                 #[cfg(not(feature = "sync-tls"))]
                 HandshakeAction::UpgradeTls { .. } => {

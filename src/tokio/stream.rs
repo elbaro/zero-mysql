@@ -26,7 +26,11 @@ impl Stream {
     }
 
     #[cfg(feature = "tokio-tls")]
-    pub async fn upgrade_to_tls(self, host: &str) -> std::io::Result<Self> {
+    pub async fn upgrade_to_tls(
+        self,
+        host: &str,
+        config: std::sync::Arc<rustls::ClientConfig>,
+    ) -> std::io::Result<Self> {
         let tcp = match self {
             Self::Tcp(buf_reader) => buf_reader.into_inner(),
             #[cfg(feature = "tokio-tls")]
@@ -45,7 +49,7 @@ impl Stream {
             }
         };
 
-        let connector = tokio_rustls::TlsConnector::from(crate::tls::client_config()?);
+        let connector = tokio_rustls::TlsConnector::from(config);
         let tls_stream = connector
             .connect(crate::tls::server_name(host)?, tcp)
             .await?;
