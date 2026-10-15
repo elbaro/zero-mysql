@@ -1,5 +1,38 @@
 # Changelog
 
+## [v0.7.0](https://github.com/elbaro/zero-mysql/compare/v0.6.0...v0.7.0) - 2026-10-15
+
+### <!-- 0 -->New features
+- add Opts::tls_config for custom rustls configs
+- [**breaking**] replace Opts::tls with Opts::tls_mode
+
+### <!-- 1 -->Bug fixes
+- release the sync pool permit when connecting fails
+- make the compio pool safe to drop without a runtime and limit it
+- make #[derive(RefFromRow)] compile and check every column
+- [**breaking**] replace native-tls with rustls and native root certificates
+- require CLIENT_CONNECT_WITH_DB when a database is set
+- accept unknown MariaDB capability bits from the server
+- [**breaking**] decide TLS support per driver in Handshake
+- percent-decode the user, password and database in connection URLs
+- stop capping tracing levels in applications that depend on the crate
+- map more MySQL error codes to Diesel error kinds
+- drop the misleading authentication-plugin wording from Error::Unsupported
+- hold the tokio pool permit until the connection reset finishes
+- new syntax for release-plz
+
+### <!-- 3 -->Documentation
+- remove comments that justify the code instead of describing it
+- link the user guide from the crate doc
+- add crate-level doc comment
+- remove license section from README
+- clean up
+
+### <!-- 9 -->Other
+- refactor: use tokio's semaphore in the compio pool instead of async-lock
+- revert: allow clippy try_from_instead_of_from_str
+- test: read DATABASE_URL instead of a hard-coded URL
+
 ## [v0.6.0](https://github.com/elbaro/zero-mysql/compare/v0.5.1...v0.6.0) - 2026-04-11
 
 ### <!-- 1 -->Bug fixes
