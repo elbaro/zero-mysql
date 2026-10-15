@@ -1,5 +1,6 @@
 mod conn;
 mod pool;
+mod semaphore;
 mod stream;
 mod transaction;
 

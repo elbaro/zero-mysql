@@ -3,24 +3,24 @@ use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
 use crossbeam_queue::ArrayQueue;
-use std_semaphore::Semaphore;
 
 use crate::error::Result;
 use crate::opts::Opts;
 
 use super::Conn;
+use super::semaphore::{Permit, Semaphore};
 
 pub struct Pool {
     opts: Opts,
     conns: ArrayQueue<Conn>,
-    semaphore: Option<Semaphore>,
+    semaphore: Option<Arc<Semaphore>>,
 }
 
 impl Pool {
     pub fn new(opts: Opts) -> Self {
         let semaphore = opts
             .pool_max_concurrency
-            .map(|n| Semaphore::new(n as isize));
+            .map(|n| Arc::new(Semaphore::new(n)));
         Self {
             conns: ArrayQueue::new(opts.pool_max_idle_conn),
             opts,
@@ -29,9 +29,7 @@ impl Pool {
     }
 
     pub fn get(self: &Arc<Self>) -> Result<PooledConn> {
-        if let Some(sem) = &self.semaphore {
-            sem.acquire();
-        }
+        let permit = self.semaphore.as_ref().map(Semaphore::acquire);
         let mut conn = match self.conns.pop() {
             Some(c) => c,
             None => Conn::new(self.opts.clone())?,
@@ -40,6 +38,7 @@ impl Pool {
         Ok(PooledConn {
             conn: ManuallyDrop::new(conn),
             pool: Arc::clone(self),
+            permit,
         })
     }
 
@@ -57,6 +56,7 @@ impl Pool {
 pub struct PooledConn {
     pool: Arc<Pool>,
     conn: ManuallyDrop<Conn>,
+    permit: Option<Permit>,
 }
 
 impl Deref for PooledConn {
@@ -77,8 +77,7 @@ impl Drop for PooledConn {
         // SAFETY: conn is never accessed after this
         let conn = unsafe { ManuallyDrop::take(&mut self.conn) };
         self.pool.check_in(conn);
-        if let Some(sem) = &self.pool.semaphore {
-            sem.release();
-        }
+        // Release after check-in so the next permit holder reuses this connection.
+        drop(self.permit.take());
     }
 }
